@@ -8,7 +8,8 @@
 
 <!-- SCREENSHOT: screenshots/auth-screen.png -->
 <!-- Zeige den Authentifizierungs-Bildschirm mit den 3 Schritten und dem Download-Button -->
-![Authentication Screen](screenshots/auth-screen.png)
+![Authentication Screen](<img width="2120" height="1082" alt="screely-1763280647553" src="https://github.com/user-attachments/assets/d18e0871-2ab2-4f47-9bd7-8820671bffa1" />
+)
 
 ## 🆘 When Do You Need This?
 
@@ -42,8 +43,9 @@
 - Safe: Shows what will be deleted before executing
 
 <!-- SCREENSHOT: screenshots/plugin-uninstall.png -->
-<!-- Zeige den Plugin Uninstall Modus mit den zwei Optionen und der Bestätigungs-Seite -->
-![Plugin Uninstall Mode](screenshots/plugin-uninstall.png)
+<img width="2120" height="1082" alt="screely-1763280647553" src="https://github.com/user-attachments/assets/f7639bb5-bc75-409e-a69b-081e12d0a034" />
+
+
 
 ### 🧹 Cache Clear
 - Deletes all compiled templates
