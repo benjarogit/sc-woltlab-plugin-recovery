@@ -22,7 +22,7 @@
 
 <!-- SCREENSHOT: screenshots/mode-selection.png -->
 <!-- Zeige die 4 Modi-Kacheln: ACP Repair, Plugin Uninstall, User Management, Cache Clear -->
-![Mode Selection](https://github.com/user-attachments/assets/0cdafa3d-4a65-49d5-a5a7-8194a468a518)
+![Mode Selection](https://github.com/user-attachments/assets/c108ffbb-4db9-448c-853c-0b0a9bffc5c4)
 
 ### 🔧 ACP Repair
 - Removes broken ACP menu entries by plugin identifier
@@ -31,7 +31,7 @@
 
 <!-- SCREENSHOT: screenshots/acp-repair.png -->
 <!-- Zeige den ACP Repair Modus mit Package-Identifier Eingabefeld und Ergebnis-Tabelle -->
-![ACP Repair Mode](https://github.com/user-attachments/assets/abab0e73-cc67-4601-bde5-8d60c3865e89)
+![ACP Repair Mode](https://github.com/user-attachments/assets/50602546-147a-41a6-a7bd-c1866c96493e)
 
 ### 🗑️ Plugin Uninstall
 - Complete plugin removal from database and filesystem
@@ -42,7 +42,7 @@
 - Safe: Shows what will be deleted before executing
 
 <!-- SCREENSHOT: screenshots/plugin-uninstall.png -->
-![Plugin Uninstall](https://github.com/user-attachments/assets/bfa8dbba-a2a8-450a-88c3-f7c4cfc61847)
+![Plugin Uninstall](https://github.com/user-attachments/assets/5a7f13c6-2988-4e11-9071-67980e7515fc)
 
 ### 🧹 Cache Clear
 - Deletes all compiled templates
@@ -54,13 +54,13 @@
 
 <!-- SCREENSHOT: screenshots/cache-clear.png -->
 <!-- Zeige den Cache Clear Modus mit Erfolgs-Meldung und Anzahl gelöschter Dateien -->
-![Cache Clear Mode](https://github.com/user-attachments/assets/07f04bc6-e157-45a8-891d-3abe946d02c0)
+![Cache Clear Mode](https://github.com/user-attachments/assets/1fc1f79e-fdc2-4b76-98ec-2719b8706bd7)
 
 ### 👤 User Management
 - Links to official WoltLab recovery tool
 - For admin password reset and user management
 
-![User Management](https://github.com/user-attachments/assets/63d9832c-0857-4c9a-ad22-fbd1566c50b1)
+![User Management](https://github.com/user-attachments/assets/f1555a4f-4b10-478a-a7ef-c953d37b922e)
 
 ## 📦 Installation
 
@@ -76,7 +76,7 @@ your-woltlab-root/
 └── plugin-recovery-tool.php  ← Upload here
 ```
 ## 🗑️ Deinstallation
-![Deinstallation](https://github.com/user-attachments/assets/1d36e80c-07ce-49e2-918d-72ccef211e68)
+![Deinstallation](https://github.com/user-attachments/assets/19e278bc-31ec-4496-97d9-fa71d9ec2dec)
 
 ## 🔐 Authentication
 
