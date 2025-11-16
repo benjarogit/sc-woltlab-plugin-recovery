@@ -8,8 +8,7 @@
 
 <!-- SCREENSHOT: screenshots/auth-screen.png -->
 <!-- Zeige den Authentifizierungs-Bildschirm mit den 3 Schritten und dem Download-Button -->
-![Authentication Screen](<img width="2120" height="1082" alt="screely-1763280647553" src="https://github.com/user-attachments/assets/d18e0871-2ab2-4f47-9bd7-8820671bffa1" />
-)
+![Authentication Screen](https://github.com/user-attachments/assets/d18e0871-2ab2-4f47-9bd7-8820671bffa1)
 
 ## 🆘 When Do You Need This?
 
@@ -23,7 +22,7 @@
 
 <!-- SCREENSHOT: screenshots/mode-selection.png -->
 <!-- Zeige die 4 Modi-Kacheln: ACP Repair, Plugin Uninstall, User Management, Cache Clear -->
-![Mode Selection](screenshots/mode-selection.png)
+![Mode Selection](https://github.com/user-attachments/assets/0cdafa3d-4a65-49d5-a5a7-8194a468a518)
 
 ### 🔧 ACP Repair
 - Removes broken ACP menu entries by plugin identifier
@@ -32,7 +31,7 @@
 
 <!-- SCREENSHOT: screenshots/acp-repair.png -->
 <!-- Zeige den ACP Repair Modus mit Package-Identifier Eingabefeld und Ergebnis-Tabelle -->
-![ACP Repair Mode](screenshots/acp-repair.png)
+![ACP Repair Mode](https://github.com/user-attachments/assets/abab0e73-cc67-4601-bde5-8d60c3865e89)
 
 ### 🗑️ Plugin Uninstall
 - Complete plugin removal from database and filesystem
@@ -43,9 +42,7 @@
 - Safe: Shows what will be deleted before executing
 
 <!-- SCREENSHOT: screenshots/plugin-uninstall.png -->
-<img width="2120" height="1082" alt="screely-1763280647553" src="https://github.com/user-attachments/assets/f7639bb5-bc75-409e-a69b-081e12d0a034" />
-
-
+![Plugin Uninstall](https://github.com/user-attachments/assets/bfa8dbba-a2a8-450a-88c3-f7c4cfc61847)
 
 ### 🧹 Cache Clear
 - Deletes all compiled templates
@@ -57,11 +54,13 @@
 
 <!-- SCREENSHOT: screenshots/cache-clear.png -->
 <!-- Zeige den Cache Clear Modus mit Erfolgs-Meldung und Anzahl gelöschter Dateien -->
-![Cache Clear Mode](screenshots/cache-clear.png)
+![Cache Clear Mode](https://github.com/user-attachments/assets/07f04bc6-e157-45a8-891d-3abe946d02c0)
 
 ### 👤 User Management
 - Links to official WoltLab recovery tool
 - For admin password reset and user management
+
+![User Management](https://github.com/user-attachments/assets/63d9832c-0857-4c9a-ad22-fbd1566c50b1)
 
 ## 📦 Installation
 
@@ -76,6 +75,8 @@ your-woltlab-root/
 ├── acp/
 └── plugin-recovery-tool.php  ← Upload here
 ```
+## 🗑️ Deinstallation
+![Deinstallation](https://github.com/user-attachments/assets/1d36e80c-07ce-49e2-918d-72ccef211e68)
 
 ## 🔐 Authentication
 
