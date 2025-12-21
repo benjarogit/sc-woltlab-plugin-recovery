@@ -124,19 +124,33 @@ function extractArchive($archivePath, $destination) {
 /**
  * Findet alle Tabellen eines Plugins anhand des Präfixes
  */
-function findPackageTables($db, $packageIdentifier) {
+function findPackageTables($db, $packageIdentifier, $wcfN = null) {
     // App-Name aus Package-Identifier extrahieren
     // z.B. de.julian-pfeil.urlshort.featuredLinks -> urlshort
+    // z.B. info.benjaro.urlshort.affiliate -> urlshort (Basis-Plugin)
     $parts = explode('.', $packageIdentifier);
-    $appName = end($parts);
+    
+    // Versuche verschiedene App-Namen:
+    // 1. Letzter Teil (für direkte Plugins)
+    // 2. Vorletzter Teil (für Erweiterungen, z.B. urlshort.affiliate -> urlshort)
+    $appNames = [];
+    if (count($parts) >= 2) {
+        $appNames[] = $parts[count($parts) - 2]; // Vorletzter Teil (Basis-Plugin)
+    }
+    $appNames[] = end($parts); // Letzter Teil (Erweiterung oder direktes Plugin)
+    
+    // Entferne Duplikate und leere Werte
+    $appNames = array_unique(array_filter($appNames));
 
-    // Versuche verschiedene Muster
-    $patterns = [
-        $appName . '%',
-        $appName . '1_%',
-        strtolower($appName) . '%',
-        strtolower($appName) . '1_%'
-    ];
+    // Versuche verschiedene Muster für jeden App-Namen
+    $patterns = [];
+    foreach ($appNames as $appName) {
+        $appNameLower = strtolower($appName);
+        $patterns[] = $appName . '%';
+        $patterns[] = $appName . '1_%';
+        $patterns[] = $appNameLower . '%';
+        $patterns[] = $appNameLower . '1_%';
+    }
 
     // Alle Tabellen holen und in PHP filtern (WCF hat kein getHandle())
     $sql = "SHOW TABLES";
@@ -144,8 +158,21 @@ function findPackageTables($db, $packageIdentifier) {
     $statement->execute();
 
     $tables = [];
+    
+    // Basis-Tabellen für alle möglichen WCF_N Werte sammeln
+    $allBaseTables = [];
+    for ($n = 1; $n <= 10; $n++) {
+        $allBaseTables = array_merge($allBaseTables, getBasePluginTables($n));
+    }
+    $allBaseTables = array_unique($allBaseTables);
+    
     while ($row = $statement->fetchArray()) {
         $tableName = reset($row);
+        
+        // Überspringe Basis-Tabellen
+        if (in_array($tableName, $allBaseTables)) {
+            continue;
+        }
 
         // Prüfen ob Tabellenname einen der Patterns enthält
         foreach ($patterns as $pattern) {
@@ -1683,7 +1710,8 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
             if ($resources && !empty($resources['tables'])) {
                 $tables = $resources['tables'];
             } else {
-                $tables = findPackageTables($db, $packageIdentifier);
+                $wcfN = $resources ? $resources['wcfN'] : detectWcfN($db, $packageIdentifier);
+                $tables = findPackageTables($db, $packageIdentifier, $wcfN);
             }
 
             if (!isset($_POST['confirm_uninstall'])) {
