@@ -2,6 +2,8 @@
 
 > Emergency recovery tool for WoltLab Suite 6.0+ when plugins break your installation. Repairs ACP, uninstalls broken plugins, and clears caches - even when the admin panel is completely inaccessible.
 
+**Language / Sprache:** [🇬🇧 English](README.md) | [🇩🇪 Deutsch](README.de.md)
+
 ![WoltLab Suite](https://img.shields.io/badge/WoltLab%20Suite-6.0+-blue.svg)
 ![PHP](https://img.shields.io/badge/PHP-8.0+-purple.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
@@ -26,8 +28,10 @@
 
 ### 🔧 ACP Repair
 - Removes broken ACP menu entries by plugin identifier
+- **NEW:** Package file upload (.tar/.tar.gz) with automatic resource detection
 - Pattern-based cleanup when plugin is not in database
 - Shows preview before deletion
+- Automatically identifies all ACP menu items from package.xml
 
 <!-- SCREENSHOT: screenshots/acp-repair.png -->
 <!-- Zeige den ACP Repair Modus mit Package-Identifier Eingabefeld und Ergebnis-Tabelle -->
@@ -37,9 +41,20 @@
 - Complete plugin removal from database and filesystem
 - Two methods:
   - Manual package identifier input
-  - Package upload (.tar/.tar.gz) with auto-detection
-- Finds and removes all plugin tables automatically
-- Safe: Shows what will be deleted before executing
+  - **Package upload (.tar/.tar.gz) with automatic resource detection**
+- **NEW:** Automatically identifies ALL plugin resources:
+  - Database tables (from install files)
+  - Options (from option.xml)
+  - Permissions/User Group Options (from userGroupOption.xml)
+  - Cronjobs (from package.xml and cronjob files)
+  - ACP menu items (from acpMenu.xml)
+  - Language items (from language/*.xml)
+  - Object types (from objectType.xml)
+  - Page locations (from pageLocation.xml)
+  - URL rules (from urlRule.xml)
+- **NEW:** SQL preview and export for manual cleanup
+- Safe: Shows detailed preview before executing
+- Automatically filters out base plugin tables
 
 <!-- SCREENSHOT: screenshots/plugin-uninstall.png -->
 ![Plugin Uninstall](https://github.com/user-attachments/assets/5a7f13c6-2988-4e11-9071-67980e7515fc)
@@ -119,13 +134,19 @@ The auth file is valid for 24 hours.
 2. Select: "🗑️ Plugin Uninstall"
 3. Choose method:
    Option A: Enter "de.vendor.plugin.name"
-   Option B: Upload the plugin .tar file
-4. Review what will be deleted:
-   - Package entry from wcf1_package
-   - 3 database tables (plugin1_table1, plugin1_table2, ...)
-   - ACP menu items
-5. Click "JETZT DEINSTALLIEREN"
-6. ✅ Plugin completely removed!
+   Option B: Upload the plugin .tar file (RECOMMENDED)
+4. If uploaded, tool automatically analyzes package.xml and finds:
+   - Database tables (from install_info.php)
+   - Options (from option.xml)
+   - Permissions (from userGroupOption.xml)
+   - Cronjobs (from package.xml)
+   - ACP menu items (from acpMenu.xml)
+   - Language items (from language/*.xml)
+   - Object types, page locations, URL rules
+5. Review detailed preview with all found resources
+6. Optional: Click "SQL anzeigen" to see generated cleanup SQL
+7. Click "JETZT DEINSTALLIEREN"
+8. ✅ Plugin completely removed with all resources!
 ```
 
 ### Example 3: Clear All Caches (Quick Fix)
@@ -161,6 +182,33 @@ SELECT COUNT(*) FROM wcf1_acp_menu_item WHERE menuItem LIKE 'app.acp.menu.%'
 
 ### Plugin Uninstall Mode
 
+**With Package Upload (Automatic Detection):**
+```php
+// 1. Extract package archive
+extractArchive($uploadedFile, $extractDir)
+
+// 2. Parse package.xml
+$packageData = parsePackageXml($extractDir . '/package.xml')
+// Extracts: application name, instruction types
+
+// 3. Analyze all resources:
+- findDatabaseTables() // Parses install_info.php for DatabaseTable::create()
+- findOptions() // Parses option.xml, extracts prefix
+- findUserGroupOptions() // Parses userGroupOption.xml
+- findCronjobs() // Finds cronjobs in package.xml
+- findAcpMenuItems() // Parses acpMenu.xml
+- findLanguageItems() // Scans language/*.xml
+- findObjectTypes() // Parses objectType.xml
+- findPageLocations() // Parses pageLocation.xml
+- findUrlRules() // Parses urlRule.xml
+
+// 4. Detect WCF_N (from database or table names)
+$wcfN = detectWcfN($db, $packageIdentifier, $extractDir)
+
+// 5. Delete all identified resources in transaction
+```
+
+**Manual Package Identifier (Fallback):**
 ```php
 // 1. Find package
 $packageData = SELECT * FROM wcf1_package WHERE package = ?
@@ -273,6 +321,19 @@ Problem: If the extension incorrectly placed files in
 3. Check WoltLab error logs: `log/YYYY-MM-DD.txt`
 
 ## 📝 Changelog
+
+### v1.1.0 (2025-01-XX)
+- 🆕 **Automatic resource detection from package files**
+- 🆕 Package upload support for ACP Repair mode
+- 🆕 Comprehensive resource analysis:
+  - Database tables (from install files)
+  - Options, Permissions, Cronjobs
+  - ACP menu items, Language items
+  - Object types, Page locations, URL rules
+- 🆕 SQL preview and export functionality
+- 🆕 Automatic WCF_N detection (database + fallback)
+- 🆕 Base plugin table filtering
+- 🆕 Improved preview with detailed resource breakdown
 
 ### v1.0.0 (2025-01-16)
 - ✨ Initial release

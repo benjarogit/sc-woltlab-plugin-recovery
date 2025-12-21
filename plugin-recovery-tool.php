@@ -221,6 +221,739 @@ function cleanupRecoveryFiles() {
     }
 }
 
+// ============================================================================
+// PACKAGE-RESSOURCEN ANALYSE FUNKTIONEN
+// ============================================================================
+
+/**
+ * Findet längstes gemeinsames Präfix aus einem Array von Strings
+ */
+function extractCommonPrefix($items, $separator = '.') {
+    if (empty($items)) {
+        return '';
+    }
+
+    $prefix = $items[0];
+    foreach ($items as $item) {
+        while (substr($item, 0, strlen($prefix)) !== $prefix) {
+            $prefix = substr($prefix, 0, -1);
+            if (empty($prefix)) {
+                return '';
+            }
+        }
+    }
+
+    // Finde letztes Trennzeichen
+    $lastSep = max(strrpos($prefix, '.'), strrpos($prefix, '_'));
+    if ($lastSep !== false) {
+        $prefix = substr($prefix, 0, $lastSep + 1);
+    }
+
+    return $prefix;
+}
+
+/**
+ * Extrahiert Namespace aus PHP-Klassenname
+ */
+function extractNamespace($phpClass) {
+    $parts = explode('\\', $phpClass);
+    if (count($parts) > 1) {
+        return $parts[0] . '\\';
+    }
+    return '';
+}
+
+/**
+ * Gibt Liste bekannter WoltLab Basis-Tabellen zurück
+ */
+function getBasePluginTables($wcfN) {
+    return [
+        "wcf{$wcfN}_package",
+        "wcf{$wcfN}_user",
+        "wcf{$wcfN}_user_group",
+        "wcf{$wcfN}_user_group_option",
+        "wcf{$wcfN}_option",
+        "wcf{$wcfN}_option_category",
+        "wcf{$wcfN}_language",
+        "wcf{$wcfN}_language_item",
+        "wcf{$wcfN}_acp_menu_item",
+        "wcf{$wcfN}_cronjob",
+        "wcf{$wcfN}_object_type",
+        "wcf{$wcfN}_page_location",
+        "wcf{$wcfN}_url_rule",
+        "wcf{$wcfN}_package_installation_queue",
+        "wcf{$wcfN}_package_installation_file_log",
+        "wcf{$wcfN}_package_installation_plugin",
+    ];
+}
+
+/**
+ * Findet Datei in verschiedenen möglichen Verzeichnissen
+ */
+function findFileInExtractDir($extractDir, $application, $filename, $possiblePaths = []) {
+    // Standard-Pfade wenn keine angegeben
+    if (empty($possiblePaths)) {
+        $possiblePaths = [
+            '', // Root
+            $filename, // Root direkt
+            "files_{$application}/acp/{$filename}",
+            "files_{$application}/{$filename}",
+        ];
+    }
+
+    foreach ($possiblePaths as $path) {
+        $fullPath = $extractDir . '/' . ltrim($path, '/');
+        if (file_exists($fullPath)) {
+            return $fullPath;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Ermittelt WCF_N Nummer
+ */
+function detectWcfN($db, $packageIdentifier, $extractDir = null) {
+    // Primär: Aus Datenbank
+    for ($n = 1; $n <= 10; $n++) {
+        try {
+            $sql = "SELECT packageID FROM wcf{$n}_package WHERE package = ?";
+            $statement = $db->prepareStatement($sql);
+            $statement->execute([$packageIdentifier]);
+            if ($statement->fetchArray()) {
+                return $n;
+            }
+        } catch (Exception $e) {
+            // Tabelle existiert nicht, weiter mit nächstem N
+        }
+    }
+
+    // Fallback: Aus Tabellennamen in Install-Dateien
+    if ($extractDir) {
+        $packageXml = findFileInExtractDir($extractDir, '', 'package.xml');
+        if ($packageXml) {
+            $xml = simplexml_load_file($packageXml);
+            if ($xml) {
+                $instructions = $xml->xpath('//instructions[@type="install"]/instruction[@type="database"]');
+                if (!empty($instructions)) {
+                    $dbPath = (string)$instructions[0]['path'];
+                    $dbFile = findFileInExtractDir($extractDir, '', $dbPath);
+                    if ($dbFile && file_exists($dbFile)) {
+                        $content = file_get_contents($dbFile);
+                        // Suche nach Pattern: prefix{N}_tablename
+                        if (preg_match('/[a-z]+(\d+)_/i', $content, $matches)) {
+                            return (int)$matches[1];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Default: 1
+    return 1;
+}
+
+/**
+ * Parst package.xml und extrahiert Metadaten
+ */
+function parsePackageXml($packageXmlPath) {
+    if (!file_exists($packageXmlPath)) {
+        return null;
+    }
+
+    $xml = simplexml_load_file($packageXmlPath);
+    if ($xml === false) {
+        return null;
+    }
+
+    $result = [
+        'package' => (string)$xml['name'],
+        'application' => (string)$xml['application'] ?: '',
+        'instructions' => []
+    ];
+
+    // Finde alle Instructions
+    $instructions = $xml->xpath('//instructions[@type="install"]/instruction');
+    foreach ($instructions as $instruction) {
+        $result['instructions'][] = [
+            'type' => (string)$instruction['type'],
+            'application' => (string)$instruction['application'] ?: '',
+            'path' => (string)$instruction['path'] ?: ''
+        ];
+    }
+
+    return $result;
+}
+
+/**
+ * Findet Datenbank-Tabellen aus Install-Datei
+ */
+function findDatabaseTables($extractDir, $packageIdentifier, $wcfN) {
+    $tables = [];
+    $baseTables = getBasePluginTables($wcfN);
+
+    $packageXml = findFileInExtractDir($extractDir, '', 'package.xml');
+    if (!$packageXml) {
+        return $tables;
+    }
+
+    $xml = simplexml_load_file($packageXml);
+    if (!$xml) {
+        return $tables;
+    }
+
+    // Finde database instruction
+    $instructions = $xml->xpath('//instructions[@type="install"]/instruction[@type="database"]');
+    if (empty($instructions)) {
+        return $tables;
+    }
+
+    $dbPath = (string)$instructions[0]['path'];
+    $dbFile = findFileInExtractDir($extractDir, '', $dbPath);
+    if (!$dbFile || !file_exists($dbFile)) {
+        return $tables;
+    }
+
+    $content = file_get_contents($dbFile);
+    // Suche nach DatabaseTable::create('tabellenname')
+    if (preg_match_all("/DatabaseTable::create\(['\"]([^'\"]+)['\"]\)/", $content, $matches)) {
+        foreach ($matches[1] as $tableName) {
+            // Filtere Basis-Tabellen aus
+            if (!in_array($tableName, $baseTables)) {
+                $tables[] = $tableName;
+            }
+        }
+    }
+
+    return array_unique($tables);
+}
+
+/**
+ * Findet Optionen aus option.xml
+ */
+function findOptions($extractDir, $application) {
+    $options = [];
+    $possiblePaths = [
+        'option.xml',
+        "files_{$application}/acp/option/option.xml",
+        "files_{$application}/option.xml",
+    ];
+
+    $optionFile = findFileInExtractDir($extractDir, $application, 'option.xml', $possiblePaths);
+    if (!$optionFile) {
+        return ['prefix' => '', 'count' => 0, 'items' => []];
+    }
+
+    $xml = simplexml_load_file($optionFile);
+    if (!$xml) {
+        return ['prefix' => '', 'count' => 0, 'items' => []];
+    }
+
+    $optionNames = [];
+    foreach ($xml->xpath('//option[@name]') as $option) {
+        $name = (string)$option['name'];
+        $optionNames[] = $name;
+        $options[] = $name;
+    }
+
+    $prefix = extractCommonPrefix($optionNames, '_');
+    return [
+        'prefix' => $prefix,
+        'count' => count($options),
+        'items' => $options
+    ];
+}
+
+/**
+ * Findet User Group Options (Permissions) aus userGroupOption.xml
+ */
+function findUserGroupOptions($extractDir, $application) {
+    $options = [];
+    $possiblePaths = [
+        'userGroupOption.xml',
+        "files_{$application}/acp/userGroupOption/userGroupOption.xml",
+        "files_{$application}/userGroupOption.xml",
+    ];
+
+    $optionFile = findFileInExtractDir($extractDir, $application, 'userGroupOption.xml', $possiblePaths);
+    if (!$optionFile) {
+        return ['prefix' => '', 'count' => 0, 'items' => []];
+    }
+
+    $xml = simplexml_load_file($optionFile);
+    if (!$xml) {
+        return ['prefix' => '', 'count' => 0, 'items' => []];
+    }
+
+    $optionNames = [];
+    foreach ($xml->xpath('//option[@name]') as $option) {
+        $name = (string)$option['name'];
+        $optionNames[] = $name;
+        $options[] = $name;
+    }
+
+    $prefix = extractCommonPrefix($optionNames, '.');
+    return [
+        'prefix' => $prefix,
+        'count' => count($options),
+        'items' => $options
+    ];
+}
+
+/**
+ * Findet Cronjobs aus package.xml oder separaten XML-Dateien
+ */
+function findCronjobs($extractDir, $packageXmlPath) {
+    $cronjobs = [];
+    $classes = [];
+
+    // Suche in package.xml
+    if (file_exists($packageXmlPath)) {
+        $xml = simplexml_load_file($packageXmlPath);
+        if ($xml) {
+            foreach ($xml->xpath('//cronjob[@className]') as $cronjob) {
+                $className = (string)$cronjob['className'];
+                $classes[] = $className;
+            }
+        }
+    }
+
+    // Suche in separaten XML-Dateien
+    $cronjobDir = $extractDir . '/acp/cronjob';
+    if (is_dir($cronjobDir)) {
+        $files = glob($cronjobDir . '/*.xml');
+        foreach ($files as $file) {
+            $xml = simplexml_load_file($file);
+            if ($xml) {
+                foreach ($xml->xpath('//cronjob[@className]') as $cronjob) {
+                    $className = (string)$cronjob['className'];
+                    $classes[] = $className;
+                }
+            }
+        }
+    }
+
+    $namespace = '';
+    if (!empty($classes)) {
+        $namespace = extractNamespace($classes[0]);
+    }
+
+    return [
+        'namespace' => $namespace,
+        'count' => count($classes),
+        'classes' => $classes
+    ];
+}
+
+/**
+ * Findet ACP-Menü-Einträge aus acpMenu.xml
+ */
+function findAcpMenuItems($extractDir, $application) {
+    $items = [];
+    $possiblePaths = [
+        'acpMenu.xml',
+        "files_{$application}/acp/menu/acpMenu.xml",
+        "files_{$application}/acpMenu.xml",
+    ];
+
+    $menuFile = findFileInExtractDir($extractDir, $application, 'acpMenu.xml', $possiblePaths);
+    if (!$menuFile) {
+        return ['prefix' => '', 'count' => 0, 'items' => []];
+    }
+
+    $xml = simplexml_load_file($menuFile);
+    if (!$xml) {
+        return ['prefix' => '', 'count' => 0, 'items' => []];
+    }
+
+    $menuNames = [];
+    foreach ($xml->xpath('//acpmenuitem[@name]') as $menuItem) {
+        $name = (string)$menuItem['name'];
+        $menuNames[] = $name;
+        $items[] = $name;
+    }
+
+    $prefix = extractCommonPrefix($menuNames, '.');
+    return [
+        'prefix' => $prefix,
+        'count' => count($items),
+        'items' => $items
+    ];
+}
+
+/**
+ * Findet Sprachvariablen aus language/*.xml
+ */
+function findLanguageItems($extractDir, $application) {
+    $items = [];
+    $possiblePaths = [
+        'language',
+        "files_{$application}/language",
+    ];
+
+    $languageDir = null;
+    foreach ($possiblePaths as $path) {
+        $fullPath = $extractDir . '/' . ltrim($path, '/');
+        if (is_dir($fullPath)) {
+            $languageDir = $fullPath;
+            break;
+        }
+    }
+
+    if (!$languageDir) {
+        return ['prefix' => '', 'count' => 0, 'items' => []];
+    }
+
+    $xmlFiles = glob($languageDir . '/*.xml');
+    $itemNames = [];
+    foreach ($xmlFiles as $xmlFile) {
+        $xml = simplexml_load_file($xmlFile);
+        if ($xml) {
+            foreach ($xml->xpath('//item[@name]') as $item) {
+                $name = (string)$item['name'];
+                if (!in_array($name, $itemNames)) {
+                    $itemNames[] = $name;
+                    $items[] = $name;
+                }
+            }
+        }
+    }
+
+    $prefix = extractCommonPrefix($itemNames, '.');
+    return [
+        'prefix' => $prefix,
+        'count' => count($items),
+        'items' => $items
+    ];
+}
+
+/**
+ * Findet Objekttypen aus objectType.xml
+ */
+function findObjectTypes($extractDir, $application) {
+    $types = [];
+    $possiblePaths = [
+        'objectType.xml',
+        "files_{$application}/acp/objectType/objectType.xml",
+        "files_{$application}/objectType.xml",
+    ];
+
+    $typeFile = findFileInExtractDir($extractDir, $application, 'objectType.xml', $possiblePaths);
+    if (!$typeFile) {
+        return ['prefix' => '', 'count' => 0, 'items' => []];
+    }
+
+    $xml = simplexml_load_file($typeFile);
+    if (!$xml) {
+        return ['prefix' => '', 'count' => 0, 'items' => []];
+    }
+
+    $typeNames = [];
+    foreach ($xml->xpath('//type[@name]') as $type) {
+        $name = (string)$type['name'];
+        $typeNames[] = $name;
+        $types[] = $name;
+    }
+
+    $prefix = extractCommonPrefix($typeNames, '.');
+    return [
+        'prefix' => $prefix,
+        'count' => count($types),
+        'items' => $types
+    ];
+}
+
+/**
+ * Findet Page Locations aus pageLocation.xml
+ */
+function findPageLocations($extractDir, $application) {
+    $locations = [];
+    $possiblePaths = [
+        'pageLocation.xml',
+        "files_{$application}/acp/page/pageLocation.xml",
+        "files_{$application}/pageLocation.xml",
+    ];
+
+    $locationFile = findFileInExtractDir($extractDir, $application, 'pageLocation.xml', $possiblePaths);
+    if (!$locationFile) {
+        return ['count' => 0, 'items' => []];
+    }
+
+    $xml = simplexml_load_file($locationFile);
+    if (!$xml) {
+        return ['count' => 0, 'items' => []];
+    }
+
+    foreach ($xml->xpath('//pagelocation[@identifier]') as $location) {
+        $identifier = (string)$location['identifier'];
+        $locations[] = $identifier;
+    }
+
+    return [
+        'count' => count($locations),
+        'items' => $locations
+    ];
+}
+
+/**
+ * Findet URL Rules aus urlRule.xml
+ */
+function findUrlRules($extractDir, $application) {
+    $rules = [];
+    $possiblePaths = [
+        'urlRule.xml',
+        "files_{$application}/acp/page/urlRule.xml",
+        "files_{$application}/urlRule.xml",
+    ];
+
+    $ruleFile = findFileInExtractDir($extractDir, $application, 'urlRule.xml', $possiblePaths);
+    if (!$ruleFile) {
+        return ['count' => 0, 'items' => []];
+    }
+
+    $xml = simplexml_load_file($ruleFile);
+    if (!$xml) {
+        return ['count' => 0, 'items' => []];
+    }
+
+    foreach ($xml->xpath('//pattern') as $pattern) {
+        $patternText = trim((string)$pattern);
+        if (!empty($patternText)) {
+            $rules[] = $patternText;
+        }
+    }
+
+    return [
+        'count' => count($rules),
+        'items' => $rules
+    ];
+}
+
+/**
+ * Hauptfunktion: Analysiert Package und identifiziert alle Ressourcen
+ */
+function analyzePackageResources($extractDir, $packageIdentifier, $db) {
+    $resources = [
+        'tables' => [],
+        'options' => ['prefix' => '', 'count' => 0, 'items' => []],
+        'permissions' => ['prefix' => '', 'count' => 0, 'items' => []],
+        'cronjobs' => ['namespace' => '', 'count' => 0, 'classes' => []],
+        'acpMenu' => ['prefix' => '', 'count' => 0, 'items' => []],
+        'language' => ['prefix' => '', 'count' => 0, 'items' => []],
+        'objectTypes' => ['prefix' => '', 'count' => 0, 'items' => []],
+        'pageLocations' => ['count' => 0, 'items' => []],
+        'urlRules' => ['count' => 0, 'items' => []]
+    ];
+
+    if (!is_dir($extractDir)) {
+        return $resources;
+    }
+
+    // Parse package.xml
+    $packageXml = findFileInExtractDir($extractDir, '', 'package.xml');
+    if (!$packageXml) {
+        return $resources;
+    }
+
+    $packageData = parsePackageXml($packageXml);
+    if (!$packageData) {
+        return $resources;
+    }
+
+    $application = $packageData['application'] ?: '';
+    $wcfN = detectWcfN($db, $packageIdentifier, $extractDir);
+
+    // Finde alle Ressourcen
+    $resources['tables'] = findDatabaseTables($extractDir, $packageIdentifier, $wcfN);
+    $resources['options'] = findOptions($extractDir, $application);
+    $resources['permissions'] = findUserGroupOptions($extractDir, $application);
+    $resources['cronjobs'] = findCronjobs($extractDir, $packageXml);
+    $resources['acpMenu'] = findAcpMenuItems($extractDir, $application);
+    $resources['language'] = findLanguageItems($extractDir, $application);
+    $resources['objectTypes'] = findObjectTypes($extractDir, $application);
+    $resources['pageLocations'] = findPageLocations($extractDir, $application);
+    $resources['urlRules'] = findUrlRules($extractDir, $application);
+    $resources['wcfN'] = $wcfN;
+
+    return $resources;
+}
+
+/**
+ * Generiert SQL-Statements für Cleanup
+ */
+function generateCleanupSql($resources, $wcfN) {
+    $sql = "-- WoltLab Plugin Cleanup SQL\n";
+    $sql .= "-- Generated automatically from package analysis\n";
+    $sql .= "-- WCF_N: {$wcfN}\n\n";
+
+    // Tabellen
+    if (!empty($resources['tables'])) {
+        $sql .= "-- Tabellen\n";
+        foreach ($resources['tables'] as $table) {
+            $sql .= "DROP TABLE IF EXISTS `" . addslashes($table) . "`;\n";
+        }
+        $sql .= "\n";
+    }
+
+    // Optionen
+    if (!empty($resources['options']['prefix'])) {
+        $sql .= "-- Optionen\n";
+        $prefix = addslashes($resources['options']['prefix']);
+        $sql .= "DELETE FROM wcf{$wcfN}_option WHERE optionName LIKE '{$prefix}%';\n\n";
+    }
+
+    // Permissions
+    if (!empty($resources['permissions']['prefix'])) {
+        $sql .= "-- Permissions (User Group Options)\n";
+        $prefix = addslashes($resources['permissions']['prefix']);
+        $sql .= "DELETE FROM wcf{$wcfN}_user_group_option WHERE optionName LIKE '{$prefix}%';\n\n";
+    }
+
+    // Cronjobs
+    if (!empty($resources['cronjobs']['namespace'])) {
+        $sql .= "-- Cronjobs\n";
+        $namespace = addslashes($resources['cronjobs']['namespace']);
+        $sql .= "DELETE FROM wcf{$wcfN}_cronjob WHERE className LIKE '{$namespace}%';\n\n";
+    }
+
+    // ACP-Menü
+    if (!empty($resources['acpMenu']['prefix'])) {
+        $sql .= "-- ACP-Menü-Einträge\n";
+        $prefix = addslashes($resources['acpMenu']['prefix']);
+        $sql .= "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE menuItem LIKE '{$prefix}%';\n\n";
+    }
+
+    // Sprachvariablen
+    if (!empty($resources['language']['prefix'])) {
+        $sql .= "-- Sprachvariablen\n";
+        $prefix = addslashes($resources['language']['prefix']);
+        $sql .= "DELETE FROM wcf{$wcfN}_language_item WHERE languageItem LIKE '{$prefix}%';\n\n";
+    }
+
+    // Objekttypen
+    if (!empty($resources['objectTypes']['prefix'])) {
+        $sql .= "-- Objekttypen\n";
+        $prefix = addslashes($resources['objectTypes']['prefix']);
+        $sql .= "DELETE FROM wcf{$wcfN}_object_type WHERE objectType LIKE '{$prefix}%';\n\n";
+    }
+
+    // Page Locations
+    if (!empty($resources['pageLocations']['items'])) {
+        $sql .= "-- Page Locations\n";
+        foreach ($resources['pageLocations']['items'] as $identifier) {
+            $id = addslashes($identifier);
+            $sql .= "DELETE FROM wcf{$wcfN}_page_location WHERE identifier = '{$id}';\n";
+        }
+        $sql .= "\n";
+    }
+
+    // URL Rules
+    if (!empty($resources['urlRules']['items'])) {
+        $sql .= "-- URL Rules\n";
+        foreach ($resources['urlRules']['items'] as $pattern) {
+            $pat = addslashes($pattern);
+            $sql .= "DELETE FROM wcf{$wcfN}_url_rule WHERE pattern = '{$pat}';\n";
+        }
+        $sql .= "\n";
+    }
+
+    return $sql;
+}
+
+/**
+ * Zeigt Vorschau der gefundenen Ressourcen
+ */
+function displayResourcePreview($resources, $wcfN, $packageIdentifier) {
+    echo '<div class="alert alert-info" style="margin-top: 20px;">';
+    echo '<strong>📦 Gefundene Ressourcen aus Package-Datei:</strong><br>';
+    echo '<small>WCF_N: ' . htmlspecialchars($wcfN) . '</small><br><br>';
+
+    $hasResources = false;
+
+    // Tabellen
+    if (!empty($resources['tables'])) {
+        $hasResources = true;
+        echo '<strong>Datenbank-Tabellen (' . count($resources['tables']) . '):</strong><br>';
+        echo '<ul style="margin: 5px 0; padding-left: 20px;">';
+        foreach ($resources['tables'] as $table) {
+            echo '<li><code>' . htmlspecialchars($table) . '</code></li>';
+        }
+        echo '</ul><br>';
+    }
+
+    // Optionen
+    if (!empty($resources['options']['prefix'])) {
+        $hasResources = true;
+        echo '<strong>Optionen (' . $resources['options']['count'] . '):</strong> ';
+        echo 'Präfix: <code>' . htmlspecialchars($resources['options']['prefix']) . '%</code><br><br>';
+    }
+
+    // Permissions
+    if (!empty($resources['permissions']['prefix'])) {
+        $hasResources = true;
+        echo '<strong>Permissions (' . $resources['permissions']['count'] . '):</strong> ';
+        echo 'Präfix: <code>' . htmlspecialchars($resources['permissions']['prefix']) . '%</code><br><br>';
+    }
+
+    // Cronjobs
+    if (!empty($resources['cronjobs']['namespace'])) {
+        $hasResources = true;
+        echo '<strong>Cronjobs (' . $resources['cronjobs']['count'] . '):</strong> ';
+        echo 'Namespace: <code>' . htmlspecialchars($resources['cronjobs']['namespace']) . '%</code><br><br>';
+    }
+
+    // ACP-Menü
+    if (!empty($resources['acpMenu']['prefix'])) {
+        $hasResources = true;
+        echo '<strong>ACP-Menü-Einträge (' . $resources['acpMenu']['count'] . '):</strong> ';
+        echo 'Präfix: <code>' . htmlspecialchars($resources['acpMenu']['prefix']) . '%</code><br><br>';
+    }
+
+    // Sprachvariablen
+    if (!empty($resources['language']['prefix'])) {
+        $hasResources = true;
+        echo '<strong>Sprachvariablen (' . $resources['language']['count'] . '):</strong> ';
+        echo 'Präfix: <code>' . htmlspecialchars($resources['language']['prefix']) . '%</code><br><br>';
+    }
+
+    // Objekttypen
+    if (!empty($resources['objectTypes']['prefix'])) {
+        $hasResources = true;
+        echo '<strong>Objekttypen (' . $resources['objectTypes']['count'] . '):</strong> ';
+        echo 'Präfix: <code>' . htmlspecialchars($resources['objectTypes']['prefix']) . '%</code><br><br>';
+    }
+
+    // Page Locations
+    if (!empty($resources['pageLocations']['items'])) {
+        $hasResources = true;
+        echo '<strong>Page Locations (' . $resources['pageLocations']['count'] . '):</strong><br>';
+        echo '<ul style="margin: 5px 0; padding-left: 20px;">';
+        foreach ($resources['pageLocations']['items'] as $identifier) {
+            echo '<li><code>' . htmlspecialchars($identifier) . '</code></li>';
+        }
+        echo '</ul><br>';
+    }
+
+    // URL Rules
+    if (!empty($resources['urlRules']['items'])) {
+        $hasResources = true;
+        echo '<strong>URL Rules (' . $resources['urlRules']['count'] . '):</strong><br>';
+        echo '<ul style="margin: 5px 0; padding-left: 20px;">';
+        foreach ($resources['urlRules']['items'] as $pattern) {
+            echo '<li><code>' . htmlspecialchars($pattern) . '</code></li>';
+        }
+        echo '</ul><br>';
+    }
+
+    if (!$hasResources) {
+        echo '<em>Keine zusätzlichen Ressourcen in Package-Datei gefunden.</em><br>';
+    }
+
+    echo '</div>';
+}
+
 ?>
 <!DOCTYPE html>
 <html>
@@ -577,32 +1310,91 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 <?php
     $db = WCF::getDB();
 
-    // Schritt 1: Package-Identifier eingeben
-    if (!isset($_POST['package_identifier'])) {
+    // Schritt 1: Package-Identifier eingeben oder hochladen
+    if (!isset($_POST['package_identifier']) && !isset($_FILES['package_file'])) {
 ?>
     <form method="POST">
         <div class="form-group">
-            <label>Package-Identifier des problematischen Plugins:</label>
-            <input type="text" name="package_identifier" placeholder="z.B. de.julian-pfeil.urlshort.featuredLinks" required>
+            <label>Option 1: Package-Identifier manuell eingeben</label>
+            <input type="text" name="package_identifier" placeholder="z.B. de.julian-pfeil.urlshort.featuredLinks">
             <small style="color: #666; display: block; margin-top: 5px;">
                 Der eindeutige Bezeichner des Plugins, dessen ACP-Menüeinträge repariert werden sollen.
             </small>
         </div>
-        <button type="submit">Weiter →</button>
+        <button type="submit">Mit Identifier reparieren</button>
+    </form>
+
+    <hr style="margin: 30px 0; border: none; border-top: 1px solid #444444;">
+
+    <form method="POST" enctype="multipart/form-data">
+        <div class="form-group">
+            <label>Option 2: Package-Datei hochladen (.tar oder .tar.gz)</label>
+            <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz">
+        </div>
+        <button type="submit">Mit Datei reparieren</button>
     </form>
 <?php
     } else {
+        $packageIdentifier = null;
+
+        // Package-Identifier ermitteln
+        if (isset($_POST['package_identifier']) && !empty($_POST['package_identifier'])) {
         $packageIdentifier = trim($_POST['package_identifier']);
+        } elseif (isset($_FILES['package_file']) && $_FILES['package_file']['error'] === UPLOAD_ERR_OK) {
+            // Upload verarbeiten
+            $uploadDir = __DIR__ . '/uploads';
+            if (!is_dir($uploadDir)) {
+                mkdir($uploadDir, 0755, true);
+            }
 
-        // Package suchen
-        $sql = "SELECT packageID, package, packageName
-                FROM wcf" . WCF_N . "_package
-                WHERE package = ?";
-        $statement = $db->prepareStatement($sql);
-        $statement->execute([$packageIdentifier]);
-        $packageData = $statement->fetchArray();
+            $uploadedFile = $uploadDir . '/' . basename($_FILES['package_file']['name']);
+            if (move_uploaded_file($_FILES['package_file']['tmp_name'], $uploadedFile)) {
+                // Entpacken
+                $extractDir = $uploadDir . '/extracted';
+                if (!is_dir($extractDir)) {
+                    mkdir($extractDir, 0755, true);
+                }
 
-        if (!$packageData && !isset($_POST['force_cleanup'])) {
+                if (extractArchive($uploadedFile, $extractDir)) {
+                    $packageXml = $extractDir . '/package.xml';
+                    $packageIdentifier = extractPackageIdentifier($packageXml);
+
+                    if (!$packageIdentifier) {
+                        echo '<div class="alert alert-error">Fehler: package.xml konnte nicht gelesen werden.</div>';
+                    }
+                } else {
+                    echo '<div class="alert alert-error">Fehler: Archiv konnte nicht entpackt werden.</div>';
+                }
+            } else {
+                echo '<div class="alert alert-error">Fehler: Datei-Upload fehlgeschlagen.</div>';
+            }
+        }
+
+        if ($packageIdentifier) {
+            // Ressourcen-Analyse durchführen wenn Upload vorhanden
+            $resources = null;
+            $extractDir = null;
+            if (isset($_FILES['package_file']) && $_FILES['package_file']['error'] === UPLOAD_ERR_OK) {
+                $uploadDir = __DIR__ . '/uploads';
+                $extractDir = $uploadDir . '/extracted';
+                if (is_dir($extractDir)) {
+                    $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
+                    if ($resources && !empty($resources['acpMenu']['prefix'])) {
+                        // Zeige gefundene ACP-Menü-Einträge aus Analyse
+                        displayResourcePreview($resources, $resources['wcfN'], $packageIdentifier);
+                    }
+                }
+            }
+
+            // Package suchen
+            $sql = "SELECT packageID, package, packageName
+                    FROM wcf" . WCF_N . "_package
+                    WHERE package = ?";
+            $statement = $db->prepareStatement($sql);
+            $statement->execute([$packageIdentifier]);
+            $packageData = $statement->fetchArray();
+
+            if (!$packageData && !isset($_POST['force_cleanup'])) {
             // App-Name extrahieren für Pattern-Suche
             $parts = explode('.', $packageIdentifier);
             $appName = end($parts);
@@ -633,11 +1425,20 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
             echo '</div>';
         } else {
             $packageID = $packageData ? $packageData['packageID'] : null;
+            $wcfN = $resources ? $resources['wcfN'] : WCF_N;
 
-            // ACP-Menüeinträge finden
-            if ($packageID) {
+            // ACP-Menüeinträge finden (aus Analyse oder Datenbank)
+            if ($resources && !empty($resources['acpMenu']['prefix'])) {
+                // Verwende Präfix aus Analyse
+                $prefix = addslashes($resources['acpMenu']['prefix']);
                 $sql = "SELECT menuItem, menuItemController
-                        FROM wcf" . WCF_N . "_acp_menu_item
+                        FROM wcf{$wcfN}_acp_menu_item
+                        WHERE menuItem LIKE ?";
+                $statement = $db->prepareStatement($sql);
+                $statement->execute([$prefix . '%']);
+            } elseif ($packageID) {
+                $sql = "SELECT menuItem, menuItemController
+                        FROM wcf{$wcfN}_acp_menu_item
                         WHERE packageID = ?";
                 $statement = $db->prepareStatement($sql);
                 $statement->execute([$packageID]);
@@ -646,7 +1447,7 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                 $parts = explode('.', $packageIdentifier);
                 $appName = end($parts);
                 $sql = "SELECT menuItem, menuItemController
-                        FROM wcf" . WCF_N . "_acp_menu_item
+                        FROM wcf{$wcfN}_acp_menu_item
                         WHERE menuItem LIKE ?";
                 $statement = $db->prepareStatement($sql);
                 $statement->execute([$appName . '.acp.menu.%']);
@@ -677,6 +1478,9 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                 echo '</tbody></table>';
                 echo '<form method="POST">';
                 echo '<input type="hidden" name="package_identifier" value="' . htmlspecialchars($packageIdentifier) . '">';
+                if ($extractDir) {
+                    echo '<input type="hidden" name="extract_dir" value="' . htmlspecialchars($extractDir) . '">';
+                }
                 if (!$packageID) {
                     echo '<input type="hidden" name="force_cleanup" value="1">';
                 }
@@ -685,18 +1489,31 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                 echo '</form>';
                 echo '</div>';
             } else {
+                // Ressourcen erneut analysieren wenn Extract-Dir vorhanden
+                $extractDir = isset($_POST['extract_dir']) ? $_POST['extract_dir'] : null;
+                if ($extractDir && is_dir($extractDir)) {
+                    $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
+                }
+                $wcfN = $resources ? $resources['wcfN'] : WCF_N;
+
                 // Löschen ausführen
                 $db->beginTransaction();
 
                 try {
-                    if ($packageID) {
-                        $sql = "DELETE FROM wcf" . WCF_N . "_acp_menu_item WHERE packageID = ?";
+                    // Verwende Analyse-Ergebnisse wenn vorhanden
+                    if ($resources && !empty($resources['acpMenu']['prefix'])) {
+                        $prefix = addslashes($resources['acpMenu']['prefix']);
+                        $sql = "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE menuItem LIKE ?";
+                        $statement = $db->prepareStatement($sql);
+                        $statement->execute([$prefix . '%']);
+                    } elseif ($packageID) {
+                        $sql = "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE packageID = ?";
                         $statement = $db->prepareStatement($sql);
                         $statement->execute([$packageID]);
                     } else {
                         $parts = explode('.', $packageIdentifier);
                         $appName = end($parts);
-                        $sql = "DELETE FROM wcf" . WCF_N . "_acp_menu_item WHERE menuItem LIKE ?";
+                        $sql = "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE menuItem LIKE ?";
                         $statement = $db->prepareStatement($sql);
                         $statement->execute([$appName . '.acp.menu.%']);
                     }
@@ -722,6 +1539,11 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                     echo '</div>';
                 }
             }
+        }
+        } else {
+            echo '<div class="alert alert-error">';
+            echo '<strong>Fehler:</strong> Kein Package-Identifier konnte ermittelt werden. Bitte versuchen Sie es erneut.';
+            echo '</div>';
         }
     }
 }
@@ -815,8 +1637,44 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
             }
             echo '</div>';
 
-            // Tabellen finden
-            $tables = findPackageTables($db, $packageIdentifier);
+            // Ressourcen-Analyse durchführen wenn Upload vorhanden
+            $resources = null;
+            $extractDir = null;
+            
+            // Prüfe ob Upload gerade erfolgt oder Extract-Dir bereits bekannt
+            if (isset($_FILES['package_file']) && $_FILES['package_file']['error'] === UPLOAD_ERR_OK) {
+                $uploadDir = __DIR__ . '/uploads';
+                $extractDir = $uploadDir . '/extracted';
+            } elseif (isset($_GET['extract_dir']) || isset($_POST['extract_dir'])) {
+                $extractDir = isset($_GET['extract_dir']) ? $_GET['extract_dir'] : $_POST['extract_dir'];
+            }
+            
+            if ($extractDir && is_dir($extractDir)) {
+                $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
+                if ($resources) {
+                    displayResourcePreview($resources, $resources['wcfN'], $packageIdentifier);
+                    
+                    // SQL anzeigen Button
+                    if (isset($_GET['show_sql'])) {
+                        echo '<div class="alert alert-info" style="margin-top: 20px;">';
+                        echo '<strong>SQL Cleanup Script:</strong><br>';
+                        echo '<pre style="max-height: 400px; overflow-y: auto;">' . htmlspecialchars(generateCleanupSql($resources, $resources['wcfN'])) . '</pre>';
+                        echo '</div>';
+                    } else {
+                        echo '<div style="margin-top: 10px;">';
+                        $extractDirParam = $extractDir ? '&extract_dir=' . urlencode($extractDir) : '';
+                        echo '<a href="?mode=' . RECOVERY_MODE_PLUGIN_UNINSTALL . '&t=' . $authHash . '&show_sql=1&package_identifier=' . urlencode($packageIdentifier) . $extractDirParam . '" class="button">SQL anzeigen</a>';
+                        echo '</div>';
+                    }
+                }
+            }
+
+            // Tabellen finden (Fallback auf alte Methode wenn keine Analyse vorhanden)
+            if ($resources && !empty($resources['tables'])) {
+                $tables = $resources['tables'];
+            } else {
+                $tables = findPackageTables($db, $packageIdentifier);
+            }
 
             if (!isset($_POST['confirm_uninstall'])) {
                 echo '<div class="alert alert-warning">';
@@ -847,10 +1705,9 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                 }
 
                 echo '<br><form method="POST">';
-                if (isset($_FILES['package_file'])) {
-                    echo '<input type="hidden" name="package_identifier" value="' . htmlspecialchars($packageIdentifier) . '">';
-                } else {
-                    echo '<input type="hidden" name="package_identifier" value="' . htmlspecialchars($packageIdentifier) . '">';
+                echo '<input type="hidden" name="package_identifier" value="' . htmlspecialchars($packageIdentifier) . '">';
+                if ($extractDir) {
+                    echo '<input type="hidden" name="extract_dir" value="' . htmlspecialchars($extractDir) . '">';
                 }
                 echo '<input type="hidden" name="confirm_uninstall" value="1">';
                 echo '<button type="submit" class="btn-danger">JETZT DEINSTALLIEREN</button>';
@@ -858,29 +1715,45 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                 echo '</div>';
 
             } else {
+                // Ressourcen erneut analysieren wenn Extract-Dir vorhanden
+                $extractDir = isset($_POST['extract_dir']) ? $_POST['extract_dir'] : null;
+                $resources = null;
+                if ($extractDir && is_dir($extractDir)) {
+                    $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
+                }
+
                 // Deinstallation durchführen
                 $db->beginTransaction();
 
                 try {
                     $log = [];
+                    $wcfN = $resources ? $resources['wcfN'] : WCF_N;
 
                     if ($packageData) {
                         $packageID = $packageData['packageID'];
 
-                        // ACP-Menüeinträge löschen
-                        $sql = "DELETE FROM wcf" . WCF_N . "_acp_menu_item WHERE packageID = ?";
-                        $statement = $db->prepareStatement($sql);
-                        $statement->execute([$packageID]);
-                        $log[] = 'ACP-Menüeinträge gelöscht: ' . $statement->getAffectedRows();
+                        // ACP-Menüeinträge löschen (aus Analyse oder über packageID)
+                        if ($resources && !empty($resources['acpMenu']['prefix'])) {
+                            $prefix = addslashes($resources['acpMenu']['prefix']);
+                            $sql = "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE menuItem LIKE '{$prefix}%'";
+                            $statement = $db->prepareStatement($sql);
+                            $statement->execute();
+                            $log[] = 'ACP-Menüeinträge gelöscht: ' . $statement->getAffectedRows();
+                        } else {
+                            $sql = "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE packageID = ?";
+                            $statement = $db->prepareStatement($sql);
+                            $statement->execute([$packageID]);
+                            $log[] = 'ACP-Menüeinträge gelöscht: ' . $statement->getAffectedRows();
+                        }
 
                         // Package-Eintrag löschen
-                        $sql = "DELETE FROM wcf" . WCF_N . "_package WHERE packageID = ?";
+                        $sql = "DELETE FROM wcf{$wcfN}_package WHERE packageID = ?";
                         $statement = $db->prepareStatement($sql);
                         $statement->execute([$packageID]);
                         $log[] = 'Package-Eintrag gelöscht';
 
                         // Installationsqueue bereinigen
-                        $sql = "DELETE FROM wcf" . WCF_N . "_package_installation_queue WHERE package = ?";
+                        $sql = "DELETE FROM wcf{$wcfN}_package_installation_queue WHERE package = ?";
                         $statement = $db->prepareStatement($sql);
                         $statement->execute([$packageIdentifier]);
                         $log[] = 'Installationsqueue bereinigt: ' . $statement->getAffectedRows();
@@ -888,10 +1761,80 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 
                     // Tabellen löschen
                     foreach ($tables as $table) {
-                        $sql = "DROP TABLE IF EXISTS `" . $table . "`";
+                        $sql = "DROP TABLE IF EXISTS `" . addslashes($table) . "`";
                         $statement = $db->prepareStatement($sql);
                         $statement->execute();
                         $log[] = 'Tabelle gelöscht: ' . $table;
+                    }
+
+                    // Weitere Ressourcen löschen wenn Analyse vorhanden
+                    if ($resources) {
+                        // Optionen
+                        if (!empty($resources['options']['prefix'])) {
+                            $prefix = addslashes($resources['options']['prefix']);
+                            $sql = "DELETE FROM wcf{$wcfN}_option WHERE optionName LIKE '{$prefix}%'";
+                            $statement = $db->prepareStatement($sql);
+                            $statement->execute();
+                            $log[] = 'Optionen gelöscht: ' . $statement->getAffectedRows();
+                        }
+
+                        // Permissions
+                        if (!empty($resources['permissions']['prefix'])) {
+                            $prefix = addslashes($resources['permissions']['prefix']);
+                            $sql = "DELETE FROM wcf{$wcfN}_user_group_option WHERE optionName LIKE '{$prefix}%'";
+                            $statement = $db->prepareStatement($sql);
+                            $statement->execute();
+                            $log[] = 'Permissions gelöscht: ' . $statement->getAffectedRows();
+                        }
+
+                        // Cronjobs
+                        if (!empty($resources['cronjobs']['namespace'])) {
+                            $namespace = addslashes($resources['cronjobs']['namespace']);
+                            $sql = "DELETE FROM wcf{$wcfN}_cronjob WHERE className LIKE '{$namespace}%'";
+                            $statement = $db->prepareStatement($sql);
+                            $statement->execute();
+                            $log[] = 'Cronjobs gelöscht: ' . $statement->getAffectedRows();
+                        }
+
+                        // Sprachvariablen
+                        if (!empty($resources['language']['prefix'])) {
+                            $prefix = addslashes($resources['language']['prefix']);
+                            $sql = "DELETE FROM wcf{$wcfN}_language_item WHERE languageItem LIKE '{$prefix}%'";
+                            $statement = $db->prepareStatement($sql);
+                            $statement->execute();
+                            $log[] = 'Sprachvariablen gelöscht: ' . $statement->getAffectedRows();
+                        }
+
+                        // Objekttypen
+                        if (!empty($resources['objectTypes']['prefix'])) {
+                            $prefix = addslashes($resources['objectTypes']['prefix']);
+                            $sql = "DELETE FROM wcf{$wcfN}_object_type WHERE objectType LIKE '{$prefix}%'";
+                            $statement = $db->prepareStatement($sql);
+                            $statement->execute();
+                            $log[] = 'Objekttypen gelöscht: ' . $statement->getAffectedRows();
+                        }
+
+                        // Page Locations
+                        if (!empty($resources['pageLocations']['items'])) {
+                            foreach ($resources['pageLocations']['items'] as $identifier) {
+                                $id = addslashes($identifier);
+                                $sql = "DELETE FROM wcf{$wcfN}_page_location WHERE identifier = '{$id}'";
+                                $statement = $db->prepareStatement($sql);
+                                $statement->execute();
+                            }
+                            $log[] = 'Page Locations gelöscht: ' . count($resources['pageLocations']['items']);
+                        }
+
+                        // URL Rules
+                        if (!empty($resources['urlRules']['items'])) {
+                            foreach ($resources['urlRules']['items'] as $pattern) {
+                                $pat = addslashes($pattern);
+                                $sql = "DELETE FROM wcf{$wcfN}_url_rule WHERE pattern = '{$pat}'";
+                                $statement = $db->prepareStatement($sql);
+                                $statement->execute();
+                            }
+                            $log[] = 'URL Rules gelöscht: ' . count($resources['urlRules']['items']);
+                        }
                     }
 
                     // Cache löschen
