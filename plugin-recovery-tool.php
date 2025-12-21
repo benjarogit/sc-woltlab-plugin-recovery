@@ -95,7 +95,7 @@ if (file_exists(__DIR__ . '/' . $authFilename)) {
  * Extrahiert Package-Identifier aus package.xml
  */
 function extractPackageIdentifier($packageXmlPath) {
-    if (!file_exists($packageXmlPath)) {
+    if (!file_exists($packageXmlPath) || !is_file($packageXmlPath)) {
         return null;
     }
 
@@ -294,16 +294,22 @@ function findFileInExtractDir($extractDir, $application, $filename, $possiblePat
     // Standard-Pfade wenn keine angegeben
     if (empty($possiblePaths)) {
         $possiblePaths = [
-            '', // Root
             $filename, // Root direkt
+            '', // Root (leer bedeutet filename direkt)
             "files_{$application}/acp/{$filename}",
             "files_{$application}/{$filename}",
         ];
     }
 
     foreach ($possiblePaths as $path) {
-        $fullPath = $extractDir . '/' . ltrim($path, '/');
-        if (file_exists($fullPath)) {
+        if (empty($path)) {
+            $fullPath = $extractDir . '/' . $filename;
+        } else {
+            $fullPath = $extractDir . '/' . ltrim($path, '/');
+        }
+        
+        // Prüfe ob es eine Datei ist (nicht ein Verzeichnis)
+        if (file_exists($fullPath) && is_file($fullPath)) {
             return $fullPath;
         }
     }
@@ -359,7 +365,7 @@ function detectWcfN($db, $packageIdentifier, $extractDir = null) {
  * Parst package.xml und extrahiert Metadaten
  */
 function parsePackageXml($packageXmlPath) {
-    if (!file_exists($packageXmlPath)) {
+    if (!file_exists($packageXmlPath) || !is_file($packageXmlPath)) {
         return null;
     }
 
@@ -510,7 +516,7 @@ function findCronjobs($extractDir, $packageXmlPath) {
     $classes = [];
 
     // Suche in package.xml
-    if (file_exists($packageXmlPath)) {
+    if (file_exists($packageXmlPath) && is_file($packageXmlPath)) {
         $xml = simplexml_load_file($packageXmlPath);
         if ($xml) {
             foreach ($xml->xpath('//cronjob[@className]') as $cronjob) {
@@ -525,11 +531,13 @@ function findCronjobs($extractDir, $packageXmlPath) {
     if (is_dir($cronjobDir)) {
         $files = glob($cronjobDir . '/*.xml');
         foreach ($files as $file) {
-            $xml = simplexml_load_file($file);
-            if ($xml) {
-                foreach ($xml->xpath('//cronjob[@className]') as $cronjob) {
-                    $className = (string)$cronjob['className'];
-                    $classes[] = $className;
+            if (is_file($file)) {
+                $xml = simplexml_load_file($file);
+                if ($xml) {
+                    foreach ($xml->xpath('//cronjob[@className]') as $cronjob) {
+                        $className = (string)$cronjob['className'];
+                        $classes[] = $className;
+                    }
                 }
             }
         }
@@ -609,13 +617,15 @@ function findLanguageItems($extractDir, $application) {
     $xmlFiles = glob($languageDir . '/*.xml');
     $itemNames = [];
     foreach ($xmlFiles as $xmlFile) {
-        $xml = simplexml_load_file($xmlFile);
-        if ($xml) {
-            foreach ($xml->xpath('//item[@name]') as $item) {
-                $name = (string)$item['name'];
-                if (!in_array($name, $itemNames)) {
-                    $itemNames[] = $name;
-                    $items[] = $name;
+        if (is_file($xmlFile)) {
+            $xml = simplexml_load_file($xmlFile);
+            if ($xml) {
+                foreach ($xml->xpath('//item[@name]') as $item) {
+                    $name = (string)$item['name'];
+                    if (!in_array($name, $itemNames)) {
+                        $itemNames[] = $name;
+                        $items[] = $name;
+                    }
                 }
             }
         }
