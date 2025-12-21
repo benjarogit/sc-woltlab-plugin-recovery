@@ -1388,9 +1388,11 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
     } else {
         $packageIdentifier = null;
 
-        // Package-Identifier ermitteln
+        // Package-Identifier ermitteln (aus POST, GET oder Upload)
         if (isset($_POST['package_identifier']) && !empty($_POST['package_identifier'])) {
-        $packageIdentifier = trim($_POST['package_identifier']);
+            $packageIdentifier = trim($_POST['package_identifier']);
+        } elseif (isset($_GET['package_identifier']) && !empty($_GET['package_identifier'])) {
+            $packageIdentifier = trim($_GET['package_identifier']);
         } elseif (isset($_FILES['package_file']) && $_FILES['package_file']['error'] === UPLOAD_ERR_OK) {
             // Upload verarbeiten
             $uploadDir = __DIR__ . '/uploads';
@@ -1613,7 +1615,12 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
     $db = WCF::getDB();
 
     // Schritt 1: Package-Identifier eingeben oder hochladen
-    if (!isset($_POST['package_identifier']) && !isset($_FILES['package_file'])) {
+    // Prüfe auch GET-Parameter für "SQL anzeigen" Funktionalität
+    $hasPackageIdentifier = (isset($_POST['package_identifier']) && !empty($_POST['package_identifier'])) ||
+                            (isset($_GET['package_identifier']) && !empty($_GET['package_identifier'])) ||
+                            (isset($_FILES['package_file']) && $_FILES['package_file']['error'] === UPLOAD_ERR_OK);
+    
+    if (!$hasPackageIdentifier) {
 ?>
     <form method="POST">
         <div class="form-group">
@@ -1636,9 +1643,11 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
     } else {
         $packageIdentifier = null;
 
-        // Package-Identifier ermitteln
+        // Package-Identifier ermitteln (aus POST, GET oder Upload)
         if (isset($_POST['package_identifier']) && !empty($_POST['package_identifier'])) {
             $packageIdentifier = trim($_POST['package_identifier']);
+        } elseif (isset($_GET['package_identifier']) && !empty($_GET['package_identifier'])) {
+            $packageIdentifier = trim($_GET['package_identifier']);
         } elseif (isset($_FILES['package_file']) && $_FILES['package_file']['error'] === UPLOAD_ERR_OK) {
             // Upload verarbeiten
             $uploadDir = __DIR__ . '/uploads';
@@ -1830,10 +1839,15 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 
                     // Tabellen löschen
                     foreach ($tables as $table) {
-                        $sql = "DROP TABLE IF EXISTS `" . addslashes($table) . "`";
-                        $statement = $db->prepareStatement($sql);
-                        $statement->execute();
-                        $log[] = 'Tabelle gelöscht: ' . $table;
+                        try {
+                            $sql = "DROP TABLE IF EXISTS `" . addslashes($table) . "`";
+                            $statement = $db->prepareStatement($sql);
+                            $statement->execute();
+                            $log[] = 'Tabelle gelöscht: ' . $table;
+                        } catch (Exception $e) {
+                            $log[] = 'Fehler beim Löschen der Tabelle ' . $table . ': ' . $e->getMessage();
+                            throw $e; // Wirf Exception weiter, damit Transaction rollback wird
+                        }
                     }
 
                     // Weitere Ressourcen löschen wenn Analyse vorhanden
@@ -1923,7 +1937,14 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                 } catch (Exception $e) {
                     $db->rollBackTransaction();
                     echo '<div class="alert alert-error">';
-                    echo '<strong>Fehler bei Deinstallation:</strong><br>' . htmlspecialchars($e->getMessage());
+                    echo '<strong>Fehler bei Deinstallation:</strong><br>';
+                    echo htmlspecialchars($e->getMessage()) . '<br><br>';
+                    if (method_exists($e, 'getTraceAsString')) {
+                        echo '<details><summary>Technische Details (für Debugging)</summary>';
+                        echo '<pre style="font-size: 11px; max-height: 200px; overflow-y: auto;">';
+                        echo htmlspecialchars($e->getTraceAsString());
+                        echo '</pre></details>';
+                    }
                     echo '</div>';
                 }
             }
