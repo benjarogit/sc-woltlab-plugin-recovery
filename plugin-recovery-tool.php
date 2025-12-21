@@ -142,16 +142,6 @@ function findPackageTables($db, $packageIdentifier, $wcfN = null) {
     // Entferne Duplikate und leere Werte
     $appNames = array_unique(array_filter($appNames));
 
-    // Versuche verschiedene Muster für jeden App-Namen
-    $patterns = [];
-    foreach ($appNames as $appName) {
-        $appNameLower = strtolower($appName);
-        $patterns[] = $appName . '%';
-        $patterns[] = $appName . '1_%';
-        $patterns[] = $appNameLower . '%';
-        $patterns[] = $appNameLower . '1_%';
-    }
-
     // Alle Tabellen holen und in PHP filtern (WCF hat kein getHandle())
     $sql = "SHOW TABLES";
     $statement = $db->prepareStatement($sql);
@@ -174,10 +164,34 @@ function findPackageTables($db, $packageIdentifier, $wcfN = null) {
             continue;
         }
 
-        // Prüfen ob Tabellenname einen der Patterns enthält
-        foreach ($patterns as $pattern) {
-            $cleanPattern = str_replace('%', '', str_replace('_', '', $pattern));
-            if (stripos($tableName, $cleanPattern) !== false) {
+        // Prüfe ob Tabellenname mit einem der App-Namen beginnt
+        // Unterstützt verschiedene Formate:
+        // - urlshort1_table (mit WCF_N)
+        // - urlshort_table (ohne WCF_N)
+        // - urlshort1table (ohne Unterstrich)
+        foreach ($appNames as $appName) {
+            $appNameLower = strtolower($appName);
+            
+            // Pattern 1: appname{N}_table (z.B. urlshort1_url)
+            if (preg_match('/^' . preg_quote($appName, '/') . '\d+_/i', $tableName)) {
+                $tables[] = $tableName;
+                break;
+            }
+            
+            // Pattern 2: appname_table (ohne Nummer)
+            if (preg_match('/^' . preg_quote($appName, '/') . '_/i', $tableName)) {
+                $tables[] = $tableName;
+                break;
+            }
+            
+            // Pattern 3: appname{N}table (ohne Unterstrich)
+            if (preg_match('/^' . preg_quote($appName, '/') . '\d+/i', $tableName)) {
+                $tables[] = $tableName;
+                break;
+            }
+            
+            // Pattern 4: appname (direkt, ohne alles)
+            if (stripos($tableName, $appName) === 0) {
                 $tables[] = $tableName;
                 break;
             }
@@ -1722,6 +1736,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     echo '✓ Package-Eintrag in wcf' . WCF_N . '_package<br>';
                     echo '✓ ACP-Menüeinträge<br>';
                     echo '✓ Package-Installationsqueue<br>';
+                    echo '✓ Package Installation SQL Log<br>';
                 }
 
                 if (!empty($tables)) {
@@ -1795,6 +1810,22 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                         $statement = $db->prepareStatement($sql);
                         $statement->execute([$packageIdentifier]);
                         $log[] = 'Installationsqueue bereinigt: ' . $statement->getAffectedRows();
+                        
+                        // Package Installation SQL Log bereinigen
+                        $sql = "DELETE FROM wcf{$wcfN}_package_installation_sql_log WHERE packageID = ?";
+                        $statement = $db->prepareStatement($sql);
+                        $statement->execute([$packageID]);
+                        $log[] = 'Package Installation SQL Log bereinigt: ' . $statement->getAffectedRows();
+                    } else {
+                        // Auch ohne Package-Eintrag: SQL Log nach Tabellennamen bereinigen
+                        if (!empty($tables)) {
+                            foreach ($tables as $table) {
+                                $sql = "DELETE FROM wcf{$wcfN}_package_installation_sql_log WHERE sqlTable = ?";
+                                $statement = $db->prepareStatement($sql);
+                                $statement->execute([$table]);
+                            }
+                            $log[] = 'Package Installation SQL Log bereinigt (nach Tabellennamen)';
+                        }
                     }
 
                     // Tabellen löschen
