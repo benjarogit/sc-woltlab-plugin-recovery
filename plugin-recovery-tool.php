@@ -1258,8 +1258,11 @@ if (!$isAuthenticated) {
     </div>
 
     <footer>
-        <a href="https://benjaro.info" target="_blank">Plugin Recovery Tool</a> &copy; 2025 Sunny C. |
-        Inspiriert von <a href="https://www.woltlab.com" target="_blank">WoltLab</a>
+        <a href="https://github.com/benjarogit/sc-woltlab-plugin-recovery" target="_blank">Plugin Recovery Tool</a> &copy; 2025 Sunny C. |
+        Inspiriert von <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank">WoltLab</a> |
+        <a href="https://github.com/benjarogit/simple-woltlab-plugin-manager" target="_blank">Simple Plugin Manager</a> |
+        <a href="https://www.woltlab.com/user/1350052-sunny-c/" target="_blank">WoltLab Profil</a> |
+        <a href="https://github.com/benjarogit/photoshopCClinux" target="_blank">Photoshop CC Linux</a>
     </footer>
 
     <script>
@@ -2119,8 +2122,11 @@ elseif ($mode === RECOVERY_MODE_CACHE_CLEAR) {
     </div>
 
     <footer>
-        <a href="https://benjaro.info" target="_blank">Plugin Recovery Tool</a> &copy; 2025 Sunny C. |
-        Inspiriert von <a href="https://www.woltlab.com" target="_blank">WoltLab</a>
+        <a href="https://github.com/benjarogit/sc-woltlab-plugin-recovery" target="_blank">Plugin Recovery Tool</a> &copy; 2025 Sunny C. |
+        Inspiriert von <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank">WoltLab</a> |
+        <a href="https://github.com/benjarogit/simple-woltlab-plugin-manager" target="_blank">Simple Plugin Manager</a> |
+        <a href="https://www.woltlab.com/user/1350052-sunny-c/" target="_blank">WoltLab Profil</a> |
+        <a href="https://github.com/benjarogit/photoshopCClinux" target="_blank">Photoshop CC Linux</a>
     </footer>
 </body>
 </html>

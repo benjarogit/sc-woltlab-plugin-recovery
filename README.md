@@ -79,7 +79,7 @@
 
 ## 📦 Installation
 
-1. **Download** `plugin-recovery-tool.php` from [Releases](https://github.com/SunnyCueq/woltlab-plugin-recovery/releases)
+1. **Download** `plugin-recovery-tool.php` from [Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases)
 2. **Upload** to your WoltLab Suite root directory (same level as `global.php`)
 3. **Access** via browser: `https://your-domain.com/plugin-recovery-tool.php`
 
@@ -306,7 +306,7 @@ Problem: If the extension incorrectly placed files in
 
 **Cause:** Outdated version
 
-**Solution:** Download latest from [GitHub Releases](https://github.com/SunnyCueq/woltlab-plugin-recovery/releases)
+**Solution:** Download latest from [GitHub Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases)
 
 ### ACP still broken after Cache Clear
 
@@ -373,13 +373,19 @@ Issues and pull requests are welcome!
 
 - [WoltLab Suite Documentation](https://docs.woltlab.com/6.0/)
 - [Official WoltLab Recovery Tool](https://manual.woltlab.com/de/recovery-tool/)
-- [Report Issues](https://github.com/SunnyCueq/woltlab-plugin-recovery/issues)
-- [Latest Release](https://github.com/SunnyCueq/woltlab-plugin-recovery/releases)
+- [Report Issues](https://github.com/benjarogit/sc-woltlab-plugin-recovery/issues)
+- [Latest Release](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases)
+
+## 🔗 Related Projects
+
+- [Simple WoltLab Plugin Manager](https://github.com/benjarogit/simple-woltlab-plugin-manager) - Plugin management tool
+- [Photoshop CC Linux](https://github.com/benjarogit/photoshopCClinux) - Photoshop CC for Linux
+- [WoltLab Profile](https://www.woltlab.com/user/1350052-sunny-c/) - My WoltLab Community profile
 
 ---
 
 <p align="center">
-  <strong>Made with ❤️ by <a href="https://benjaro.info">Sunny C.</a></strong>
+  <strong>Made with ❤️ by <a href="https://github.com/benjarogit">Sunny C.</a></strong>
 </p>
 
 <p align="center">
