@@ -1449,30 +1449,74 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 
             if (!$packageData && !isset($_POST['force_cleanup'])) {
             // App-Name extrahieren für Pattern-Suche
+            // Versuche sowohl letzten als auch vorletzten Teil (für Erweiterungen)
             $parts = explode('.', $packageIdentifier);
-            $appName = end($parts);
+            $appNames = [];
+            if (count($parts) >= 2) {
+                $appNames[] = $parts[count($parts) - 2]; // Vorletzter Teil (Basis-Plugin)
+            }
+            $appNames[] = end($parts); // Letzter Teil (Erweiterung oder direktes Plugin)
+            $appNames = array_unique($appNames);
 
-            // Prüfen ob überhaupt Menüeinträge mit diesem Pattern existieren
-            $sql = "SELECT COUNT(*) as count
-                    FROM wcf" . WCF_N . "_acp_menu_item
-                    WHERE menuItem LIKE ?";
-            $statement = $db->prepareStatement($sql);
-            $statement->execute([$appName . '.acp.menu.%']);
-            $menuCount = $statement->fetchArray()['count'];
+            // Prüfe alle möglichen Patterns
+            $allMenuItems = [];
+            $foundPatterns = [];
+            
+            foreach ($appNames as $appName) {
+                $patterns = [
+                    $appName . '.acp.menu.%',
+                    strtolower($appName) . '.acp.menu.%',
+                ];
+                
+                foreach ($patterns as $pattern) {
+                    $sql = "SELECT menuItem, menuItemController
+                            FROM wcf" . WCF_N . "_acp_menu_item
+                            WHERE menuItem LIKE ?";
+                    $statement = $db->prepareStatement($sql);
+                    $statement->execute([$pattern]);
+                    
+                    while ($row = $statement->fetchArray()) {
+                        if (!in_array($row['menuItem'], array_column($allMenuItems, 'menuItem'))) {
+                            $allMenuItems[] = $row;
+                            if (!in_array($pattern, $foundPatterns)) {
+                                $foundPatterns[] = $pattern;
+                            }
+                        }
+                    }
+                }
+            }
+
+            $menuCount = count($allMenuItems);
 
             echo '<div class="alert alert-warning">';
             echo '<strong>Warnung:</strong> Plugin nicht in Datenbank gefunden.<br>';
             echo 'Dies kann bedeuten, dass die Installation fehlgeschlagen ist.<br><br>';
 
             if ($menuCount > 0) {
-                echo '<strong>Gefundene ACP-Menüeinträge mit Pattern "' . htmlspecialchars($appName) . '.acp.menu.*": ' . $menuCount . '</strong><br><br>';
+                echo '<strong>Gefundene ACP-Menüeinträge (' . $menuCount . '):</strong><br>';
+                if (count($foundPatterns) > 0) {
+                    echo '<small>Patterns: ' . htmlspecialchars(implode(', ', $foundPatterns)) . '</small><br><br>';
+                }
+                
+                // Zeige gefundene Einträge
+                echo '<table class="table" style="margin-top: 10px;">';
+                echo '<thead><tr><th>Menu Item</th><th>Controller</th></tr></thead>';
+                echo '<tbody>';
+                foreach ($allMenuItems as $item) {
+                    echo '<tr>';
+                    echo '<td>' . htmlspecialchars($item['menuItem']) . '</td>';
+                    echo '<td>' . htmlspecialchars($item['menuItemController'] ?: '-') . '</td>';
+                    echo '</tr>';
+                }
+                echo '</tbody></table><br>';
+                
                 echo '<form method="POST">';
                 echo '<input type="hidden" name="package_identifier" value="' . htmlspecialchars($packageIdentifier) . '">';
                 echo '<input type="hidden" name="force_cleanup" value="1">';
                 echo '<button type="submit" class="btn-danger">Diese ' . $menuCount . ' Menüeinträge löschen</button>';
                 echo '</form>';
             } else {
-                echo '<strong>Keine ACP-Menüeinträge mit diesem Pattern gefunden.</strong><br>';
+                echo '<strong>Keine ACP-Menüeinträge mit diesen Patterns gefunden.</strong><br>';
                 echo 'Es gibt nichts zu bereinigen.';
             }
             echo '</div>';
@@ -1496,19 +1540,52 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                 $statement = $db->prepareStatement($sql);
                 $statement->execute([$packageID]);
             } else {
-                // Fallback: Nach Pattern suchen
+                // Fallback: Nach Pattern suchen (versuche mehrere App-Namen)
                 $parts = explode('.', $packageIdentifier);
-                $appName = end($parts);
-                $sql = "SELECT menuItem, menuItemController
-                        FROM wcf{$wcfN}_acp_menu_item
-                        WHERE menuItem LIKE ?";
-                $statement = $db->prepareStatement($sql);
-                $statement->execute([$appName . '.acp.menu.%']);
+                $appNames = [];
+                if (count($parts) >= 2) {
+                    $appNames[] = $parts[count($parts) - 2]; // Vorletzter Teil
+                }
+                $appNames[] = end($parts); // Letzter Teil
+                $appNames = array_unique($appNames);
+                
+                // Sammle alle Menüeinträge für alle Patterns
+                $allMenuItems = [];
+                foreach ($appNames as $appName) {
+                    $patterns = [
+                        $appName . '.acp.menu.%',
+                        strtolower($appName) . '.acp.menu.%',
+                    ];
+                    
+                    foreach ($patterns as $pattern) {
+                        $sql = "SELECT menuItem, menuItemController
+                                FROM wcf{$wcfN}_acp_menu_item
+                                WHERE menuItem LIKE ?";
+                        $statement = $db->prepareStatement($sql);
+                        $statement->execute([$pattern]);
+                        
+                        while ($row = $statement->fetchArray()) {
+                            if (!in_array($row['menuItem'], array_column($allMenuItems, 'menuItem'))) {
+                                $allMenuItems[] = $row;
+                            }
+                        }
+                    }
+                }
+                
+                // Erstelle ein Statement-Objekt für die spätere Verwendung
+                // (Wir haben bereits die Daten, aber für Kompatibilität)
+                $menuItems = $allMenuItems;
+                $statement = null; // Wird nicht mehr benötigt, da wir $menuItems direkt haben
             }
 
-            $menuItems = [];
-            while ($row = $statement->fetchArray()) {
-                $menuItems[] = $row;
+            // Wenn $menuItems noch nicht gesetzt wurde (aus Fallback), hole Daten aus Statement
+            if (!isset($menuItems)) {
+                $menuItems = [];
+                if ($statement) {
+                    while ($row = $statement->fetchArray()) {
+                        $menuItems[] = $row;
+                    }
+                }
             }
 
             if (empty($menuItems)) {
@@ -1564,11 +1641,30 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                         $statement = $db->prepareStatement($sql);
                         $statement->execute([$packageID]);
                     } else {
+                        // Fallback: Nach Pattern suchen (versuche mehrere App-Namen)
                         $parts = explode('.', $packageIdentifier);
-                        $appName = end($parts);
-                        $sql = "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE menuItem LIKE ?";
-                        $statement = $db->prepareStatement($sql);
-                        $statement->execute([$appName . '.acp.menu.%']);
+                        $appNames = [];
+                        if (count($parts) >= 2) {
+                            $appNames[] = $parts[count($parts) - 2]; // Vorletzter Teil
+                        }
+                        $appNames[] = end($parts); // Letzter Teil
+                        $appNames = array_unique($appNames);
+                        
+                        $deletedTotal = 0;
+                        foreach ($appNames as $appName) {
+                            $patterns = [
+                                $appName . '.acp.menu.%',
+                                strtolower($appName) . '.acp.menu.%',
+                            ];
+                            
+                            foreach ($patterns as $pattern) {
+                                $sql = "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE menuItem LIKE ?";
+                                $statement = $db->prepareStatement($sql);
+                                $statement->execute([$pattern]);
+                                $deletedTotal += $statement->getAffectedRows();
+                            }
+                        }
+                        $deletedCount = $deletedTotal;
                     }
 
                     $deletedCount = $statement->getAffectedRows();
