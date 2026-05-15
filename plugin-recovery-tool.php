@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.2.8
+ * @version 1.2.9
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -19,7 +19,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.2.8');
+define('RECOVERY_VERSION', '1.2.9');
 define('RECOVERY_MODE_SELECTION', 0);
 define('RECOVERY_MODE_ACP_REPAIR', 1);
 define('RECOVERY_MODE_PLUGIN_UNINSTALL', 2);
@@ -1916,6 +1916,7 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
     <meta name="robots" content="noindex">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= \htmlspecialchars($documentTitle) ?></title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" integrity="sha512-Evv84Mr4kqVGRNSgIGL/F/aIDqQb7xQ2vcrdIwxfjThSH8CSR7PBEakCr51Ck+w+/U6swU2Im1vVX0SVk9ABhg==" crossorigin="anonymous" referrerpolicy="no-referrer">
     <?php if ($assets['WCFSetup.css'] !== ''): ?>
     <link rel="stylesheet" href="<?= \htmlspecialchars($assets['WCFSetup.css']) ?>">
     <?php endif; ?>
@@ -2082,6 +2083,12 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         .recovery-nav-link:hover { text-decoration: underline; }
         .recovery-nav-acp { margin-left: auto; }
         .recovery-top-actions { text-align: right; margin-bottom: 20px; }
+
+        /* Font Awesome Icon-Abstände */
+        .fa-solid, .fas { margin-right: 6px; }
+        .alert .fa-solid, p.info .fa-solid, p.error .fa-solid, p.success .fa-solid, p.warning .fa-solid { flex-shrink: 0; }
+        .mode-button .fa-solid, .recoveryModeCard .fa-solid { display: block; font-size: 28px; margin: 0 auto 10px; }
+        button .fa-solid, .button .fa-solid { margin-right: 6px; }
     </style>
 </head>
 <body>
@@ -2100,7 +2107,7 @@ function recoveryRenderPageEnd(?array $assets = null): void
     ?>
 </div>
 <footer>
-    <a href="https://github.com/benjarogit/sc-woltlab-plugin-recovery" target="_blank" rel="noopener">Plugin Recovery Tool</a> &copy; <?= \date('Y') ?> Sunny C.
+    <a href="https://github.com/benjarogit/sc-woltlab-plugin-recovery" target="_blank" rel="noopener"><i class="fa-solid fa-screwdriver-wrench"></i> Plugin Recovery Tool</a> &copy; <?= \date('Y') ?> Sunny C.
     <?php if ($baseUrl !== ''): ?>
     | <a href="<?= \htmlspecialchars($baseUrl) ?>">Installation</a>
     <?php endif; ?>
@@ -2113,7 +2120,7 @@ function recoveryRenderPageEnd(?array $assets = null): void
 
 function recoveryRenderBackLink(string $href): void
 {
-    echo '<a href="' . \htmlspecialchars($href) . '" class="back-link">&#8592; Zurück zur Auswahl</a>';
+    echo '<a href="' . \htmlspecialchars($href) . '" class="back-link"><i class="fa-solid fa-arrow-left"></i> Zurück zur Auswahl</a>';
 }
 
 function recoveryRenderGlobalNav(int $mode, string $authHash, string $baseUrl): void
@@ -2121,16 +2128,16 @@ function recoveryRenderGlobalNav(int $mode, string $authHash, string $baseUrl): 
     $acpUrl = $baseUrl . 'acp/';
     echo '<nav class="recovery-global-nav" aria-label="Recovery-Navigation">';
     if ($mode !== RECOVERY_MODE_SELECTION) {
-        echo '<a href="?t=' . \htmlspecialchars($authHash) . '" class="recovery-nav-link">&#8592; Zurück zur Modus-Auswahl</a>';
+        echo '<a href="?t=' . \htmlspecialchars($authHash) . '" class="recovery-nav-link"><i class="fa-solid fa-arrow-left"></i> Zurück zur Modus-Auswahl</a>';
     }
-    echo '<a href="' . \htmlspecialchars($acpUrl) . '" class="recovery-nav-link recovery-nav-acp">&#8594; Zum ACP</a>';
+    echo '<a href="' . \htmlspecialchars($acpUrl) . '" class="recovery-nav-link recovery-nav-acp"><i class="fa-solid fa-gauge-high"></i> Zum ACP</a>';
     echo '</nav>';
 }
 
-function recoveryRenderAcpSuccessLink(string $baseUrl, string $label = '→ Zum ACP'): void
+function recoveryRenderAcpSuccessLink(string $baseUrl, string $label = 'Zum ACP'): void
 {
     echo '<br><a href="' . \htmlspecialchars($baseUrl . 'acp/') . '" class="button btn-success">'
-        . \htmlspecialchars($label) . '</a>';
+        . '<i class="fa-solid fa-gauge-high"></i> ' . \htmlspecialchars($label) . '</a>';
 }
 
 // ============================================================================
@@ -3188,27 +3195,27 @@ if (!$isAuthenticated) {
     <p class="subtitle">Authentifizierung erforderlich</p>
 
     <div class="alert alert-warning">
-        <strong>Schritt 1:</strong> Auth-Datei herunterladen<br>
+        <strong><i class="fa-solid fa-file-arrow-down"></i> Schritt 1:</strong> Auth-Datei herunterladen<br>
         <a href="?action=download-auth-file&amp;t=<?= htmlspecialchars($authHash) ?>" class="button" style="display: inline-block; margin-top: 10px;" id="downloadBtn">
-            plugin-recovery-auth.php herunterladen
+            <i class="fa-solid fa-file-arrow-down"></i> plugin-recovery-auth.php herunterladen
         </a>
     </div>
 
     <div class="alert alert-info" style="margin-top: 20px;" id="step2" style="display: none;">
-        <strong>Schritt 2:</strong> Datei hochladen<br>
+        <strong><i class="fa-solid fa-file-arrow-up"></i> Schritt 2:</strong> Datei hochladen<br>
         Laden Sie die heruntergeladene Datei <code><?= htmlspecialchars($authFilename) ?></code> in dasselbe Verzeichnis hoch,
         in dem sich diese <code>plugin-recovery-tool.php</code> befindet.
     </div>
 
     <div class="alert alert-info" style="margin-top: 20px;" id="step3" style="display: none;">
-        <strong>Schritt 3:</strong> Recovery starten<br>
+        <strong><i class="fa-solid fa-rocket"></i> Schritt 3:</strong> Recovery starten<br>
         <a href="?t=<?= htmlspecialchars($authHash) ?>&amp;auth_ok=1" class="button btn-success" style="margin-top: 10px;">
-            Recovery Tool starten
+            <i class="fa-solid fa-rocket"></i> Recovery Tool starten
         </a>
     </div>
 
     <div class="alert alert-error" style="margin-top: 30px;">
-        <strong>Sicherheitshinweis:</strong><br>
+        <i class="fa-solid fa-shield-halved"></i> <strong>Sicherheitshinweis:</strong><br>
         Löschen Sie beide Dateien (<code>plugin-recovery-tool.php</code> und <code><?= htmlspecialchars($authFilename) ?></code>)
         nach der Verwendung. Diese Dateien können ein Sicherheitsrisiko darstellen!
     </div>
@@ -3281,11 +3288,11 @@ recoveryRenderGlobalNav($mode, $authHash, $recoveryBaseUrl);
 if ($mode === RECOVERY_MODE_SELECTION) {
 ?>
     <?php if (isset($_GET['auth_ok'])): ?>
-    <div class="alert alert-success"><strong>Authentifizierung erfolgreich.</strong> Sie können jetzt einen Recovery-Modus wählen.</div>
+    <div class="alert alert-success"><i class="fa-solid fa-circle-check"></i> <strong>Authentifizierung erfolgreich.</strong> Sie können jetzt einen Recovery-Modus wählen.</div>
     <?php endif; ?>
 
     <div class="recovery-top-actions">
-        <a href="<?= htmlspecialchars($recoveryBaseUrl) ?>acp/" class="button">&#8594; Zum ACP</a>
+        <a href="<?= htmlspecialchars($recoveryBaseUrl) ?>acp/" class="button"><i class="fa-solid fa-gauge-high"></i> Zum ACP</a>
     </div>
 
     <h1>WoltLab Suite Recovery Tool</h1>
@@ -3293,36 +3300,41 @@ if ($mode === RECOVERY_MODE_SELECTION) {
 
     <div class="mode-grid">
         <a href="?mode=<?= RECOVERY_MODE_ACP_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
+            <i class="fa-solid fa-wrench"></i>
             <strong>ACP Repair</strong>
             <span>Repariert defekte ACP-Menüeinträge eines Plugins</span>
         </a>
         <a href="?mode=<?= RECOVERY_MODE_PLUGIN_UNINSTALL ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
+            <i class="fa-solid fa-trash-can"></i>
             <strong>Plugin Uninstall</strong>
             <span>Deinstalliert Plugin komplett (DB + Dateien)</span>
         </a>
         <a href="?mode=<?= RECOVERY_MODE_USER_MANAGEMENT ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
+            <i class="fa-solid fa-users-gear"></i>
             <strong>User Management</strong>
             <span>Admin-Passwort zurücksetzen &amp; Berechtigungen</span>
         </a>
         <a href="?mode=<?= RECOVERY_MODE_CACHE_CLEAR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
+            <i class="fa-solid fa-broom"></i>
             <strong>Cache Clear</strong>
             <span>Löscht alle Caches &amp; kompilierte Templates</span>
         </a>
         <a href="?mode=<?= RECOVERY_MODE_PACKAGE_LIST_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
+            <i class="fa-solid fa-list-check"></i>
             <strong>Paketliste reparieren</strong>
             <span>Entfernt verwaiste Queue-/Application-Einträge (ACP-Paketliste)</span>
         </a>
     </div>
 
     <div class="alert alert-info">
-        <strong>Hinweis:</strong> Dieses Tool arbeitet direkt auf Datenbank-Ebene und sollte nur im Notfall verwendet werden.
+        <i class="fa-solid fa-circle-info"></i> <strong>Hinweis:</strong> Dieses Tool arbeitet direkt auf Datenbank-Ebene und sollte nur im Notfall verwendet werden.
     </div>
 
     <div class="alert alert-warning" style="margin-top: 30px;">
-        <strong>Fertig mit Recovery?</strong><br>
+        <i class="fa-solid fa-triangle-exclamation"></i> <strong>Fertig mit Recovery?</strong><br>
         Wenn Sie alle Reparaturen abgeschlossen haben, sollten Sie das Recovery Tool und alle zugehörigen Dateien löschen.<br><br>
         <a href="?action=cleanup&amp;t=<?= htmlspecialchars($authHash) ?>" class="button btn-danger" onclick="return confirm('ACHTUNG: Das Recovery Tool wird entfernt (Auth-Datei, Uploads, diese PHP-Datei) und Sie werden ins ACP weitergeleitet. Fortfahren?')">
-            Recovery Tool vollständig entfernen
+            <i class="fa-solid fa-xmark"></i> Recovery Tool vollständig entfernen
         </a>
     </div>
 
@@ -3346,7 +3358,7 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                 Der eindeutige Bezeichner des Plugins, dessen ACP-Menüeinträge repariert werden sollen.
             </small>
         </div>
-        <button type="submit">Mit Identifier reparieren</button>
+        <button type="submit"><i class="fa-solid fa-wrench"></i> Mit Identifier reparieren</button>
     </form>
 
     <hr>
@@ -3356,7 +3368,7 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
             <label>Option 2: Package-Datei hochladen (.tar, .tar.gz, .tgz – max. 100 MiB)</label>
             <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz">
         </div>
-        <button type="submit">Mit Datei reparieren</button>
+        <button type="submit"><i class="fa-solid fa-wrench"></i> Mit Datei reparieren</button>
     </form>
 <?php
     } else {
@@ -3413,7 +3425,7 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                         echo '<input type="hidden" name="extract_dir" value="' . \htmlspecialchars($extractDir) . '">';
                     }
                     echo '<input type="hidden" name="force_cleanup" value="1">';
-                    echo '<button type="submit" class="btn-danger">Diese ' . $menuCount . ' Menüeinträge löschen</button>';
+                    echo '<button type="submit" class="btn-danger"><i class="fa-solid fa-trash-can"></i> Diese ' . $menuCount . ' Menüeinträge löschen</button>';
                     echo '</form>';
                 } else {
                     echo '<strong>Keine ACP-Menüeinträge mit den ermittelten Mustern gefunden.</strong><br>';
@@ -3446,7 +3458,7 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                         echo '<input type="hidden" name="force_cleanup" value="1">';
                     }
                     echo '<input type="hidden" name="confirm_delete" value="1">';
-                    echo '<button type="submit" class="btn-danger">Alle löschen</button>';
+                    echo '<button type="submit" class="btn-danger"><i class="fa-solid fa-trash-can"></i> Alle löschen</button>';
                     echo '</form>';
                     echo '</div>';
                 } else {
@@ -3534,7 +3546,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
             <input type="text" name="package_identifier" placeholder="z.B. de.example.my-plugin" autocomplete="off">
             <small style="display:block;margin-top:5px">Der eindeutige Package-Identifier (Reverse-Domain-Notation).</small>
         </div>
-        <button type="submit">Analysieren &#8594;</button>
+        <button type="submit"><i class="fa-solid fa-magnifying-glass"></i> Analysieren</button>
     </form>
 
     <hr>
@@ -3545,7 +3557,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
             <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz">
             <small style="display:block;margin-top:5px">package.xml wird automatisch ausgelesen – DB-Analyse folgt.</small>
         </div>
-        <button type="submit">Analysieren &#8594;</button>
+        <button type="submit"><i class="fa-solid fa-magnifying-glass"></i> Analysieren</button>
     </form>
 <?php
     } else {
@@ -3706,7 +3718,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     }
 
                     // ── Dateisystem ───────────────────────────────────────────
-                    echo '<h2 style="margin:24px 0 10px">Dateisystem</h2>';
+                    echo '<h2 style="margin:24px 0 10px"><i class="fa-solid fa-folder-open"></i> Dateisystem</h2>';
                     if ($fsEval['deletable']) {
                         echo '<div class="alert alert-warning">';
                         echo '<label style="cursor:pointer"><input type="checkbox" name="delete_files" value="1"> ';
@@ -3718,7 +3730,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     }
 
                     echo '<div style="margin-top:28px">';
-                    echo '<button type="submit" class="btn-danger">Weiter: Backup &amp; Ausführen &#8594;</button>';
+                    echo '<button type="submit" class="btn-danger"><i class="fa-solid fa-play"></i> Weiter: Backup &amp; Ausführen</button>';
                     echo '</div>';
                     echo '</form>';
 
@@ -3754,7 +3766,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 
                     if ($backupSql !== '') {
                         $backupB64 = \base64_encode($backupSql);
-                        echo '<h2>SQL-Backup der betroffenen Zeilen</h2>';
+                        echo '<h2><i class="fa-solid fa-database"></i> SQL-Backup der betroffenen Zeilen</h2>';
                         echo '<div class="alert alert-info">';
                         echo '<strong>Backup für packageID = ' . $packageID . '</strong><br>';
                         echo '<small>Enthält alle Zeilen aus den ausgewählten Tabellen – bitte vor dem Ausführen herunterladen oder kopieren.</small>';
@@ -3762,15 +3774,15 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                         // Server-seitiger Download via POST
                         echo '<form method="POST" action="?action=download-sql&amp;t=' . \htmlspecialchars($authHash) . '" style="display:inline;margin-right:10px">';
                         echo '<input type="hidden" name="sql_b64" value="' . \htmlspecialchars($backupB64) . '">';
-                        echo '<button type="submit" class="button">&#8595; SQL-Backup herunterladen (.sql)</button>';
+                        echo '<button type="submit" class="button"><i class="fa-solid fa-download"></i> SQL-Backup herunterladen (.sql)</button>';
                         echo '</form>';
                         // Client-seitiger JS-Download (Fallback)
-                        echo '<button type="button" class="button" onclick="(function(){';
+                        echo '<button type="button" class="button" style="margin-left:8px" onclick="(function(){';
                         echo 'var s=atob(' . \json_encode($backupB64) . ');';
                         echo 'var b=new Blob([s],{type:\'text/plain\'});';
                         echo 'var a=document.createElement(\'a\');a.href=URL.createObjectURL(b);';
                         echo 'a.download=\'recovery-backup-' . \date('Y-m-d-His') . '.sql\';a.click();';
-                        echo '})()">&#8595; JS-Download</button>';
+                        echo '})()"><i class=\"fa-solid fa-download\"></i> JS-Download</button>';
                         echo '<br><br>';
                         echo '<details><summary style="cursor:pointer">SQL-Inhalt anzeigen (' . \number_format(\strlen($backupSql)) . ' Bytes)</summary>';
                         echo '<textarea style="width:100%;height:220px;margin-top:10px;font-size:12px;font-family:monospace;background:#2D2D2D;color:#c0c0c0;border:1px solid #444;padding:10px;border-radius:3px;box-sizing:border-box" readonly>';
@@ -3790,7 +3802,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     }
 
                     // Zusammenfassung der geplanten Aktionen
-                    echo '<h2 style="margin-top:24px">Geplante Aktionen ' . ($isDryRun ? '<span style="color:#c93">(Dry-Run)</span>' : '') . '</h2>';
+                    echo '<h2 style="margin-top:24px"><i class="fa-solid fa-database"></i> Geplante Aktionen ' . ($isDryRun ? '<span style="color:#c93">(Dry-Run)</span>' : '') . '</h2>';
                     echo '<div class="alert ' . ($isDryRun ? 'alert-warning' : 'alert-error') . '">';
                     if ($isDryRun) {
                         echo '<strong>&#128065; Dry-Run – keine Änderungen werden vorgenommen</strong><br><br>';
@@ -3844,7 +3856,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     foreach ($validDropTables as $t) {
                         echo '<input type="hidden" name="drop_tables[]" value="' . \htmlspecialchars($t) . '">';
                     }
-                    $btnLabel = $isDryRun ? '&#128065; Dry-Run starten' : '&#9888; Jetzt ausführen (nicht rückgängig!)';
+                    $btnLabel = $isDryRun ? '<i class="fa-solid fa-play"></i> Dry-Run starten' : '<i class="fa-solid fa-trash-can"></i> Jetzt ausführen (nicht rückgängig!)';
                     $btnClass = $isDryRun ? 'button' : 'button btn-danger';
                     echo '<button type="submit" class="' . $btnClass . '">' . $btnLabel . '</button>';
                     echo '</form>';
@@ -4073,11 +4085,11 @@ elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
     $umUser = recoveryUserGetByID($db, $umUid);
     if ($umUser === null): ?>
     <div class="alert alert-error">Benutzer mit ID <code><?= $umUid ?></code> nicht gefunden.</div>
-    <a href="<?= $umBaseUrl ?>" class="back-link">&#8592; Zurück zur Suche</a>
+    <a href="<?= $umBaseUrl ?>" class="back-link"><i class="fa-solid fa-arrow-left"></i> Zurück zur Suche</a>
 <?php else:
     $currentGroupIDs = recoveryUserGetGroupIDs($db, (int)$umUser['userID']);
 ?>
-    <a href="<?= $umBaseUrl ?>" class="back-link">&#8592; Anderen Benutzer suchen</a>
+    <a href="<?= $umBaseUrl ?>" class="back-link"><i class="fa-solid fa-arrow-left"></i> Anderen Benutzer suchen</a>
 
     <h2>Benutzer: <code><?= \htmlspecialchars($umUser['username']) ?></code> <small style="font-size:16px; color:#9D9D9D;">(ID&nbsp;<?= (int)$umUser['userID'] ?>)</small></h2>
 
@@ -4107,12 +4119,12 @@ elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
     <?php endforeach; ?>
 
     <!-- ── Passwort zurücksetzen ──────────────────────────────────────── -->
-    <h2>Passwort zurücksetzen</h2>
+    <h2><i class="fa-solid fa-key"></i> Passwort zurücksetzen</h2>
     <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start;">
         <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>" style="flex:1; min-width:200px;">
             <input type="hidden" name="um_action" value="reset_password">
             <p style="margin-bottom:12px; font-size:13px; color:#9D9D9D;">Generiert ein zufälliges sicheres Passwort und zeigt es einmalig an.</p>
-            <button type="submit" class="btn-danger">Zufälliges Passwort setzen</button>
+            <button type="submit" class="btn-danger"><i class="fa-solid fa-key"></i> Zufälliges Passwort setzen</button>
         </form>
         <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>" style="flex:2; min-width:280px;">
             <input type="hidden" name="um_action" value="reset_password_custom">
@@ -4120,47 +4132,47 @@ elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
                 <label for="um_custom_pwd">Eigenes Passwort setzen (min. 8 Zeichen)</label>
                 <input type="password" id="um_custom_pwd" name="custom_password" autocomplete="new-password" placeholder="Neues Passwort eingeben">
             </div>
-            <button type="submit">Passwort setzen</button>
+            <button type="submit"><i class="fa-solid fa-key"></i> Passwort setzen</button>
         </form>
     </div>
 
     <!-- ── E-Mail ändern ──────────────────────────────────────────────── -->
-    <h2>E-Mail-Adresse ändern</h2>
+    <h2><i class="fa-solid fa-envelope"></i> E-Mail-Adresse ändern</h2>
     <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>">
         <input type="hidden" name="um_action" value="change_email">
         <div class="form-group">
             <label for="um_email">Neue E-Mail-Adresse</label>
             <input type="text" id="um_email" name="new_email" value="<?= \htmlspecialchars($umUser['email']) ?>" placeholder="neue@email.de">
         </div>
-        <button type="submit">E-Mail ändern</button>
+        <button type="submit"><i class="fa-solid fa-envelope"></i> E-Mail ändern</button>
     </form>
 
     <!-- ── Konto aktivieren / Sperre aufheben ────────────────────────── -->
     <?php if ($umUser['banned'] || $umUser['activationCode'] != 0): ?>
-    <h2>Konto aktivieren &amp; Sperre aufheben</h2>
+    <h2><i class="fa-solid fa-user"></i> Konto aktivieren &amp; Sperre aufheben</h2>
     <p style="margin-bottom:12px; font-size:13px; color:#9D9D9D;">
         Setzt <code>activationCode&nbsp;=&nbsp;0</code>, <code>banned&nbsp;=&nbsp;0</code> und löscht den Sperr-Grund.
     </p>
     <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>">
         <input type="hidden" name="um_action" value="activate">
-        <button type="submit" class="btn-success">Benutzer aktivieren &amp; entsperren</button>
+        <button type="submit" class="btn-success"><i class="fa-solid fa-circle-check"></i> Benutzer aktivieren &amp; entsperren</button>
     </form>
     <?php endif; ?>
 
     <!-- ── 2FA deaktivieren ───────────────────────────────────────────── -->
     <?php if ($umUser['multifactorActive']): ?>
-    <h2>Zwei-Faktor-Authentifizierung deaktivieren</h2>
+    <h2><i class="fa-solid fa-shield-halved"></i> Zwei-Faktor-Authentifizierung deaktivieren</h2>
     <p style="margin-bottom:12px; font-size:13px; color:#9D9D9D;">
         Löscht alle 2FA-Setups (inkl. Backup-Codes) und setzt <code>multifactorActive&nbsp;=&nbsp;0</code>.
     </p>
     <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>">
         <input type="hidden" name="um_action" value="disable_2fa">
-        <button type="submit" class="btn-danger">2FA deaktivieren</button>
+        <button type="submit" class="btn-danger"><i class="fa-solid fa-shield-halved"></i> 2FA deaktivieren</button>
     </form>
     <?php endif; ?>
 
     <!-- ── Schnell zur Administrator-Gruppe ──────────────────────────── -->
-    <h2>Administrator-Gruppe (ID&nbsp;4)</h2>
+    <h2><i class="fa-solid fa-users-gear"></i> Administrator-Gruppe (ID&nbsp;4)</h2>
     <?php if (\in_array(4, $currentGroupIDs, true)): ?>
     <div class="alert alert-info">Benutzer ist bereits in der Administrator-Gruppe (ID&nbsp;4).</div>
     <?php else: ?>
@@ -4169,12 +4181,12 @@ elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
     </p>
     <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>">
         <input type="hidden" name="um_action" value="add_admin">
-        <button type="submit" class="btn-success">Zur Administrator-Gruppe hinzufügen</button>
+        <button type="submit" class="btn-success"><i class="fa-solid fa-users-gear"></i> Zur Administrator-Gruppe hinzufügen</button>
     </form>
     <?php endif; ?>
 
     <!-- ── Alle Gruppen verwalten ─────────────────────────────────────── -->
-    <h2>Alle Gruppen verwalten</h2>
+    <h2><i class="fa-solid fa-sliders"></i> Alle Gruppen verwalten</h2>
     <?php $allGroups = recoveryUserGetAllGroups($db); ?>
     <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>">
         <input type="hidden" name="um_action" value="set_groups">
@@ -4215,7 +4227,7 @@ elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
             <?php endforeach; ?>
             </tbody>
         </table>
-        <button type="submit" style="margin-top:15px;">Gruppen speichern</button>
+        <button type="submit" style="margin-top:15px;"><i class="fa-solid fa-sliders"></i> Gruppen speichern</button>
     </form>
 
 <?php endif; // $umUser !== null
@@ -4229,7 +4241,7 @@ else: // $umUid === 0 → Suchmaske ?>
     <div class="alert alert-success"><?= $msg ?></div>
     <?php endforeach; ?>
 
-    <h2>Benutzer suchen</h2>
+    <h2><i class="fa-solid fa-magnifying-glass"></i> Benutzer suchen</h2>
     <form method="POST" action="<?= $umBaseUrl ?>">
         <div class="form-group">
             <label for="um_search">Benutzername oder E-Mail (Präfix-Suche, max. 50 Treffer)</label>
@@ -4237,7 +4249,7 @@ else: // $umUid === 0 → Suchmaske ?>
                 value="<?= \htmlspecialchars($_POST['um_search'] ?? '') ?>"
                 placeholder="z.&thinsp;B. Admin oder admin@example.com" autofocus>
         </div>
-        <button type="submit">Suchen</button>
+        <button type="submit"><i class="fa-solid fa-magnifying-glass"></i> Suchen</button>
     </form>
 
     <?php
@@ -4319,7 +4331,7 @@ elseif ($mode === RECOVERY_MODE_CACHE_CLEAR) {
 
     <form method="POST">
         <input type="hidden" name="confirm_clear" value="1">
-        <button type="submit" class="btn-danger">Cache jetzt löschen</button>
+        <button type="submit" class="btn-danger"><i class="fa-solid fa-broom"></i> Cache jetzt löschen</button>
     </form>
 <?php
     } else {
@@ -4363,7 +4375,7 @@ elseif ($mode === RECOVERY_MODE_PACKAGE_LIST_REPAIR) {
 
     <form method="POST">
         <input type="hidden" name="confirm_repair" value="1">
-        <button type="submit" class="btn-danger">Verwaiste Einträge jetzt bereinigen</button>
+        <button type="submit" class="btn-danger"><i class="fa-solid fa-list-check"></i> Verwaiste Einträge jetzt bereinigen</button>
     </form>
 <?php
     } else {
