@@ -9,18 +9,19 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.3
+ * @version 1.5.6
  * @requires PHP >= 8.3
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
- * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
+ * Universelles Recovery nach Stressoren wie kaputter Installation: DB gemäß WoltLab-PIP-Zuordnung,
+ * Cache/Pfade aller Apps, Option-Konstanten-Fallback für sämtliche Plugins (nicht nur einzelne Pakete).
  */
 
 // ============================================================================
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.3');
+define('RECOVERY_VERSION', '1.5.6');
 define('RECOVERY_MIN_PHP_VERSION', '8.3.0');
 
 if (\PHP_VERSION_ID < 80300) {
@@ -1058,6 +1059,379 @@ function recoveryStripConstantsFromOptionsIncPhp(array $constantNames): void
     }
 
     \file_put_contents($file, \implode("\n", $filtered) . "\n");
+}
+
+/**
+ * WoltLab speichert Optionen als Konstanten (UPPERCASE, Punkt zu Unterstrich). Kompilierte ACP-Templates
+ * können diese Konstanten ohne defined()-Check nutzen → PHP 8+: Fatal Error wenn options.inc.php
+ * unvollständig oder nach beschädigter Deinstallation ohne Option-Zeilen.
+ */
+function recoveryOptionNameToConstant(string $optionName): string
+{
+    return \strtoupper(\str_replace('.', '_', $optionName));
+}
+
+/**
+ * Ausgabe eines Skalars für \define(, …) ohne abschließendes Semikolon.
+ */
+function recoveryPhpScalarExpressionForOptionType(string $optionType, string $optionValue): string
+{
+    $t = \strtolower($optionType);
+
+    if ($t === 'boolean' || \str_ends_with($t, 'boolean')) {
+        $on = ($optionValue === '1' || \strtolower($optionValue) === 'true'
+            || \strtolower($optionValue) === 'yes' || \strtolower($optionValue) === 'on');
+
+        return $on ? '1' : '0';
+    }
+
+    if (\str_contains($t, 'integer') || $t === 'negativeinteger' || \str_contains($t, 'bigint')) {
+        return (string) (int) $optionValue;
+    }
+
+    if (\str_contains($t, 'float') || $t === 'currency'
+        || $t === 'number' || \str_contains($t, 'fraction')) {
+        $f = (float) $optionValue;
+        if (!\is_finite($f)) {
+            return '0.0';
+        }
+
+        return \rtrim(\rtrim(\sprintf('%.8F', $f), '0'), '.');
+    }
+
+    return \var_export((string) $optionValue, true);
+}
+
+/**
+ * PHP-Schlüsselwörter und typisches Rauschen in kompilierten Templates (keine Plugin-Option-Konstanten).
+ *
+ * @return array<string, true>
+ */
+function recoveryGetCompiledTemplateConstantIgnoreList(): array
+{
+    static $set = null;
+    if ($set !== null) {
+        return $set;
+    }
+
+    $keys = [
+        'ABSTRACT', 'ARRAY', 'AS', 'BREAK', 'CALLABLE', 'CASE', 'CATCH', 'CLASS', 'CLONE', 'CONST',
+        'CONTINUE', 'DECLARE', 'DEFAULT', 'DIE', 'DO', 'ECHO', 'ELSE', 'ELSEIF', 'EMPTY', 'ENDDECLARE',
+        'ENDFOR', 'ENDFOREACH', 'ENDIF', 'ENDSWITCH', 'ENDWHILE', 'ENUM', 'EVAL', 'EXIT', 'EXTENDS',
+        'FALSE', 'FINAL', 'FINALLY', 'FN', 'FOR', 'FOREACH', 'FUNCTION', 'GLOBAL', 'GOTO', 'IF',
+        'IMPLEMENTS', 'INCLUDE', 'INCLUDE_ONCE', 'INSTANCEOF', 'INSTEADOF', 'INTERFACE', 'ISSET',
+        'ITERABLE', 'LIST', 'MATCH', 'MIXED', 'NAMESPACE', 'NEW', 'NULL', 'OBJECT', 'PARENT',
+        'PRINT', 'PRIVATE', 'PROTECTED', 'PUBLIC', 'READONLY', 'REQUIRE', 'REQUIRE_ONCE', 'RESOURCE',
+        'RETURN', 'SELF', 'STATIC', 'STRING', 'SWITCH', 'THROW', 'TRAIT', 'TRUE', 'TRY', 'UNSET',
+        'USE', 'VAR', 'VOID', 'WHILE', 'YIELD', 'YIELD_FROM',
+        'HTML', 'SESSION', 'COOKIE', 'REQUEST', 'RESPONSE', 'TEMPLATE', 'LANGUAGE', 'EXCEPTION',
+        'CALLBACK', 'CONTEXT', 'HANDLER', 'LISTENER', 'CONTROLLER', 'ACTION', 'PARAMETER',
+        'ATTRIBUTE', 'SANITIZE', 'SANITIZED', 'UNSUPPORTED', 'UNKNOWN', 'DEFAULTS', 'BOOLEAN',
+        'DOUBLE', 'INTEGER', 'NUMBER', 'PACKAGE', 'HEADER', 'FOOTER', 'STRINGUTIL', 'ARRAYLIST',
+        'BASELINE', 'PIPELINE', 'MIDDLEWARE', 'REDIRECT', 'LOCATION', 'SECURITY', 'SIGNATURE',
+        'INTERNAL', 'EXTERNAL', 'PRIMARY', 'SECONDARY', 'OFFSETGET', 'OFFSETSET', 'OFFSETUNSET',
+        'SERIALIZE', 'UNSERIALIZE', 'INVOKABLE', 'BACKTRACE', 'FILENAME', 'LINENUMBER',
+    ];
+
+    $set = \array_fill_keys($keys, true);
+
+    return $set;
+}
+
+/**
+ * @return list<string>
+ */
+function recoveryCollectCompiledPhpTemplatePaths(string $wcfRoot, int $maxFiles): array
+{
+    $paths = [];
+    foreach (recoveryGetFilesystemCacheDirectoryList($wcfRoot) as $dir) {
+        $norm = \str_replace('\\', '/', $dir);
+        if (!\str_contains($norm, 'templates/compiled')) {
+            continue;
+        }
+        if (!\is_dir($dir)) {
+            continue;
+        }
+
+        try {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS | \FilesystemIterator::CURRENT_AS_PATHNAME),
+                \RecursiveIteratorIterator::LEAVES_ONLY
+            );
+            foreach ($iterator as $pathname) {
+                if (!\is_string($pathname) || !\is_file($pathname)) {
+                    continue;
+                }
+                if (\strcasecmp((string) \pathinfo($pathname, \PATHINFO_EXTENSION), 'php') !== 0) {
+                    continue;
+                }
+                $paths[] = $pathname;
+                if (\count($paths) >= $maxFiles) {
+                    return $paths;
+                }
+            }
+        } catch (\Throwable $ignored) {
+        }
+    }
+
+    return $paths;
+}
+
+/**
+ * Grobes Pattern wie bei WoltLab-Option-Konstanten in Templates (mindestens 6 Zeichen).
+ *
+ * @return list<string>
+ */
+function recoveryExtractCandidateConstantsFromPhpSource(string $source): array
+{
+    if (!\preg_match_all('/\b([A-Z][A-Z0-9_]{5,})\b/', $source, $matches)) {
+        return [];
+    }
+
+    return $matches[1];
+}
+
+function recoveryShouldIgnoreDiscoveredTemplateConstant(string $constant): bool
+{
+    if ($constant === '' || !\preg_match('/^[A-Z][A-Z0-9_]+$/', $constant)) {
+        return true;
+    }
+    if (\strlen($constant) > 120) {
+        return true;
+    }
+    if (\str_starts_with($constant, 'WCF_') || \str_starts_with($constant, 'PHP_')
+        || \str_starts_with($constant, 'MYSQL_') || \str_starts_with($constant, 'PDO')) {
+        return true;
+    }
+
+    return isset(recoveryGetCompiledTemplateConstantIgnoreList()[$constant]);
+}
+
+/**
+ * Skalar für „verwaiste“ Konstanten (kein Eintrag mehr in wcf_option), nach Namensheuristik.
+ * Schützt das ACP vor Fatal Errors – konservativ (eher 0/leerer String).
+ */
+function recoveryHeuristicScalarExpressionForOrphanPluginConstant(string $constant): string
+{
+    if (\preg_match('/_VERSION$/', $constant)) {
+        return \var_export('0.0.0', true);
+    }
+    if (\preg_match('/_PATTERN$/', $constant)) {
+        return \var_export('[a-zA-Z0-9_-]{1,64}', true);
+    }
+
+    $upper = \strtoupper($constant);
+    foreach (['_ENABLED', '_ACTIVE', '_DISABLE', '_VISIBLE', '_ALLOW', '_DENY', '_REQUIRED', '_OPTIONAL', '_DEBUG', '_SHOW', '_HIDE', '_FREE', '_CONFIRM', '_MUST'] as $needle) {
+        if (\str_contains($upper, $needle)) {
+            return '0';
+        }
+    }
+    foreach (['_URL', '_PATH', '_DIR', '_URI', '_HTML', '_TEXT', '_MESSAGE', '_PREFIX', '_SUFFIX', '_TOKEN', '_HASH', '_ICON', '_CSS', '_JS', '_KEY', '_SECRET', '_EMAIL', '_TITLE', '_DESCRIPTION', '_BODY'] as $needle) {
+        if (\str_contains($upper, $needle)) {
+            return \var_export('', true);
+        }
+    }
+    foreach (['_COUNT', '_LENGTH', '_LIMIT', '_SIZE', '_TIME', '_DELAY', '_PORT', '_MIN', '_MAX', '_STEP', '_WIDTH', '_HEIGHT', '_TOTAL', '_OFFSET', '_INDEX', '_NUMBER'] as $needle) {
+        if (\str_contains($upper, $needle)) {
+            return '0';
+        }
+    }
+
+    return '0';
+}
+
+/**
+ * Versucht Option-Zeile aus Konstantennamen (Konvention: CONSTANT ↔ option_name kleingeschrieben).
+ *
+ * @return array{optionValue: string, optionType: string}|null
+ */
+function recoveryTryFetchOptionRowForConstantGuess(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    string $constant
+): ?array {
+    $guess = \strtolower($constant);
+    if ($guess === '' || !\preg_match('/^[a-z0-9._]+$/', $guess)) {
+        return null;
+    }
+
+    try {
+        $statement = $db->prepareStatement(
+            "SELECT optionValue, optionType FROM wcf{$wcfN}_option WHERE optionName = ?"
+        );
+        $statement->execute([$guess]);
+        $row = $statement->fetchArray();
+
+        return \is_array($row) ? $row : null;
+    } catch (\Throwable $ignored) {
+        return null;
+    }
+}
+
+/**
+ * Findet in kompilierten WoltLab-Templates vorkommende Kandidaten-Konstanten (plugin-neutral).
+ *
+ * @return list<string>
+ */
+function recoveryDiscoverOrphanOptionLikeConstantsFromCompiledTemplates(
+    string $wcfRoot,
+    int $maxFiles,
+    int $maxBytesPerFile,
+    array &$detailLog
+): array {
+    $detailLog = [];
+    $paths = recoveryCollectCompiledPhpTemplatePaths($wcfRoot, $maxFiles);
+    $detailLog[] = 'Template-Konstanten-Scan: ' . \count($paths) . ' PHP-Dateien unter templates/compiled';
+
+    $found = [];
+    foreach ($paths as $path) {
+        $content = @\file_get_contents($path, false, null, 0, $maxBytesPerFile);
+        if ($content === false || $content === '') {
+            continue;
+        }
+        foreach (recoveryExtractCandidateConstantsFromPhpSource($content) as $c) {
+            if (recoveryShouldIgnoreDiscoveredTemplateConstant($c)) {
+                continue;
+            }
+            $found[$c] = true;
+        }
+    }
+
+    $list = \array_keys($found);
+    \sort($list);
+
+    return $list;
+}
+
+function recoveryStripPluginRecoveryOptionFallbackBlock(): void
+{
+    if (!\defined('WCF_DIR')) {
+        \define('WCF_DIR', recoveryResolveWcfDir());
+    }
+
+    $file = WCF_DIR . 'options.inc.php';
+    if (!\is_file($file) || !\is_readable($file)) {
+        return;
+    }
+
+    $content = (string) \file_get_contents($file);
+    $pattern = '~// <plugin-recovery-tool> option constant fallbacks begin.*// <plugin-recovery-tool> option constant fallbacks end\s*~sU';
+    $trimmed = \preg_replace($pattern, '', $content);
+    if ($trimmed !== null && $trimmed !== $content) {
+        \file_put_contents($file, \rtrim($trimmed) . "\n");
+    }
+}
+
+/**
+ * Schreibt einen markierten Fallback-Block in options.inc.php – **plugin-neutral**:
+ * 1) alle Zeilen aus {@see wcf{N}_option} (Core + sämtliche Plugins),
+ * 2) zusätzlich Namen aus kompilierten Templates, die wie Options-Konstanten aussehen,
+ *    aber keine passende Option-Zeile mehr haben (nach Deinstallation / kaputter Installation).
+ */
+function recoveryEnsureOptionConstantFallbacks(\wcf\system\database\Database $db, int $wcfN, array &$log): void
+{
+    if (!\defined('WCF_DIR')) {
+        \define('WCF_DIR', recoveryResolveWcfDir());
+    }
+
+    $file = WCF_DIR . 'options.inc.php';
+    if (!\is_file($file)) {
+        $log[] = 'Option-Konstanten-Fallback: options.inc.php nicht gefunden';
+
+        return;
+    }
+    if (!\is_writable($file)) {
+        $log[] = 'Option-Konstanten-Fallback: options.inc.php nicht beschreibbar';
+
+        return;
+    }
+
+    recoveryStripPluginRecoveryOptionFallbackBlock();
+
+    $lines = [];
+    $lines[] = '// <plugin-recovery-tool> option constant fallbacks begin';
+    $lines[] = '// Notfall-Fallback für fehlende Option-Konstanten (Recovery Tool ' . RECOVERY_VERSION . ').';
+    $lines[] = '// Alle Plugins: DB + kompilierte Templates. Block wird beim nächsten Lauf ersetzt; bei stabiler Installation löschen.';
+
+    $seenConstant = [];
+    $dbBackedCount = 0;
+
+    try {
+        $statement = $db->prepareStatement("SELECT optionName, optionValue, optionType FROM wcf{$wcfN}_option");
+        $statement->execute();
+        while ($row = $statement->fetchArray()) {
+            $optionName = (string) ($row['optionName'] ?? '');
+            if ($optionName === '' || !\preg_match('/^[a-zA-Z0-9._]+$/', $optionName)) {
+                continue;
+            }
+            $const = recoveryOptionNameToConstant($optionName);
+            if ($const === '' || !\preg_match('/^[A-Z0-9_]+$/', $const)) {
+                continue;
+            }
+            if (isset($seenConstant[$const])) {
+                continue;
+            }
+            $seenConstant[$const] = true;
+            $dbBackedCount++;
+            $type = (string) ($row['optionType'] ?? 'text');
+            $value = isset($row['optionValue']) ? (string) $row['optionValue'] : '';
+
+            $expr = recoveryPhpScalarExpressionForOptionType($type, $value);
+            $lines[] = "if (!\\defined('" . $const . "')) {\n\t\\define('" . $const . "', " . $expr . ');' . "\n}";
+        }
+    } catch (\Throwable $e) {
+        $log[] = 'Option-Konstanten-Fallback: Lesen aus wcf' . $wcfN . '_option fehlgeschlagen (' . $e->getMessage()
+            . ') – es werden nur Template-Scan/Fallbacks geschrieben';
+    }
+
+    $wcfRoot = \rtrim(WCF_DIR, '/\\') . \DIRECTORY_SEPARATOR;
+    $scanDetail = [];
+    $orphanCandidates = recoveryDiscoverOrphanOptionLikeConstantsFromCompiledTemplates(
+        $wcfRoot,
+        450,
+        131072,
+        $scanDetail
+    );
+    foreach ($scanDetail as $detailLine) {
+        $log[] = 'Option-Konstanten-Fallback: ' . $detailLine;
+    }
+
+    $templateScanCount = 0;
+    $maxOrphanDefines = 300;
+    foreach ($orphanCandidates as $const) {
+        if (isset($seenConstant[$const])) {
+            continue;
+        }
+        if ($templateScanCount >= $maxOrphanDefines) {
+            $log[] = 'Option-Konstanten-Fallback: Template-Scan nach ' . $maxOrphanDefines
+                . ' Zusatzkonstanten gestoppt (Obergrenze; Installation hat sehr viele Kandidaten)';
+
+            break;
+        }
+
+        $guessRow = recoveryTryFetchOptionRowForConstantGuess($db, $wcfN, $const);
+        if (\is_array($guessRow)) {
+            $expr = recoveryPhpScalarExpressionForOptionType(
+                (string) ($guessRow['optionType'] ?? 'text'),
+                isset($guessRow['optionValue']) ? (string) $guessRow['optionValue'] : ''
+            );
+        } else {
+            $expr = recoveryHeuristicScalarExpressionForOrphanPluginConstant($const);
+        }
+
+        $seenConstant[$const] = true;
+        $templateScanCount++;
+        $lines[] = "if (!\\defined('" . $const . "')) {\n\t\\define('" . $const . "', " . $expr . ');' . "\n}";
+    }
+
+    $lines[] = '// <plugin-recovery-tool> option constant fallbacks end';
+
+    $snippet = "\n" . \implode("\n", $lines) . "\n";
+    \file_put_contents($file, \rtrim((string) \file_get_contents($file)) . $snippet, \LOCK_EX);
+
+    $total = \count($seenConstant);
+    $log[] = 'Option-Konstanten-Fallback: options.inc.php ergänzt (gesamt ' . $total . ' Konstanten: '
+        . $dbBackedCount . ' aus DB, ' . $templateScanCount . ' aus Template-Scan bzw. Zusatzfallback)';
 }
 
 function recoveryExecuteDelete(
@@ -2966,15 +3340,42 @@ function findPackageTables($db, $packageIdentifier, $wcfN = null) {
 }
 
 /**
- * Löscht kompilierte Templates und Datei-Caches per Filesystem (ohne WCF/CacheHandler).
+ * Inhalt eines Verzeichnisses rekursiv löschen (das Verzeichnis selbst bleibt erhalten).
  */
-function clearCompiledTemplates(): int
+function recoveryDeleteDirectoryContentsRecursive(string $dir): int
 {
-    if (!\defined('WCF_DIR')) {
-        \define('WCF_DIR', recoveryResolveWcfDir());
+    if (!\is_dir($dir)) {
+        return 0;
     }
 
-    $wcfRoot = \rtrim(WCF_DIR, '/\\') . '/';
+    $deletedFiles = 0;
+    try {
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS | \FilesystemIterator::CURRENT_AS_FILEINFO),
+            \RecursiveIteratorIterator::CHILD_FIRST
+        );
+
+        foreach ($iterator as $fileinfo) {
+            $path = $fileinfo->getPathname();
+            if ($fileinfo->isDir()) {
+                @\rmdir($path);
+            } else {
+                @\unlink($path);
+            }
+            $deletedFiles++;
+        }
+    } catch (\Throwable $ignored) {
+    }
+
+    return $deletedFiles;
+}
+
+/**
+ * @return list<string>
+ */
+function recoveryGetFilesystemCacheDirectoryList(string $wcfRoot): array
+{
+    $wcfRoot = \rtrim(\str_replace('\\', '/', $wcfRoot), '/') . '/';
     $dirs = [
         $wcfRoot . 'tmp',
         $wcfRoot . 'cache',
@@ -2982,28 +3383,50 @@ function clearCompiledTemplates(): int
         $wcfRoot . 'acp/templates/compiled',
     ];
 
-    $deletedFiles = 0;
-    foreach ($dirs as $dir) {
-        if (!\is_dir($dir)) {
+    $protectedDirs = \array_flip(recoveryGetProtectedDirectoryNames());
+
+    foreach (\scandir($wcfRoot) ?: [] as $name) {
+        if ($name === '.' || $name === '..') {
+            continue;
+        }
+        if (!recoveryValidateAppDirectoryName($name) || isset($protectedDirs[$name])) {
             continue;
         }
 
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
-        );
+        $subdir = $wcfRoot . \str_replace('\\', '/', $name);
+        if (!\is_dir($subdir)) {
+            continue;
+        }
 
-        foreach ($iterator as $fileinfo) {
-            if ($fileinfo->isDir()) {
-                @\rmdir($fileinfo->getRealPath());
-            } else {
-                @\unlink($fileinfo->getRealPath());
+        foreach (['templates/compiled', 'acp/templates/compiled'] as $rel) {
+            $candidate = $subdir . '/' . $rel;
+            if (\is_dir($candidate)) {
+                $dirs[] = \rtrim($candidate, '/');
             }
-            $deletedFiles++;
         }
     }
 
-    return $deletedFiles;
+    return \array_values(\array_unique($dirs));
+}
+
+/**
+ * Löscht kompilierte Templates und Datei-Caches per Filesystem (ohne WCF/CacheHandler).
+ * Inkl. Anwendungen im Installations-Stamm wie z.&nbsp;B. shrinkr/acp/templates/compiled.
+ */
+function clearCompiledTemplates(): int
+{
+    if (!\defined('WCF_DIR')) {
+        \define('WCF_DIR', recoveryResolveWcfDir());
+    }
+
+    $wcfRoot = \rtrim(WCF_DIR, '/\\') . DIRECTORY_SEPARATOR;
+
+    $deletedTotal = 0;
+    foreach (recoveryGetFilesystemCacheDirectoryList($wcfRoot) as $dir) {
+        $deletedTotal += recoveryDeleteDirectoryContentsRecursive(\str_replace('/', DIRECTORY_SEPARATOR, $dir));
+    }
+
+    return $deletedTotal;
 }
 
 /**
@@ -4135,6 +4558,8 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                             $resources
                         );
                         clearCompiledTemplates();
+                        $optionFbLog = [];
+                        recoveryEnsureOptionConstantFallbacks($db, $wcfN, $optionFbLog);
                         $db->commitTransaction();
                         recoveryCleanupUploadWorkspace();
 
@@ -4142,6 +4567,9 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                         echo '<strong>✓ ACP-Repair erfolgreich!</strong><br>';
                         echo 'Gelöschte Menüeinträge: ' . $deletedCount . '<br>';
                         echo 'Cache wurde geleert.<br>';
+                        foreach ($optionFbLog as $fbEntry) {
+                            echo \htmlspecialchars($fbEntry) . '<br>';
+                        }
                         echo '</div>';
                     } catch (\Throwable $e) {
                         recoverySafeRollBackTransaction($db);
@@ -4778,6 +5206,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                                 recoveryStripConstantsFromOptionsIncPhp($optionConstants);
                                 $log[] = 'options.inc.php bereinigt (' . \count($optionConstants) . ' Konstanten entfernt)';
                             }
+                            recoveryEnsureOptionConstantFallbacks($db, $wcfN, $log);
                             $deletedCacheFiles = clearCompiledTemplates();
                             $log[] = 'Cache gelöscht: ' . $deletedCacheFiles . ' Dateien';
                             recoveryCleanupUploadWorkspace();
@@ -4793,6 +5222,25 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                         }
 
                         echo '</div>';
+
+                        if (!$isDryRun) {
+                            $cacheAgainUrl = \htmlspecialchars(
+                                recoveryBuildModeUrl(RECOVERY_MODE_CACHE_CLEAR, $authHash),
+                                ENT_QUOTES,
+                                'UTF-8'
+                            );
+                            echo '<div class="alert alert-info">';
+                            echo '<strong>ACP lädt nicht oder zeigt Fatal Error?</strong><br>';
+                            echo 'Zusätzlich wurde <code>options.inc.php</code> mit einem markierten Fallback-Block ergänzt (<code>if (!defined(&#8230;)) define(&#8230;)</code>) für <strong>alle</strong> Optionen aus der DB plus Konstanten-Erkennung aus kompilierten Templates. ';
+                            echo 'Nach Plugin-Problemen bleiben oft <em>kompilierte Templates</em> ohne passende globale Konstanten (Log: '
+                                . '<code>Undefined constant &quot;&hellip;&quot;</code>). ';
+                            echo 'Das Tool hat den Datei-Cache geleert; bei Bedarf <strong>Caches erneut leeren:</strong> Modus Cache Clear.';
+                            echo '<br><br><a href="' . $cacheAgainUrl . '" class="button">';
+                            echo '<i class="fa-solid fa-broom"></i> Cache Clear öffnen</a>';
+                            echo '<br><br><small>Plugin-Fix: Konstanten immer mit <code>defined(\'CONST\')</code> oder Standardwert in Templates nutzen. '
+                                . 'Nach fehlgeschlagener Installation hilft häufig manuell: <code>acp/templates/compiled/</code> leeren.';
+                            echo '</small></div>';
+                        }
 
                     } catch (\Throwable $e) {
                         echo '<div class="alert alert-error">';
@@ -5151,7 +5599,9 @@ elseif ($mode === RECOVERY_MODE_CACHE_CLEAR) {
         tmp/<br>
         cache/<br>
         templates/compiled/<br>
-        acp/templates/compiled/
+        acp/templates/compiled/<br>
+        sowie bei installierten Anwendungen z.&nbsp;B. <code>shrinkr/templates/compiled/</code> und <code>shrinkr/acp/templates/compiled/</code>.<br><br>
+        <strong>Hinweis:</strong> Anschließend werden fehlende Option-<code>define()</code>s aus der Datenbank <strong>aller Plugins</strong> sowie aus kompilierten Templates ermittelt und sicher in <code>options.inc.php</code> nachgetragen (gegen Fatal Error „Undefined constant“ im ACP).
     </div>
 
     <form method="POST">
@@ -5161,10 +5611,15 @@ elseif ($mode === RECOVERY_MODE_CACHE_CLEAR) {
 <?php
     } else {
         $deletedFiles = clearCompiledTemplates();
+        $optionFbLog = [];
+        recoveryEnsureOptionConstantFallbacks($db, WCF_N, $optionFbLog);
 
         echo '<div class="alert alert-success">';
         echo '<strong>Cache erfolgreich geleert.</strong><br>';
         echo 'Gelöschte Dateien: ' . $deletedFiles . '<br>';
+        foreach ($optionFbLog as $fbEntry) {
+            echo \htmlspecialchars($fbEntry) . '<br>';
+        }
         echo '</div>';
     }
 }
@@ -5206,6 +5661,8 @@ elseif ($mode === RECOVERY_MODE_PACKAGE_LIST_REPAIR) {
         try {
             $result = recoveryRepairOrphanedPackageReferences($db, WCF_N);
             $deletedFiles = clearCompiledTemplates();
+            $optionFbLog = [];
+            recoveryEnsureOptionConstantFallbacks($db, WCF_N, $optionFbLog);
 
             echo '<div class="alert alert-success">';
             echo '<strong>Paketliste-Reparatur abgeschlossen.</strong><br><br>';
@@ -5213,6 +5670,9 @@ elseif ($mode === RECOVERY_MODE_PACKAGE_LIST_REPAIR) {
                 echo '• ' . \htmlspecialchars($entry) . '<br>';
             }
             echo '<br>Cache-Dateien gelöscht: ' . (int) $deletedFiles . '<br>';
+            foreach ($optionFbLog as $fbEntry) {
+                echo \htmlspecialchars($fbEntry) . '<br>';
+            }
             echo '</div>';
         } catch (\Throwable $e) {
             echo '<div class="alert alert-error"><strong>Fehler:</strong> '
