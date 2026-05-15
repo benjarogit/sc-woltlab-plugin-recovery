@@ -9,7 +9,15 @@
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Version](https://img.shields.io/github/v/release/benjarogit/sc-woltlab-plugin-recovery)
 
-![Authentication Screen](https://github.com/user-attachments/assets/d18e0871-2ab2-4f47-9bd7-8820671bffa1)
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/387d02cb-4d84-47e9-8d2b-aac2cebccf8a" width="100%">
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/b05703cc-8461-408f-9280-2b405d8be538" width="15%">
+
+  <img src="https://github.com/user-attachments/assets/9b2b31e5-63a4-449d-85b1-ad6ce56dc1e4" width="15%">
+</p>
 
 ## When do you need this?
 
@@ -30,7 +38,21 @@
 | **Cache Clear** | Deletes compiled templates and all cache directories |
 | **Package List Repair** | Fixes orphaned packages causing null errors on the Package List page |
 
-![Mode Selection](https://github.com/user-attachments/assets/c108ffbb-4db9-448c-853c-0b0a9bffc5c4)
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/0278a36b-419b-45be-8b60-971c1ff1d3d0" width="100%">
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/8d482e46-2729-492a-b244-4df70849374e" width="15%">
+
+  <img src="https://github.com/user-attachments/assets/7aaf67d0-89b5-4c6d-8c26-1c4677fa5950" width="15%">
+
+  <img src="https://github.com/user-attachments/assets/f8a01a05-1a63-4805-bba2-8d5af716ebb1" width="15%">
+
+  <img src="https://github.com/user-attachments/assets/a0c86fbd-811f-460f-be98-8d117ef56af8" width="15%">
+
+  <img src="https://github.com/user-attachments/assets/1002c23d-52f8-4f17-821f-9efe8e277251" width="15%">
+</p>
 
 ## Installation
 
@@ -68,6 +90,8 @@ Use the built-in **"Remove Recovery Tool completely"** button when you are done.
 
 ### ACP Repair
 
+![ACP Repair Mode](https://github.com/user-attachments/assets/50602546-147a-41a6-a7bd-c1866c96493e)
+
 Removes broken ACP menu entries that crash the admin panel:
 
 - **Input by identifier:** Enter the package identifier manually (e.g. `de.example.my-plugin`)
@@ -76,6 +100,10 @@ Removes broken ACP menu entries that crash the admin panel:
 - The cache is cleared automatically after deletion
 
 ### Plugin Uninstall
+
+![Plugin Uninstall](https://github.com/user-attachments/assets/5a7f13c6-2988-4e11-9071-67980e7515fc)
+
+![Uninstall wizard](https://github.com/user-attachments/assets/19e278bc-31ec-4496-97d9-fa71d9ec2dec)
 
 Complete plugin removal via a **3-step wizard**:
 
@@ -104,6 +132,8 @@ Complete plugin removal via a **3-step wizard**:
 
 ### User Management
 
+![User Management](https://github.com/user-attachments/assets/f1555a4f-4b10-478a-a7ef-c953d37b922e)
+
 Full user administration without ACP access:
 
 - **User search:** Search by username or email address
@@ -115,6 +145,8 @@ Full user administration without ACP access:
 
 ### Cache Clear
 
+![Cache Clear Mode](https://github.com/user-attachments/assets/1fc1f79e-fdc2-4b76-98ec-2719b8706bd7)
+
 Deletes all cache and compiled-template directories directly via the filesystem (bypasses WCF/CacheHandler):
 
 | Directory | Contents |
@@ -125,6 +157,8 @@ Deletes all cache and compiled-template directories directly via the filesystem 
 | `acp/templates/compiled/` | Compiled ACP templates |
 
 ### Package List Repair
+
+![Package List Repair](https://github.com/user-attachments/assets/1002c23d-52f8-4f17-821f-9efe8e277251)
 
 Fixes orphaned database entries that block the ACP package list or prevent package uninstallation:
 

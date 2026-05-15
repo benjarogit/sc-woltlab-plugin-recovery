@@ -90,6 +90,8 @@ Nach Abschluss der Arbeiten den integrierten Button **„Recovery Tool vollstän
 
 ### ACP Repair
 
+![ACP Repair Modus](https://github.com/user-attachments/assets/50602546-147a-41a6-a7bd-c1866c96493e)
+
 Entfernt defekte ACP-Menüeinträge, die das Admin-Panel abstürzen lassen:
 
 - **Eingabe per Identifier:** Package-Identifier manuell eingeben (z. B. `de.example.my-plugin`)
@@ -98,6 +100,10 @@ Entfernt defekte ACP-Menüeinträge, die das Admin-Panel abstürzen lassen:
 - Nach dem Löschen wird der Cache automatisch geleert
 
 ### Plugin Uninstall
+
+![Plugin Uninstall Modus](https://github.com/user-attachments/assets/5a7f13c6-2988-4e11-9071-67980e7515fc)
+
+![Deinstallation (Assistent)](https://github.com/user-attachments/assets/19e278bc-31ec-4496-97d9-fa71d9ec2dec)
 
 Vollständige Plugin-Deinstallation in einem **3-Schritt-Assistenten**:
 
@@ -126,6 +132,8 @@ Vollständige Plugin-Deinstallation in einem **3-Schritt-Assistenten**:
 
 ### User Management
 
+![Benutzerverwaltung](https://github.com/user-attachments/assets/f1555a4f-4b10-478a-a7ef-c953d37b922e)
+
 Benutzerverwaltung ohne ACP-Zugang:
 
 - **Benutzersuche:** Suche nach Name oder E-Mail-Adresse
@@ -137,6 +145,8 @@ Benutzerverwaltung ohne ACP-Zugang:
 
 ### Cache Clear
 
+![Cache Clear Modus](https://github.com/user-attachments/assets/1fc1f79e-fdc2-4b76-98ec-2719b8706bd7)
+
 Löscht alle Cache- und Kompilat-Verzeichnisse direkt über das Dateisystem (ohne WCF/CacheHandler):
 
 | Verzeichnis | Inhalt |
@@ -147,6 +157,8 @@ Löscht alle Cache- und Kompilat-Verzeichnisse direkt über das Dateisystem (ohn
 | `acp/templates/compiled/` | Kompilierte ACP-Templates |
 
 ### Package List Repair
+
+![Package List Repair](https://github.com/user-attachments/assets/1002c23d-52f8-4f17-821f-9efe8e277251)
 
 Behebt verwaiste Datenbankeinträge, die die ACP-Paketliste oder den Deinstallations-Prozess blockieren:
 
