@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.6
+ * @version 1.5.8
  * @requires PHP >= 8.3
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.6');
+define('RECOVERY_VERSION', '1.5.8');
 define('RECOVERY_MIN_PHP_VERSION', '8.3.0');
 
 if (\PHP_VERSION_ID < 80300) {
@@ -1139,11 +1139,116 @@ function recoveryGetCompiledTemplateConstantIgnoreList(): array
 }
 
 /**
+ * Einzelner Kennzeichner für PHP define('…') mit möglichen Backslashes im Namen (namespaced Konstanten).
+ */
+function recoveryPhpSingleQuotedDefineNameLiteral(string $name): string
+{
+    return "'" . \str_replace(['\\', "'"], ['\\\\', "\\'"], $name) . "'";
+}
+
+/**
+ * Erstes Segment OPTION_KONSTANTE → Kleinbuchstaben (z. B. SHRINKR_ACTIVE → shrinkr), nur bei Unterstrich.
+ */
+function recoveryLeadingPrefixSegmentLowerFromConstant(string $constant): ?string
+{
+    if (!\str_contains($constant, '_')) {
+        return null;
+    }
+    $seg = \explode('_', $constant, 2)[0];
+    if ($seg === '' || !\preg_match('/^[A-Z][A-Z0-9]*$/', $seg)) {
+        return null;
+    }
+
+    return \strtolower($seg);
+}
+
+/**
+ * Liest aus App-Unterverzeichnissen …/lib/**/*.php Namespace-Zeilen (Plugin-neutral).
+ *
+ * @return list<string>
+ */
+function recoveryDiscoverPhpNamespacesInApplicationLibs(string $wcfRoot, int $maxPhpFiles): array
+{
+    $found = [];
+    $filesRead = 0;
+    $protectedDirs = \array_flip(recoveryGetProtectedDirectoryNames());
+    $wcfRoot = \rtrim(\str_replace('\\', '/', $wcfRoot), '/') . '/';
+
+    foreach (\scandir($wcfRoot) ?: [] as $entry) {
+        if ($entry === '.' || $entry === '..') {
+            continue;
+        }
+        if (!recoveryValidateAppDirectoryName($entry) || isset($protectedDirs[$entry])) {
+            continue;
+        }
+
+        $libDir = $wcfRoot . $entry . '/lib';
+        if (!\is_dir($libDir)) {
+            continue;
+        }
+
+        try {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator(
+                    $libDir,
+                    \FilesystemIterator::SKIP_DOTS | \FilesystemIterator::CURRENT_AS_PATHNAME
+                ),
+                \RecursiveIteratorIterator::LEAVES_ONLY
+            );
+            foreach ($iterator as $pathname) {
+                if (!\is_string($pathname) || !\is_file($pathname)) {
+                    continue;
+                }
+                if (\strcasecmp((string) \pathinfo($pathname, \PATHINFO_EXTENSION), 'php') !== 0) {
+                    continue;
+                }
+
+                $head = @\file_get_contents($pathname, false, null, 0, 12288);
+                if ($head === false || $head === '') {
+                    continue;
+                }
+                if (\preg_match('/^\s*namespace\s+([a-zA-Z0-9_\\\\]+)\s*;/m', $head, $matches)) {
+                    $found[$matches[1]] = true;
+                }
+                $filesRead++;
+                if ($filesRead >= $maxPhpFiles) {
+                    return \array_keys($found);
+                }
+            }
+        } catch (\Throwable $ignored) {
+        }
+    }
+
+    return \array_keys($found);
+}
+
+/**
+ * Namespaces, deren Root-Segment (vor erstem \\) zum Konstanten-Präfix passt (shrinkr ↔ shrinkr\\system\\…).
+ *
+ * @param list<string> $namespaces
+ * @return list<string>
+ */
+function recoveryNamespacesWhoseRootMatchesPrefix(array $namespaces, string $prefixLower): array
+{
+    $out = [];
+    foreach ($namespaces as $ns) {
+        $root = \strtolower(\explode('\\', $ns, 2)[0]);
+        if ($root === $prefixLower) {
+            $out[] = $ns;
+        }
+    }
+
+    return $out;
+}
+
+/**
  * @return list<string>
  */
 function recoveryCollectCompiledPhpTemplatePaths(string $wcfRoot, int $maxFiles): array
 {
     $paths = [];
+    $gatherCap = \max($maxFiles * 5, 1200);
+
     foreach (recoveryGetFilesystemCacheDirectoryList($wcfRoot) as $dir) {
         $norm = \str_replace('\\', '/', $dir);
         if (!\str_contains($norm, 'templates/compiled')) {
@@ -1166,12 +1271,36 @@ function recoveryCollectCompiledPhpTemplatePaths(string $wcfRoot, int $maxFiles)
                     continue;
                 }
                 $paths[] = $pathname;
-                if (\count($paths) >= $maxFiles) {
-                    return $paths;
+                if (\count($paths) >= $gatherCap) {
+                    break 2;
                 }
             }
         } catch (\Throwable $ignored) {
         }
+    }
+
+    $scorePath = static function (string $p): int {
+        $b = \strtolower(\basename(\str_replace('\\', '/', $p)));
+        $s = 4;
+        if (\str_contains($b, 'index')) {
+            $s -= 3;
+        }
+        if (\str_contains($b, 'package')) {
+            $s -= 2;
+        }
+        if (\str_contains($b, 'option')) {
+            $s -= 1;
+        }
+
+        return $s;
+    };
+
+    \usort($paths, static function ($a, $b) use ($scorePath): int {
+        return $scorePath((string) $a) <=> $scorePath((string) $b);
+    });
+
+    if (\count($paths) > $maxFiles) {
+        $paths = \array_slice($paths, 0, $maxFiles);
     }
 
     return $paths;
@@ -1325,8 +1454,9 @@ function recoveryStripPluginRecoveryOptionFallbackBlock(): void
 /**
  * Schreibt einen markierten Fallback-Block in options.inc.php – **plugin-neutral**:
  * 1) alle Zeilen aus {@see wcf{N}_option} (Core + sämtliche Plugins),
- * 2) zusätzlich Namen aus kompilierten Templates, die wie Options-Konstanten aussehen,
- *    aber keine passende Option-Zeile mehr haben (nach Deinstallation / kaputter Installation).
+ * 2) Konstanten aus kompilierten Templates (Heuristik),
+ * 3) zusätzlich **namespaced** {@see define()} für PHP 8 (unqualifizierte Konstanten im Namespace `foo\\bar`
+ *    lösen zu `foo\\bar\\CONST`; globales define('CONST') reicht dann nicht — daher Spiegelung nach Präfix-Match).
  */
 function recoveryEnsureOptionConstantFallbacks(\wcf\system\database\Database $db, int $wcfN, array &$log): void
 {
@@ -1348,12 +1478,8 @@ function recoveryEnsureOptionConstantFallbacks(\wcf\system\database\Database $db
 
     recoveryStripPluginRecoveryOptionFallbackBlock();
 
-    $lines = [];
-    $lines[] = '// <plugin-recovery-tool> option constant fallbacks begin';
-    $lines[] = '// Notfall-Fallback für fehlende Option-Konstanten (Recovery Tool ' . RECOVERY_VERSION . ').';
-    $lines[] = '// Alle Plugins: DB + kompilierte Templates. Block wird beim nächsten Lauf ersetzt; bei stabiler Installation löschen.';
-
-    $seenConstant = [];
+    /** @var array<string, string> $globalExpr Konstantenname → PHP-Skalarausdruck für define */
+    $globalExpr = [];
     $dbBackedCount = 0;
 
     try {
@@ -1368,16 +1494,14 @@ function recoveryEnsureOptionConstantFallbacks(\wcf\system\database\Database $db
             if ($const === '' || !\preg_match('/^[A-Z0-9_]+$/', $const)) {
                 continue;
             }
-            if (isset($seenConstant[$const])) {
+            if (isset($globalExpr[$const])) {
                 continue;
             }
-            $seenConstant[$const] = true;
-            $dbBackedCount++;
             $type = (string) ($row['optionType'] ?? 'text');
             $value = isset($row['optionValue']) ? (string) $row['optionValue'] : '';
 
-            $expr = recoveryPhpScalarExpressionForOptionType($type, $value);
-            $lines[] = "if (!\\defined('" . $const . "')) {\n\t\\define('" . $const . "', " . $expr . ');' . "\n}";
+            $globalExpr[$const] = recoveryPhpScalarExpressionForOptionType($type, $value);
+            $dbBackedCount++;
         }
     } catch (\Throwable $e) {
         $log[] = 'Option-Konstanten-Fallback: Lesen aus wcf' . $wcfN . '_option fehlgeschlagen (' . $e->getMessage()
@@ -1399,7 +1523,7 @@ function recoveryEnsureOptionConstantFallbacks(\wcf\system\database\Database $db
     $templateScanCount = 0;
     $maxOrphanDefines = 300;
     foreach ($orphanCandidates as $const) {
-        if (isset($seenConstant[$const])) {
+        if (isset($globalExpr[$const])) {
             continue;
         }
         if ($templateScanCount >= $maxOrphanDefines) {
@@ -1419,9 +1543,52 @@ function recoveryEnsureOptionConstantFallbacks(\wcf\system\database\Database $db
             $expr = recoveryHeuristicScalarExpressionForOrphanPluginConstant($const);
         }
 
-        $seenConstant[$const] = true;
+        $globalExpr[$const] = $expr;
         $templateScanCount++;
+    }
+
+    $lines = [];
+    $lines[] = '// <plugin-recovery-tool> option constant fallbacks begin';
+    $lines[] = '// Notfall-Fallback für fehlende Option-Konstanten (Recovery Tool ' . RECOVERY_VERSION . ').';
+    $lines[] = '// Alle Plugins: DB + Template-Scan + Namespace-Spiegelung (PHP 8). Block beim nächsten Lauf ersetzt.';
+
+    $sortedConstants = \array_keys($globalExpr);
+    \sort($sortedConstants);
+
+    foreach ($sortedConstants as $const) {
+        $expr = $globalExpr[$const];
         $lines[] = "if (!\\defined('" . $const . "')) {\n\t\\define('" . $const . "', " . $expr . ');' . "\n}";
+    }
+
+    $libNamespaces = recoveryDiscoverPhpNamespacesInApplicationLibs($wcfRoot, 550);
+    $log[] = 'Option-Konstanten-Fallback: Namespace-Spiegelung — ' . \count($libNamespaces)
+        . ' PHP-Namespaces unter App-lib/ (Präfix-Match zur Konstante, z. B. shrinkr ↔ shrinkr\\\\…)';
+
+    /** @var array<string, true> $fqSeen */
+    $fqSeen = [];
+    $mirrorCount = 0;
+    $maxMirror = 650;
+    foreach ($sortedConstants as $const) {
+        $pfx = recoveryLeadingPrefixSegmentLowerFromConstant($const);
+        if ($pfx === null) {
+            continue;
+        }
+        $expr = $globalExpr[$const];
+        foreach (recoveryNamespacesWhoseRootMatchesPrefix($libNamespaces, $pfx) as $ns) {
+            if ($mirrorCount >= $maxMirror) {
+                $log[] = 'Option-Konstanten-Fallback: Namespace-Spiegelung nach ' . $maxMirror . ' defines gestoppt (Obergrenze)';
+
+                break 2;
+            }
+            $fq = $ns . '\\' . $const;
+            if (\strlen($fq) > 240 || isset($fqSeen[$fq])) {
+                continue;
+            }
+            $fqSeen[$fq] = true;
+            $lit = recoveryPhpSingleQuotedDefineNameLiteral($fq);
+            $lines[] = 'if (!\\defined(' . $lit . ')) {' . "\n\t\\define(" . $lit . ', ' . $expr . ');' . "\n}";
+            $mirrorCount++;
+        }
     }
 
     $lines[] = '// <plugin-recovery-tool> option constant fallbacks end';
@@ -1429,9 +1596,10 @@ function recoveryEnsureOptionConstantFallbacks(\wcf\system\database\Database $db
     $snippet = "\n" . \implode("\n", $lines) . "\n";
     \file_put_contents($file, \rtrim((string) \file_get_contents($file)) . $snippet, \LOCK_EX);
 
-    $total = \count($seenConstant);
-    $log[] = 'Option-Konstanten-Fallback: options.inc.php ergänzt (gesamt ' . $total . ' Konstanten: '
-        . $dbBackedCount . ' aus DB, ' . $templateScanCount . ' aus Template-Scan bzw. Zusatzfallback)';
+    $totalGlobals = \count($globalExpr);
+    $log[] = 'Option-Konstanten-Fallback: options.inc.php ergänzt (globale Konstanten: ' . $totalGlobals
+        . ', davon ' . $dbBackedCount . ' aus DB, ' . $templateScanCount . ' aus Template-Scan; '
+        . 'Namespace-Spiegel: ' . $mirrorCount . ')';
 }
 
 function recoveryExecuteDelete(
