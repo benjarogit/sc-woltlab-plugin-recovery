@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.2.3
+ * @version 1.2.4
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -230,6 +230,232 @@ function recoveryTryDeleteByPackageId(
 }
 
 /**
+ * @return list<string> Tabellennamen ohne wcf{N}_-Präfix
+ */
+function recoveryDiscoverPackageIdTables(\wcf\system\database\Database $db, int $wcfN): array
+{
+    $prefix = "wcf{$wcfN}_";
+    $tables = [];
+
+    try {
+        $statement = $db->prepareStatement('SHOW TABLES');
+        $statement->execute();
+        while ($row = $statement->fetchArray()) {
+            $fullName = (string) \reset($row);
+            if (!\str_starts_with($fullName, $prefix)) {
+                continue;
+            }
+
+            $shortName = \substr($fullName, \strlen($prefix));
+            if ($shortName === 'package') {
+                continue;
+            }
+
+            try {
+                $col = $db->prepareStatement("SHOW COLUMNS FROM `{$fullName}` LIKE 'packageID'");
+                $col->execute();
+                if ($col->fetchArray()) {
+                    $tables[] = $shortName;
+                }
+            } catch (\Throwable) {
+            }
+        }
+    } catch (\Throwable) {
+    }
+
+    return \array_values(\array_unique($tables));
+}
+
+function recoveryResolvePluginDirectory(?array $packageData, string $packageIdentifier): ?string
+{
+    if ($packageData) {
+        $dir = \trim((string) ($packageData['packageDir'] ?? ''), '/\\');
+        if ($dir !== '') {
+            return $dir;
+        }
+    }
+
+    $parts = \explode('.', $packageIdentifier);
+    if (\count($parts) < 2) {
+        return null;
+    }
+
+    return (string) \end($parts);
+}
+
+function recoveryDeleteDirectoryRecursive(string $directory): bool
+{
+    if (!\is_dir($directory)) {
+        return false;
+    }
+
+    $iterator = new \RecursiveIteratorIterator(
+        new \RecursiveDirectoryIterator($directory, \RecursiveDirectoryIterator::SKIP_DOTS),
+        \RecursiveIteratorIterator::CHILD_FIRST
+    );
+
+    foreach ($iterator as $file) {
+        if ($file->isDir()) {
+            @\rmdir($file->getPathname());
+        } else {
+            @\unlink($file->getPathname());
+        }
+    }
+
+    return @\rmdir($directory);
+}
+
+function recoveryDeletePluginFilesOnDisk(
+    ?array $packageData,
+    string $packageIdentifier,
+    array &$log
+): void {
+    if (!\defined('WCF_DIR')) {
+        \define('WCF_DIR', recoveryResolveWcfDir());
+    }
+
+    $appDir = recoveryResolvePluginDirectory($packageData, $packageIdentifier);
+    if (!$appDir || !\preg_match('/^[a-zA-Z0-9_-]+$/', $appDir)) {
+        $log[] = 'Plugin-Verzeichnis auf Disk: kein sicheres Verzeichnis ermittelt';
+
+        return;
+    }
+
+    $wcfRoot = \rtrim(WCF_DIR, '/\\');
+    $target = $wcfRoot . '/' . $appDir;
+    $wcfReal = \realpath($wcfRoot);
+    if ($wcfReal === false) {
+        $log[] = 'Plugin-Verzeichnis auf Disk: WCF_DIR nicht auflösbar';
+
+        return;
+    }
+
+    if (!\is_dir($target)) {
+        $log[] = 'Plugin-Verzeichnis auf Disk: nicht vorhanden (' . $appDir . '/)';
+
+        return;
+    }
+
+    $targetReal = \realpath($target);
+    if (
+        $targetReal === false
+        || (!\str_starts_with($targetReal, $wcfReal . \DIRECTORY_SEPARATOR) && $targetReal !== $wcfReal)
+    ) {
+        $log[] = 'Plugin-Verzeichnis auf Disk: Sicherheitsprüfung fehlgeschlagen (' . $appDir . '/)';
+
+        return;
+    }
+
+    if (recoveryDeleteDirectoryRecursive($targetReal)) {
+        $log[] = 'Plugin-Verzeichnis gelöscht: ' . $appDir . '/';
+    } else {
+        $log[] = 'Plugin-Verzeichnis konnte nicht vollständig gelöscht werden: ' . $appDir . '/';
+    }
+}
+
+/**
+ * @return array{rows: list<array{label: string, count: int, error?: string}>, dropTables: list<string>}
+ */
+function recoveryPreviewDbCleanupByPackageId(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    int $packageID,
+    string $packageIdentifier
+): array {
+    $rows = [];
+    foreach (recoveryDiscoverPackageIdTables($db, $wcfN) as $table) {
+        try {
+            $sql = "SELECT COUNT(*) AS cnt FROM wcf{$wcfN}_{$table} WHERE packageID = ?";
+            $statement = $db->prepareStatement($sql);
+            $statement->execute([$packageID]);
+            $row = $statement->fetchArray();
+            $count = (int) ($row['cnt'] ?? 0);
+            if ($count > 0) {
+                $rows[] = ['label' => $table, 'count' => $count];
+            }
+        } catch (\Throwable $e) {
+            $rows[] = ['label' => $table, 'count' => -1, 'error' => $e->getMessage()];
+        }
+    }
+
+    $dropTables = \function_exists('findPackageTables')
+        ? findPackageTables($db, $packageIdentifier, $wcfN)
+        : [];
+
+    return ['rows' => $rows, 'dropTables' => $dropTables];
+}
+
+function recoveryDisplayDbCleanupPreview(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    array $packageData,
+    string $packageIdentifier
+): void {
+    $packageID = (int) $packageData['packageID'];
+    $preview = recoveryPreviewDbCleanupByPackageId($db, $wcfN, $packageID, $packageIdentifier);
+
+    echo '<div class="alert alert-info"><strong>Datenbank-Bereinigung (Package-ID ' . $packageID . '):</strong><br>';
+    echo '<small>Auch ohne Package-Archiv werden alle wcf' . $wcfN . '_*-Tabellen mit Spalte <code>packageID</code> bereinigt.</small><br><br>';
+
+    if (!empty($preview['rows'])) {
+        echo '<ul>';
+        foreach ($preview['rows'] as $row) {
+            if (isset($row['error'])) {
+                echo '<li><code>wcf' . $wcfN . '_' . \htmlspecialchars($row['label']) . '</code> – Prüfung fehlgeschlagen</li>';
+            } else {
+                echo '<li><code>wcf' . $wcfN . '_' . \htmlspecialchars($row['label']) . '</code> – '
+                    . (int) $row['count'] . ' Einträge</li>';
+            }
+        }
+        echo '</ul>';
+    } else {
+        echo '<em>Keine packageID-verknüpften Einträge in anderen Tabellen gefunden.</em><br>';
+    }
+
+    echo '<br><strong>Package-Eintrag:</strong> wcf' . $wcfN . '_package (1 Zeile)<br>';
+
+    if (!empty($preview['dropTables'])) {
+        echo '<br><strong>Zusätzlich DROP TABLE (' . \count($preview['dropTables']) . '):</strong><br><ul>';
+        foreach ($preview['dropTables'] as $table) {
+            echo '<li><code>' . \htmlspecialchars($table) . '</code></li>';
+        }
+        echo '</ul>';
+    }
+
+    $appDir = recoveryResolvePluginDirectory($packageData, $packageIdentifier);
+    if ($appDir) {
+        echo '<br><strong>Dateisystem:</strong> Verzeichnis <code>' . \htmlspecialchars($appDir) . '/</code> unter WCF_DIR wird entfernt (falls vorhanden).';
+    }
+
+    echo '</div>';
+}
+
+function recoverySafeCommitTransaction(\wcf\system\database\Database $db): void
+{
+    try {
+        $db->commitTransaction();
+    } catch (\Throwable $e) {
+        // MySQL beendet Transaktionen bei DDL (DROP TABLE) implizit.
+        if (
+            \str_contains($e->getMessage(), 'no active transaction')
+            || \str_contains($e->getMessage(), 'Could not commit transaction')
+        ) {
+            return;
+        }
+
+        throw $e;
+    }
+}
+
+function recoverySafeRollBackTransaction(\wcf\system\database\Database $db): void
+{
+    try {
+        $db->rollBackTransaction();
+    } catch (\Throwable) {
+    }
+}
+
+/**
  * Generische Vollbereinigung für jedes Plugin (ohne WoltLab-Paket-Deinstaller).
  *
  * @param array<string, mixed>|null $resources
@@ -271,6 +497,12 @@ function recoveryPerformFullPluginCleanup(
             'bbcode' => 'BBCodes',
             'smiley' => 'Smileys',
         ];
+
+        foreach (recoveryDiscoverPackageIdTables($db, $wcfN) as $discoveredTable) {
+            if (!isset($packageIdTables[$discoveredTable])) {
+                $packageIdTables[$discoveredTable] = 'DB: ' . $discoveredTable;
+            }
+        }
 
         foreach ($packageIdTables as $table => $label) {
             recoveryTryDeleteByPackageId($db, $wcfN, $table, $packageID, $label, $log);
@@ -407,7 +639,7 @@ function recoveryPerformFullPluginCleanup(
     $tables = [];
     if ($resources && !empty($resources['tables'])) {
         $tables = $resources['tables'];
-    } elseif ($packageData && !empty($packageData['applicationDirectory'])) {
+    } elseif ($packageData && !empty($packageData['packageDir'])) {
         $tables = \function_exists('findPackageTables')
             ? findPackageTables($db, $packageIdentifier, $wcfN)
             : [];
@@ -431,6 +663,8 @@ function recoveryPerformFullPluginCleanup(
         recoveryStripConstantsFromOptionsIncPhp($optionConstants);
         $log[] = 'options.inc.php bereinigt (Plugin-Konstanten entfernt)';
     }
+
+    recoveryDeletePluginFilesOnDisk($packageData, $packageIdentifier, $log);
 }
 
 
@@ -635,7 +869,27 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
             .table tbody tr:hover, table tbody tr:hover { background: rgba(0,0,0,.06); }
             hr { border-top-color: #ddd; }
             small { color: #777; }
+            .recovery-global-nav { border-bottom-color: #ddd; }
+            .recovery-nav-link { color: #369; }
         }
+        .recovery-global-nav {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px 20px;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #444444;
+        }
+        .recovery-nav-link {
+            color: #fff;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .recovery-nav-link:hover { text-decoration: underline; }
+        .recovery-nav-acp { margin-left: auto; }
+        .recovery-top-actions { text-align: right; margin-bottom: 20px; }
     </style>
 </head>
 <body>
@@ -670,6 +924,23 @@ function recoveryRenderBackLink(string $href): void
     echo '<a href="' . \htmlspecialchars($href) . '" class="back-link">&#8592; Zurück zur Auswahl</a>';
 }
 
+function recoveryRenderGlobalNav(int $mode, string $authHash, string $baseUrl): void
+{
+    $acpUrl = $baseUrl . 'acp/';
+    echo '<nav class="recovery-global-nav" aria-label="Recovery-Navigation">';
+    if ($mode !== RECOVERY_MODE_SELECTION) {
+        echo '<a href="?t=' . \htmlspecialchars($authHash) . '" class="recovery-nav-link">&#8592; Zurück zur Modus-Auswahl</a>';
+    }
+    echo '<a href="' . \htmlspecialchars($acpUrl) . '" class="recovery-nav-link recovery-nav-acp">&#8594; Zum ACP</a>';
+    echo '</nav>';
+}
+
+function recoveryRenderAcpSuccessLink(string $baseUrl, string $label = '→ Zum ACP'): void
+{
+    echo '<br><a href="' . \htmlspecialchars($baseUrl . 'acp/') . '" class="button btn-success">'
+        . \htmlspecialchars($label) . '</a>';
+}
+
 // ============================================================================
 // AUTHENTIFIZIERUNG (wie WoltLab wsc-recovery.php)
 // ============================================================================
@@ -699,20 +970,6 @@ if ($action === 'download-auth-file') {
     exit;
 }
 
-// Cleanup-Action: Alle Recovery-Dateien löschen
-if ($action === 'cleanup') {
-    cleanupRecoveryFiles();
-    recoveryRenderStandaloneMessage(
-        'Recovery Tool entfernt',
-        'Recovery Tool entfernt',
-        '<div class="alert alert-success"><strong>Recovery Tool erfolgreich entfernt.</strong></div>'
-        . '<p>Folgende Dateien wurden gelöscht:</p>'
-        . '<ul><li>plugin-recovery-tool.php</li><li>plugin-recovery-auth.php</li><li>uploads/</li></ul>'
-        . '<div class="alert alert-info"><strong>Diese Seite ist nicht mehr erreichbar.</strong></div>'
-    );
-    exit;
-}
-
 // Auth-Datei prüfen
 $isAuthenticated = false;
 if (file_exists(__DIR__ . '/' . $authFilename)) {
@@ -727,6 +984,24 @@ if (file_exists(__DIR__ . '/' . $authFilename)) {
             $isAuthenticated = true;
         }
     }
+}
+
+// Cleanup-Action: Hilfsdateien löschen, Tool per Shutdown entfernen, Weiterleitung ins ACP
+if ($action === 'cleanup') {
+    $cleanupAcpUrl = recoveryGetSiteBaseUrl() . 'acp/';
+    cleanupRecoveryAuxiliaryFiles();
+    \register_shutdown_function(static function (): void {
+        @\unlink(__DIR__ . '/plugin-recovery-tool.php');
+    });
+    \header('Location: ' . $cleanupAcpUrl);
+    exit;
+}
+
+// Auth-Status (JSON) für Auto-Fortsetzung nach Upload der Auth-Datei
+if ($action === 'auth-status') {
+    \header('Content-Type: application/json; charset=utf-8');
+    echo \json_encode(['ok' => $isAuthenticated]);
+    exit;
 }
 
 // ============================================================================
@@ -874,34 +1149,41 @@ function clearCompiledTemplates() {
 }
 
 /**
- * Löscht alle Recovery-Dateien
+ * Löscht Recovery-Hilfsdateien (nicht plugin-recovery-tool.php – das erfolgt per Shutdown).
  */
-function cleanupRecoveryFiles() {
+function cleanupRecoveryAuxiliaryFiles(): void
+{
     $files = [
         __DIR__ . '/plugin-recovery.php',
         __DIR__ . '/universal-recovery.php',
         __DIR__ . '/acp-repair.php',
         __DIR__ . '/wsc-recovery.php',
         __DIR__ . '/recovery-tool.php',
-        __DIR__ . '/plugin-recovery-tool.php',
         __DIR__ . '/plugin-recovery-auth.php',
-        __DIR__ . '/uploads'  // Upload-Verzeichnis
+        __DIR__ . '/uploads',
     ];
 
     foreach ($files as $file) {
-        if (is_file($file)) {
-            @unlink($file);
-        } elseif (is_dir($file)) {
-            $it = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($file, RecursiveDirectoryIterator::SKIP_DOTS),
-                RecursiveIteratorIterator::CHILD_FIRST
+        if (\is_file($file)) {
+            @\unlink($file);
+        } elseif (\is_dir($file)) {
+            $it = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($file, \RecursiveDirectoryIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::CHILD_FIRST
             );
             foreach ($it as $f) {
-                $f->isDir() ? @rmdir($f) : @unlink($f);
+                $f->isDir() ? @\rmdir($f) : @\unlink($f);
             }
-            @rmdir($file);
+            @\rmdir($file);
         }
     }
+}
+
+/** @deprecated Verwende cleanupRecoveryAuxiliaryFiles() */
+function cleanupRecoveryFiles(): void
+{
+    cleanupRecoveryAuxiliaryFiles();
+    @\unlink(__DIR__ . '/plugin-recovery-tool.php');
 }
 
 // ============================================================================
@@ -1669,7 +1951,7 @@ if (!$isAuthenticated) {
 
     <div class="alert alert-info" style="margin-top: 20px;" id="step3" style="display: none;">
         <strong>Schritt 3:</strong> Recovery starten<br>
-        <a href="?t=<?= htmlspecialchars($authHash) ?>" class="button btn-success" style="margin-top: 10px;">
+        <a href="?t=<?= htmlspecialchars($authHash) ?>&amp;auth_ok=1" class="button btn-success" style="margin-top: 10px;">
             Recovery Tool starten
         </a>
     </div>
@@ -1685,8 +1967,24 @@ if (!$isAuthenticated) {
         setTimeout(function() {
             document.getElementById('step2').style.display = 'block';
             document.getElementById('step3').style.display = 'block';
+            startAuthPolling();
         }, 500);
     });
+    function startAuthPolling() {
+        var token = new URLSearchParams(window.location.search).get('t');
+        if (!token) return;
+        var interval = setInterval(function() {
+            fetch('?action=auth-status&t=' + encodeURIComponent(token))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.ok) {
+                        clearInterval(interval);
+                        window.location.href = '?t=' + encodeURIComponent(token) + '&auth_ok=1';
+                    }
+                })
+                .catch(function() {});
+        }, 2000);
+    }
     </script>
 <?php
     recoveryRenderPageEnd();
@@ -1719,6 +2017,8 @@ $db = WCF::getDB();
 
 $mode = isset($_GET['mode']) ? (int)$_GET['mode'] : RECOVERY_MODE_SELECTION;
 
+recoveryRenderGlobalNav($mode, $authHash, $recoveryBaseUrl);
+
 ?>
 
 <?php
@@ -1728,6 +2028,14 @@ $mode = isset($_GET['mode']) ? (int)$_GET['mode'] : RECOVERY_MODE_SELECTION;
 
 if ($mode === RECOVERY_MODE_SELECTION) {
 ?>
+    <?php if (isset($_GET['auth_ok'])): ?>
+    <div class="alert alert-success"><strong>Authentifizierung erfolgreich.</strong> Sie können jetzt einen Recovery-Modus wählen.</div>
+    <?php endif; ?>
+
+    <div class="recovery-top-actions">
+        <a href="<?= htmlspecialchars($recoveryBaseUrl) ?>acp/" class="button">&#8594; Zum ACP</a>
+    </div>
+
     <h1>WoltLab Suite Recovery Tool</h1>
     <p class="subtitle">Wählen Sie den gewünschten Recovery-Modus</p>
 
@@ -1757,7 +2065,7 @@ if ($mode === RECOVERY_MODE_SELECTION) {
     <div class="alert alert-warning" style="margin-top: 30px;">
         <strong>Fertig mit Recovery?</strong><br>
         Wenn Sie alle Reparaturen abgeschlossen haben, sollten Sie das Recovery Tool und alle zugehörigen Dateien löschen.<br><br>
-        <a href="?action=cleanup&amp;t=<?= htmlspecialchars($authHash) ?>" class="button btn-danger" onclick="return confirm('ACHTUNG: Dies löscht plugin-recovery-tool.php, plugin-recovery-auth.php und alle Upload-Verzeichnisse. Fortfahren?')">
+        <a href="?action=cleanup&amp;t=<?= htmlspecialchars($authHash) ?>" class="button btn-danger" onclick="return confirm('ACHTUNG: Das Recovery Tool wird entfernt (Auth-Datei, Uploads, diese PHP-Datei) und Sie werden ins ACP weitergeleitet. Fortfahren?')">
             Recovery Tool vollständig entfernen
         </a>
     </div>
@@ -1767,7 +2075,6 @@ if ($mode === RECOVERY_MODE_SELECTION) {
 
 elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 ?>
-    <a href="?t=<?= htmlspecialchars($authHash) ?>" class="back-link">&#8592; Zurück zur Auswahl</a>
     <h1>ACP Repair</h1>
     <p class="subtitle">Repariert defekte ACP-Menüeinträge eines Plugins</p>
 
@@ -1851,7 +2158,7 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
             }
 
             // Package suchen
-            $sql = "SELECT packageID, package, packageName
+            $sql = "SELECT packageID, package, packageName, packageDir, isApplication
                     FROM wcf" . WCF_N . "_package
                     WHERE package = ?";
             $statement = $db->prepareStatement($sql);
@@ -2088,7 +2395,7 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                     echo '<strong>✓ ACP-Repair erfolgreich!</strong><br>';
                     echo 'Gelöschte Menüeinträge: ' . $deletedCount . '<br>';
                     echo 'Cache wurde geleert.<br><br>';
-                    echo '<a href="' . htmlspecialchars($recoveryBaseUrl) . 'acp/" class="btn-success">Zum ACP</a>';
+                    recoveryRenderAcpSuccessLink($recoveryBaseUrl, '→ Zum ACP');
                     echo '</div>';
 
                 } catch (Exception $e) {
@@ -2113,7 +2420,6 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 
 elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 ?>
-    <a href="?t=<?= htmlspecialchars($authHash) ?>" class="back-link">&#8592; Zurück zur Auswahl</a>
     <h1>Plugin Uninstall</h1>
     <p class="subtitle">Deinstalliert Plugin komplett aus Datenbank und Dateisystem</p>
 
@@ -2213,6 +2519,10 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                 $extractDir = isset($_GET['extract_dir']) ? $_GET['extract_dir'] : $_POST['extract_dir'];
             }
             
+            if ($packageData) {
+                recoveryDisplayDbCleanupPreview($db, WCF_N, $packageData, $packageIdentifier);
+            }
+
             if ($extractDir && is_dir($extractDir)) {
                 $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
                 if ($resources) {
@@ -2287,9 +2597,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
                 }
 
-                // Deinstallation durchführen (vollständig, ohne global.php)
-                $db->beginTransaction();
-
+                // Deinstallation ohne Transaktion (DROP TABLE beendet MySQL-Transaktionen implizit)
                 try {
                     $log = [];
                     $wcfN = $resources ? (int) $resources['wcfN'] : WCF_N;
@@ -2306,18 +2614,16 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     $deletedFiles = clearCompiledTemplates();
                     $log[] = 'Cache gelöscht: ' . $deletedFiles . ' Dateien';
 
-                    $db->commitTransaction();
-
                     echo '<div class="alert alert-success">';
                     echo '<strong>✓ Plugin erfolgreich deinstalliert!</strong><br><br>';
                     echo '<strong>Durchgeführte Aktionen:</strong><br>';
                     foreach ($log as $entry) {
                         echo '• ' . htmlspecialchars($entry) . '<br>';
                     }
+                    recoveryRenderAcpSuccessLink($recoveryBaseUrl);
                     echo '</div>';
 
                 } catch (Exception $e) {
-                    $db->rollBackTransaction();
                     echo '<div class="alert alert-error">';
                     echo '<strong>Fehler bei Deinstallation:</strong><br>';
                     echo htmlspecialchars($e->getMessage()) . '<br><br>';
@@ -2340,7 +2646,6 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 
 elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
 ?>
-    <a href="?t=<?= htmlspecialchars($authHash) ?>" class="back-link">&#8592; Zurück zur Auswahl</a>
     <h1>User Management</h1>
     <p class="subtitle">Für User-Management nutzen Sie das offizielle WoltLab Recovery Tool</p>
 
@@ -2365,7 +2670,6 @@ elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
 
 elseif ($mode === RECOVERY_MODE_CACHE_CLEAR) {
 ?>
-    <a href="?t=<?= htmlspecialchars($authHash) ?>" class="back-link">&#8592; Zurück zur Auswahl</a>
     <h1>Cache Clear</h1>
     <p class="subtitle">Löscht alle Caches und kompilierte Templates</p>
 
@@ -2391,7 +2695,7 @@ elseif ($mode === RECOVERY_MODE_CACHE_CLEAR) {
         echo '<div class="alert alert-success">';
         echo '<strong>Cache erfolgreich geleert.</strong><br>';
         echo 'Gelöschte Dateien: ' . $deletedFiles . '<br><br>';
-        echo '<a href="' . htmlspecialchars($recoveryBaseUrl) . '" class="btn-success">Zur Hauptseite</a>';
+        recoveryRenderAcpSuccessLink($recoveryBaseUrl);
         echo '</div>';
     }
 }
