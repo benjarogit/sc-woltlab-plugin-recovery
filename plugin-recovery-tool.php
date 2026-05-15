@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.3.0
+ * @version 1.3.1
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -19,7 +19,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.3.0');
+define('RECOVERY_VERSION', '1.3.1');
 define('RECOVERY_MODE_SELECTION', 0);
 define('RECOVERY_MODE_ACP_REPAIR', 1);
 define('RECOVERY_MODE_PLUGIN_UNINSTALL', 2);
@@ -3408,9 +3408,11 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 
 <?php
     // Schritt 1: Package-Identifier eingeben oder hochladen
-    if (!isset($_POST['package_identifier']) && !isset($_FILES['package_file'])) {
+    $acpRepairHasFileUpload = isset($_FILES['package_file']['error'])
+        && $_FILES['package_file']['error'] === UPLOAD_ERR_OK;
+    if (empty($_POST['package_identifier']) && !$acpRepairHasFileUpload) {
 ?>
-    <form method="POST">
+    <form method="POST" action="?mode=<?= RECOVERY_MODE_ACP_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>">
         <div class="form-group">
             <label>Option 1: Package-Identifier manuell eingeben</label>
             <input type="text" name="package_identifier" placeholder="z.B. de.example.my-plugin" autocomplete="off">
@@ -3423,7 +3425,7 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 
     <hr>
 
-    <form method="POST" enctype="multipart/form-data">
+    <form method="POST" enctype="multipart/form-data" action="?mode=<?= RECOVERY_MODE_ACP_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>">
         <div class="form-group">
             <label>Option 2: Package-Datei hochladen (.tar, .tar.gz, .tgz – max. 100 MiB)</label>
             <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz">
@@ -3479,7 +3481,7 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                         echo '<td>' . \htmlspecialchars($item['menuItemController'] ?: '-') . '</td></tr>';
                     }
                     echo '</tbody></table><br>';
-                    echo '<form method="POST">';
+                    echo '<form method="POST" action="?mode=' . RECOVERY_MODE_ACP_REPAIR . '&amp;t=' . \htmlspecialchars($authHash) . '">';
                     echo '<input type="hidden" name="package_identifier" value="' . \htmlspecialchars($packageIdentifier) . '">';
                     if ($extractDir) {
                         echo '<input type="hidden" name="extract_dir" value="' . \htmlspecialchars($extractDir) . '">';
@@ -3509,7 +3511,7 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                         echo '<td>' . \htmlspecialchars($item['menuItemController'] ?: '-') . '</td></tr>';
                     }
                     echo '</tbody></table>';
-                    echo '<form method="POST">';
+                    echo '<form method="POST" action="?mode=' . RECOVERY_MODE_ACP_REPAIR . '&amp;t=' . \htmlspecialchars($authHash) . '">';
                     echo '<input type="hidden" name="package_identifier" value="' . \htmlspecialchars($packageIdentifier) . '">';
                     if ($extractDir) {
                         echo '<input type="hidden" name="extract_dir" value="' . \htmlspecialchars($extractDir) . '">';
@@ -3595,7 +3597,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
         </div>
     </div>
 
-    <form method="POST">
+    <form method="POST" action="?mode=<?= RECOVERY_MODE_PLUGIN_UNINSTALL ?>&amp;t=<?= htmlspecialchars($authHash) ?>">
         <div class="form-group">
             <label>Option 1: Package-Identifier manuell eingeben</label>
             <input type="text" name="package_identifier" placeholder="z.B. de.example.my-plugin" autocomplete="off">
@@ -3606,7 +3608,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 
     <hr>
 
-    <form method="POST" enctype="multipart/form-data">
+    <form method="POST" enctype="multipart/form-data" action="?mode=<?= RECOVERY_MODE_PLUGIN_UNINSTALL ?>&amp;t=<?= htmlspecialchars($authHash) ?>">
         <div class="form-group">
             <label>Option 2: Package-Datei hochladen (.tar, .tar.gz, .tgz – max. 100 MiB)</label>
             <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz">
@@ -3691,7 +3693,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                         $packageData, $packageIdentifier, $db, $wcfN, $extractDir
                     );
 
-                    echo '<form method="POST">';
+                    echo '<form method="POST" action="?mode=' . RECOVERY_MODE_PLUGIN_UNINSTALL . '&amp;t=' . \htmlspecialchars($authHash) . '">';
                     echo '<input type="hidden" name="package_identifier" value="' . \htmlspecialchars($packageIdentifier) . '">';
                     if ($extractDir) {
                         echo '<input type="hidden" name="extract_dir" value="' . \htmlspecialchars($extractDir) . '">';
@@ -3911,7 +3913,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     echo '</div>';
 
                     // Formular mit allen Selektionen als Hidden-Inputs → Step 3 (Execute)
-                    echo '<form method="POST">';
+                    echo '<form method="POST" action="?mode=' . RECOVERY_MODE_PLUGIN_UNINSTALL . '&amp;t=' . \htmlspecialchars($authHash) . '">';
                     echo '<input type="hidden" name="package_identifier" value="' . \htmlspecialchars($packageIdentifier) . '">';
                     if ($extractDir) {
                         echo '<input type="hidden" name="extract_dir" value="' . \htmlspecialchars($extractDir) . '">';
