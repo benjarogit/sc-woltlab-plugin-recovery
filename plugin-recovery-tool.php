@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.3.1
+ * @version 1.3.2
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -19,7 +19,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.3.1');
+define('RECOVERY_VERSION', '1.3.2');
 define('RECOVERY_MODE_SELECTION', 0);
 define('RECOVERY_MODE_ACP_REPAIR', 1);
 define('RECOVERY_MODE_PLUGIN_UNINSTALL', 2);
@@ -505,35 +505,277 @@ function recoveryFetchAcpMenuItemsByPatterns(
 /**
  * @return array{packageIdentifier?: string, extractDir?: string|null, error?: string}
  */
-function recoveryResolvePackageInputFromRequest(): array
+function recoveryResolvePackageInputFromRequest(string $authHash = ''): array
 {
-    if (isset($_FILES['package_file']) && ($_FILES['package_file']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+    if (recoveryHasUploadedPackageFile()) {
         $upload = recoveryHandlePackageUpload($_FILES['package_file']);
 
-        return $upload['ok']
-            ? [
-                'packageIdentifier' => $upload['packageIdentifier'],
-                'extractDir' => $upload['extractDir'] ?? null,
-            ]
-            : ['error' => $upload['error'] ?? 'Upload fehlgeschlagen.'];
+        if (!$upload['ok']) {
+            return ['error' => $upload['error'] ?? 'Upload fehlgeschlagen.'];
+        }
+
+        $identifier = $upload['packageIdentifier'];
+        $extractDir = $upload['extractDir'] ?? null;
+        if ($authHash !== '' && $identifier) {
+            recoveryStorePackageContext($authHash, $identifier, $extractDir);
+        }
+
+        return [
+            'packageIdentifier' => $identifier,
+            'extractDir' => $extractDir,
+        ];
     }
 
     $raw = null;
-    if (!empty($_POST['package_identifier'])) {
+    if (isset($_POST['package_identifier']) && \trim((string) $_POST['package_identifier']) !== '') {
         $raw = \trim((string) $_POST['package_identifier']);
-    } elseif (!empty($_GET['package_identifier'])) {
+    } elseif (isset($_GET['package_identifier']) && \trim((string) $_GET['package_identifier']) !== '') {
         $raw = \trim((string) $_GET['package_identifier']);
     }
 
     if ($raw !== null && $raw !== '') {
         try {
-            return ['packageIdentifier' => recoveryValidatePackageIdentifier($raw), 'extractDir' => recoveryResolveTrustedExtractDir()];
+            $identifier = recoveryValidatePackageIdentifier($raw);
+            $extractDir = recoveryResolveTrustedExtractDir();
+            if ($authHash !== '') {
+                recoveryStorePackageContext($authHash, $identifier, $extractDir);
+            }
+
+            return ['packageIdentifier' => $identifier, 'extractDir' => $extractDir];
         } catch (\InvalidArgumentException $e) {
             return ['error' => $e->getMessage()];
         }
     }
 
+    if ($authHash !== '') {
+        $ctx = recoveryLoadPackageContext($authHash);
+        if ($ctx && !empty($ctx['packageIdentifier'])) {
+            return [
+                'packageIdentifier' => $ctx['packageIdentifier'],
+                'extractDir' => $ctx['extractDir'] ?? recoveryResolveTrustedExtractDir(),
+            ];
+        }
+    }
+
     return [];
+}
+
+function recoveryWasPostTruncated(): bool
+{
+    return $_SERVER['REQUEST_METHOD'] === 'POST'
+        && empty($_POST)
+        && empty($_FILES)
+        && isset($_SERVER['CONTENT_LENGTH'])
+        && (int) $_SERVER['CONTENT_LENGTH'] > 0;
+}
+
+function recoveryResolveRequestMode(): int
+{
+    if (isset($_GET['mode'])) {
+        return (int) $_GET['mode'];
+    }
+    if (isset($_POST['mode'])) {
+        return (int) $_POST['mode'];
+    }
+
+    return RECOVERY_MODE_SELECTION;
+}
+
+function recoveryHasUploadedPackageFile(): bool
+{
+    return isset($_FILES['package_file'])
+        && ($_FILES['package_file']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK;
+}
+
+function recoveryResolveUninstallStep(): string
+{
+    if (isset($_POST['uninstall_step'])) {
+        return \trim((string) $_POST['uninstall_step']);
+    }
+    if (isset($_GET['uninstall_step'])) {
+        return \trim((string) $_GET['uninstall_step']);
+    }
+
+    return '';
+}
+
+function recoveryBuildModeUrl(int $mode, string $authHash, array $params = []): string
+{
+    $query = \array_merge(['mode' => $mode, 't' => $authHash], $params);
+
+    return 'plugin-recovery-tool.php?' . \http_build_query($query);
+}
+
+function recoveryEnsureSession(): void
+{
+    if (\session_status() === PHP_SESSION_NONE) {
+        \session_start();
+    }
+}
+
+function recoveryStorePackageContext(string $authHash, string $packageIdentifier, ?string $extractDir): void
+{
+    recoveryEnsureSession();
+    $_SESSION['recovery_pkg'] ??= [];
+    $_SESSION['recovery_pkg'][$authHash] = [
+        'packageIdentifier' => $packageIdentifier,
+        'extractDir' => $extractDir,
+        'savedAt' => \time(),
+    ];
+}
+
+function recoveryLoadPackageContext(string $authHash): ?array
+{
+    recoveryEnsureSession();
+    $ctx = $_SESSION['recovery_pkg'][$authHash] ?? null;
+    if (!$ctx || (\time() - (int) ($ctx['savedAt'] ?? 0)) > 7200) {
+        return null;
+    }
+
+    if (!empty($ctx['extractDir'])) {
+        $uploadBase = \realpath(__DIR__ . '/uploads');
+        $extractReal = \realpath((string) $ctx['extractDir']);
+        if (
+            $uploadBase === false
+            || $extractReal === false
+            || !\str_starts_with($extractReal, $uploadBase . \DIRECTORY_SEPARATOR)
+        ) {
+            $ctx['extractDir'] = null;
+        } else {
+            $ctx['extractDir'] = $extractReal;
+        }
+    }
+
+    return $ctx;
+}
+
+function recoveryRenderPostTruncatedWarning(): void
+{
+    echo '<div class="alert alert-error"><strong>Upload fehlgeschlagen:</strong> '
+        . 'Die Anfrage wurde vom Server abgeschnitten (post_max_size / upload_max_filesize). '
+        . 'Bitte kleinere Datei wählen oder die PHP-Limits erhöhen.</div>';
+}
+
+function recoveryRenderProcessingError(\Throwable $e): void
+{
+    echo '<div class="alert alert-error"><strong>Fehler bei der Verarbeitung:</strong> '
+        . \nl2br(\htmlspecialchars(recoveryFormatUserError($e))) . '</div>';
+    recoveryRenderExceptionDetails($e);
+}
+
+function recoveryFormLoadingScript(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    ?>
+<script>
+(function () {
+    document.querySelectorAll('form[data-recovery-loading]').forEach(function (form) {
+        form.addEventListener('submit', function () {
+            var container = document.querySelector('.container');
+            if (!container) { return; }
+            var el = document.getElementById('recovery-loading-overlay');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'recovery-loading-overlay';
+                el.className = 'recovery-loading';
+                container.appendChild(el);
+            }
+            el.textContent = form.getAttribute('data-recovery-loading') || 'Bitte warten …';
+            el.style.display = 'block';
+        });
+    });
+})();
+</script>
+<?php
+}
+
+function recoveryRenderFormModeHiddenFields(int $mode, string $authHash): void
+{
+    echo '<input type="hidden" name="mode" value="' . (int) $mode . '">';
+    echo '<input type="hidden" name="t" value="' . \htmlspecialchars($authHash, ENT_QUOTES, 'UTF-8') . '">';
+}
+
+function recoveryAcpShouldShowInputForm(): bool
+{
+    if (recoveryWasPostTruncated()) {
+        return true;
+    }
+    if (isset($_POST['confirm_delete']) || isset($_POST['force_cleanup'])) {
+        return false;
+    }
+    if (isset($_GET['package_identifier']) && \trim((string) $_GET['package_identifier']) !== '') {
+        return false;
+    }
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+        return true;
+    }
+    if (recoveryHasUploadedPackageFile()) {
+        return false;
+    }
+
+    return !isset($_POST['package_identifier']) || \trim((string) $_POST['package_identifier']) === '';
+}
+
+function recoveryUninstallShouldShowInputForm(): bool
+{
+    if (recoveryWasPostTruncated()) {
+        return true;
+    }
+    if (recoveryResolveUninstallStep() !== '') {
+        return false;
+    }
+    if (isset($_GET['package_identifier']) && \trim((string) $_GET['package_identifier']) !== '') {
+        return false;
+    }
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+        return true;
+    }
+    if (recoveryHasUploadedPackageFile()) {
+        return false;
+    }
+
+    return !isset($_POST['package_identifier']) || \trim((string) $_POST['package_identifier']) === '';
+}
+
+/**
+ * POST-Redirect-GET nach erfolgreicher Erstanalyse (vor HTML-Ausgabe).
+ */
+function recoveryMaybeRedirectUninstallAnalyse(string $authHash): void
+{
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+        return;
+    }
+    if (recoveryResolveRequestMode() !== RECOVERY_MODE_PLUGIN_UNINSTALL) {
+        return;
+    }
+    if (recoveryResolveUninstallStep() !== '') {
+        return;
+    }
+    if (recoveryWasPostTruncated()) {
+        return;
+    }
+    if (!recoveryHasUploadedPackageFile()
+        && (!isset($_POST['package_identifier']) || \trim((string) $_POST['package_identifier']) === '')
+    ) {
+        return;
+    }
+
+    $packageInput = recoveryResolvePackageInputFromRequest($authHash);
+    if (isset($packageInput['error']) || empty($packageInput['packageIdentifier'])) {
+        return;
+    }
+
+    $params = ['package_identifier' => $packageInput['packageIdentifier']];
+    if (!empty($packageInput['extractDir'])) {
+        $params['extract_dir'] = $packageInput['extractDir'];
+    }
+
+    \header('Location: ' . recoveryBuildModeUrl(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash, $params));
+    exit;
 }
 
 function recoveryResolveTrustedExtractDir(): ?string
@@ -2048,6 +2290,29 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         .wizardStep.completed .wizardStepLabel { color: #5d5; }
         .wizardPanel { display: none; }
         .wizardPanel.active { display: block; }
+        .recovery-loading {
+            display: none;
+            padding: 24px 20px;
+            margin: 20px 0;
+            text-align: center;
+            color: #9D9D9D;
+            background: rgba(51, 102, 153, 0.12);
+            border: 1px solid #369;
+            border-radius: 3px;
+        }
+        .recovery-loading::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            margin-left: 10px;
+            vertical-align: middle;
+            border: 2px solid #369;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: recovery-spin 0.8s linear infinite;
+        }
+        @keyframes recovery-spin { to { transform: rotate(360deg); } }
 
         @media (prefers-color-scheme: light) {
             body { background: #f0f0f0; color: #333; }
@@ -2569,7 +2834,7 @@ function detectWcfN($db, $packageIdentifier, $extractDir = null) {
             if ($statement->fetchArray()) {
                 return $n;
             }
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             // Tabelle existiert nicht, weiter mit nächstem N
         }
     }
@@ -3202,6 +3467,19 @@ function displayResourcePreview($resources, $wcfN, $packageIdentifier) {
     echo '</div>';
 }
 
+$mode = recoveryResolveRequestMode();
+$recoveryBootstrapError = null;
+$recoveryDb = null;
+
+if ($isAuthenticated) {
+    try {
+        $recoveryDb = recoveryBootstrapDatabase();
+        recoveryMaybeRedirectUninstallAnalyse($authHash);
+    } catch (\Throwable $e) {
+        $recoveryBootstrapError = $e;
+    }
+}
+
 recoveryRenderPageStart('Plugin Recovery Tool', 'Plugin Recovery Tool');
 
 // Auth-Screen anzeigen wenn nicht authentifiziert
@@ -3315,16 +3593,10 @@ if (!$isAuthenticated) {
 
 // Ab hier ist der User authentifiziert
 
-// ============================================================================
-// WOLTLAB BOOTSTRAP (minimal – kein global.php, kaputte Apps crashen nicht)
-// ============================================================================
-
-try {
-    $recoveryDb = recoveryBootstrapDatabase();
-} catch (\Throwable $e) {
+if ($recoveryBootstrapError !== null) {
     echo '<div class="alert alert-error"><strong>Bootstrap-Fehler:</strong> '
-        . \nl2br(\htmlspecialchars(recoveryFormatUserError($e))) . '</div>';
-    recoveryRenderExceptionDetails($e);
+        . \nl2br(\htmlspecialchars(recoveryFormatUserError($recoveryBootstrapError))) . '</div>';
+    recoveryRenderExceptionDetails($recoveryBootstrapError);
     recoveryRenderPageEnd();
     exit;
 }
@@ -3333,12 +3605,6 @@ use wcf\system\WCF;
 
 $recoveryBaseUrl = recoveryGetSiteBaseUrl();
 $db = WCF::getDB();
-
-// ============================================================================
-// MODUS AUSWAHL
-// ============================================================================
-
-$mode = isset($_GET['mode']) ? (int)$_GET['mode'] : RECOVERY_MODE_SELECTION;
 
 recoveryRenderGlobalNav($mode, $authHash, $recoveryBaseUrl);
 
@@ -3407,12 +3673,17 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
     <p class="subtitle">Repariert defekte ACP-Menüeinträge eines Plugins</p>
 
 <?php
-    // Schritt 1: Package-Identifier eingeben oder hochladen
-    $acpRepairHasFileUpload = isset($_FILES['package_file']['error'])
-        && $_FILES['package_file']['error'] === UPLOAD_ERR_OK;
-    if (empty($_POST['package_identifier']) && !$acpRepairHasFileUpload) {
+    recoveryFormLoadingScript();
+    if (recoveryWasPostTruncated()) {
+        recoveryRenderPostTruncatedWarning();
+    }
+
+    $acpModeUrl = recoveryBuildModeUrl(RECOVERY_MODE_ACP_REPAIR, $authHash);
+
+    if (recoveryAcpShouldShowInputForm()) {
 ?>
-    <form method="POST" action="?mode=<?= RECOVERY_MODE_ACP_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>">
+    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($acpModeUrl) ?>" data-recovery-loading="Paket wird analysiert …">
+        <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_ACP_REPAIR, $authHash); ?>
         <div class="form-group">
             <label>Option 1: Package-Identifier manuell eingeben</label>
             <input type="text" name="package_identifier" placeholder="z.B. de.example.my-plugin" autocomplete="off">
@@ -3425,16 +3696,19 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 
     <hr>
 
-    <form method="POST" enctype="multipart/form-data" action="?mode=<?= RECOVERY_MODE_ACP_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>">
+    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($acpModeUrl) ?>" data-recovery-loading="Paket wird hochgeladen und analysiert …">
+        <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_ACP_REPAIR, $authHash); ?>
         <div class="form-group">
             <label>Option 2: Package-Datei hochladen (.tar, .tar.gz, .tgz – max. 100 MiB)</label>
-            <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz">
+            <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz" required>
         </div>
         <button type="submit"><i class="fa-solid fa-wrench"></i> Mit Datei reparieren</button>
     </form>
 <?php
     } else {
-        $packageInput = recoveryResolvePackageInputFromRequest();
+        echo '<div id="recovery-loading-overlay" class="recovery-loading" style="display:block">Paket wird analysiert …</div>';
+        try {
+        $packageInput = recoveryResolvePackageInputFromRequest($authHash);
         if (isset($packageInput['error'])) {
             echo '<div class="alert alert-error"><strong>Fehler:</strong> '
                 . \htmlspecialchars($packageInput['error']) . '</div>';
@@ -3481,7 +3755,9 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                         echo '<td>' . \htmlspecialchars($item['menuItemController'] ?: '-') . '</td></tr>';
                     }
                     echo '</tbody></table><br>';
-                    echo '<form method="POST" action="?mode=' . RECOVERY_MODE_ACP_REPAIR . '&amp;t=' . \htmlspecialchars($authHash) . '">';
+                    echo '<form method="POST" enctype="multipart/form-data" action="' . \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_ACP_REPAIR, $authHash)) . '">';
+                    echo '<input type="hidden" name="mode" value="' . RECOVERY_MODE_ACP_REPAIR . '">';
+                    echo '<input type="hidden" name="t" value="' . \htmlspecialchars($authHash, ENT_QUOTES, 'UTF-8') . '">';
                     echo '<input type="hidden" name="package_identifier" value="' . \htmlspecialchars($packageIdentifier) . '">';
                     if ($extractDir) {
                         echo '<input type="hidden" name="extract_dir" value="' . \htmlspecialchars($extractDir) . '">';
@@ -3511,7 +3787,9 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                         echo '<td>' . \htmlspecialchars($item['menuItemController'] ?: '-') . '</td></tr>';
                     }
                     echo '</tbody></table>';
-                    echo '<form method="POST" action="?mode=' . RECOVERY_MODE_ACP_REPAIR . '&amp;t=' . \htmlspecialchars($authHash) . '">';
+                    echo '<form method="POST" enctype="multipart/form-data" action="' . \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_ACP_REPAIR, $authHash)) . '">';
+                    echo '<input type="hidden" name="mode" value="' . RECOVERY_MODE_ACP_REPAIR . '">';
+                    echo '<input type="hidden" name="t" value="' . \htmlspecialchars($authHash, ENT_QUOTES, 'UTF-8') . '">';
                     echo '<input type="hidden" name="package_identifier" value="' . \htmlspecialchars($packageIdentifier) . '">';
                     if ($extractDir) {
                         echo '<input type="hidden" name="extract_dir" value="' . \htmlspecialchars($extractDir) . '">';
@@ -3562,6 +3840,12 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
             echo '<strong>Fehler:</strong> Kein Package-Identifier konnte ermittelt werden. Bitte versuchen Sie es erneut.';
             echo '</div>';
         }
+        } catch (\Throwable $e) {
+            recoveryRenderProcessingError($e);
+        }
+        $loadingEl = 'var o=document.getElementById("recovery-loading-overlay");if(o){o.style.display="none";}';
+        echo '<script>' . $loadingEl . '</script>';
+        echo '<p style="margin-top:24px"><a href="' . \htmlspecialchars($acpModeUrl) . '" class="back-link"><i class="fa-solid fa-arrow-left"></i> Neue Analyse starten</a></p>';
     }
 }
 
@@ -3575,12 +3859,16 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
     <p class="subtitle">Deinstalliert Plugin komplett – per-Ressource-Auswahl, SQL-Backup &amp; Dry-Run</p>
 
 <?php
-    $uninstallStep = isset($_POST['uninstall_step']) ? (string)\trim($_POST['uninstall_step']) : '';
-    $hasIdentifierInput = (!empty($_POST['package_identifier']))
-        || (isset($_FILES['package_file']) && ($_FILES['package_file']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK);
+    recoveryFormLoadingScript();
+    if (recoveryWasPostTruncated()) {
+        recoveryRenderPostTruncatedWarning();
+    }
 
-    // ── EINGABE-SCREEN ────────────────────────────────────────────────────────
-    if (!$hasIdentifierInput && $uninstallStep === '') {
+    $uninstallModeUrl = recoveryBuildModeUrl(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash);
+    $uninstallStep = recoveryResolveUninstallStep();
+    $showEntryForms = recoveryUninstallShouldShowInputForm();
+
+    if ($showEntryForms) {
 ?>
     <div class="wizardSteps">
         <div class="wizardStep active">
@@ -3597,7 +3885,8 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
         </div>
     </div>
 
-    <form method="POST" action="?mode=<?= RECOVERY_MODE_PLUGIN_UNINSTALL ?>&amp;t=<?= htmlspecialchars($authHash) ?>">
+    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($uninstallModeUrl) ?>" data-recovery-loading="Paket wird analysiert …">
+        <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash); ?>
         <div class="form-group">
             <label>Option 1: Package-Identifier manuell eingeben</label>
             <input type="text" name="package_identifier" placeholder="z.B. de.example.my-plugin" autocomplete="off">
@@ -3608,18 +3897,22 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 
     <hr>
 
-    <form method="POST" enctype="multipart/form-data" action="?mode=<?= RECOVERY_MODE_PLUGIN_UNINSTALL ?>&amp;t=<?= htmlspecialchars($authHash) ?>">
+    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($uninstallModeUrl) ?>" data-recovery-loading="Paket wird hochgeladen und analysiert …">
+        <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash); ?>
         <div class="form-group">
             <label>Option 2: Package-Datei hochladen (.tar, .tar.gz, .tgz – max. 100 MiB)</label>
-            <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz">
+            <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz" required>
             <small style="display:block;margin-top:5px">package.xml wird automatisch ausgelesen – DB-Analyse folgt.</small>
         </div>
         <button type="submit"><i class="fa-solid fa-magnifying-glass"></i> Analysieren</button>
     </form>
 <?php
     } else {
-        // ── Paket laden ───────────────────────────────────────────────────────
-        $packageInput = recoveryResolvePackageInputFromRequest();
+        if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && $uninstallStep === '') {
+            echo '<div id="recovery-loading-overlay" class="recovery-loading" style="display:block">Paket wird analysiert …</div>';
+        }
+        try {
+        $packageInput = recoveryResolvePackageInputFromRequest($authHash);
         if (isset($packageInput['error'])) {
             echo '<div class="alert alert-error"><strong>Fehler:</strong> '
                 . \htmlspecialchars($packageInput['error']) . '</div>';
@@ -3693,7 +3986,9 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                         $packageData, $packageIdentifier, $db, $wcfN, $extractDir
                     );
 
-                    echo '<form method="POST" action="?mode=' . RECOVERY_MODE_PLUGIN_UNINSTALL . '&amp;t=' . \htmlspecialchars($authHash) . '">';
+                    echo '<form method="POST" enctype="multipart/form-data" action="' . \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash)) . '">';
+                    echo '<input type="hidden" name="mode" value="' . RECOVERY_MODE_PLUGIN_UNINSTALL . '">';
+                    echo '<input type="hidden" name="t" value="' . \htmlspecialchars($authHash, ENT_QUOTES, 'UTF-8') . '">';
                     echo '<input type="hidden" name="package_identifier" value="' . \htmlspecialchars($packageIdentifier) . '">';
                     if ($extractDir) {
                         echo '<input type="hidden" name="extract_dir" value="' . \htmlspecialchars($extractDir) . '">';
@@ -3913,7 +4208,9 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     echo '</div>';
 
                     // Formular mit allen Selektionen als Hidden-Inputs → Step 3 (Execute)
-                    echo '<form method="POST" action="?mode=' . RECOVERY_MODE_PLUGIN_UNINSTALL . '&amp;t=' . \htmlspecialchars($authHash) . '">';
+                    echo '<form method="POST" enctype="multipart/form-data" action="' . \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash)) . '">';
+                    echo '<input type="hidden" name="mode" value="' . RECOVERY_MODE_PLUGIN_UNINSTALL . '">';
+                    echo '<input type="hidden" name="t" value="' . \htmlspecialchars($authHash, ENT_QUOTES, 'UTF-8') . '">';
                     echo '<input type="hidden" name="package_identifier" value="' . \htmlspecialchars($packageIdentifier) . '">';
                     if ($extractDir) {
                         echo '<input type="hidden" name="extract_dir" value="' . \htmlspecialchars($extractDir) . '">';
@@ -4075,9 +4372,17 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                         recoveryRenderExceptionDetails($e);
                         echo '</div>';
                     }
+                } else {
+                    echo '<div class="alert alert-error"><strong>Fehler:</strong> Unbekannter Wizard-Schritt (uninstall_step='
+                        . \htmlspecialchars($uninstallStep) . ').</div>';
                 }
             }
         }
+        } catch (\Throwable $e) {
+            recoveryRenderProcessingError($e);
+        }
+        echo '<script>var o=document.getElementById("recovery-loading-overlay");if(o){o.style.display="none";}</script>';
+        echo '<p style="margin-top:24px"><a href="' . \htmlspecialchars($uninstallModeUrl) . '" class="back-link"><i class="fa-solid fa-arrow-left"></i> Neue Analyse starten</a></p>';
     }
 }
 
