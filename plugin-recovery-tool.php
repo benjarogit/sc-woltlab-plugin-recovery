@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.2.0
+ * @version 1.2.1
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -55,7 +55,14 @@ function recoveryBootstrapDatabase()
     }
 
     require_once WCF_DIR . 'lib/system/api/autoload.php';
-    require_once WCF_DIR . 'lib/core.functions.php';
+    require_once WCF_DIR . 'lib/system/WCF.class.php';
+
+    // Nur WoltLab-Autoloader – core.functions.php setzt Exception-Handler für WCF,
+    // bevor die Klasse in älteren Ladereihenfolgen verfügbar war.
+    if (!\defined('RECOVERY_WCF_AUTOLOAD')) {
+        \define('RECOVERY_WCF_AUTOLOAD', true);
+        \spl_autoload_register([\wcf\system\WCF::class, 'autoload'], true, true);
+    }
 
     $dbHost = $dbUser = $dbPassword = $dbName = '';
     $dbPort = 0;
@@ -105,8 +112,6 @@ function recoveryDetectWcfN(\wcf\system\database\Database $db): int
 
 function recoveryInjectDatabaseIntoWcf(\wcf\system\database\Database $db): void
 {
-    require_once WCF_DIR . 'lib/system/WCF.class.php';
-
     $reflection = new \ReflectionClass(\wcf\system\WCF::class);
     $property = $reflection->getProperty('dbObj');
     $property->setAccessible(true);
