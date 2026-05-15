@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.2.2
+ * @version 1.2.3
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -479,7 +479,7 @@ function recoveryRenderStandaloneMessage(string $documentTitle, string $contentT
     recoveryRenderPageEnd($assets);
 }
 
-function recoveryRenderPageStart(string $documentTitle, string $contentTitle, ?array $assets = null): void
+function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '', ?array $assets = null): void
 {
     $assets ??= recoveryGetSetupAssets();
     ?>
@@ -489,12 +489,32 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle, ?a
     <meta charset="utf-8">
     <meta name="robots" content="noindex">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title><?= \htmlspecialchars($documentTitle) ?> - WoltLab Suite</title>
+    <title><?= \htmlspecialchars($documentTitle) ?></title>
     <?php if ($assets['WCFSetup.css'] !== ''): ?>
     <link rel="stylesheet" href="<?= \htmlspecialchars($assets['WCFSetup.css']) ?>">
     <?php endif; ?>
     <style>
-        /* ── Dark Theme (Standard) ───────────────────────────── */
+        /* WCFSetup.css neutralisieren – einfaches Container-Layout beibehalten */
+        .pageHeaderContainer, .pageHeaderFacade, .pageHeader, .pageHeaderLogo,
+        .pageContainer, #pageContainer, .pageNavigation,
+        #acpPageContentContainer, .acpPageContentContainer,
+        .layoutBoundary, .contentHeader, .contentTitle, .content,
+        #pageFooter, .pageFooter, .pageFooterCopyright, .copyright {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            max-width: none !important;
+            min-height: 0 !important;
+        }
+        .section, .sectionHeader, .sectionTitle, .sectionDescription,
+        .formSubmit, .recoveryModeGrid, .recoveryModeCard, .recoveryBackLink {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+        }
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -521,60 +541,72 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle, ?a
         footer a { color: inherit; text-decoration: none; }
         footer a:hover { color: #fff; }
         h1 { color: #fff; margin-bottom: 10px; font-size: 32px; font-weight: 300; }
-        h2 { color: #fff; margin: 40px 0 10px; font-size: 24px; font-weight: 300; }
+        h2 { color: #fff; margin: 40px 0 10px 0; font-size: 24px; font-weight: 300; }
         .subtitle { color: #9D9D9D; margin-bottom: 30px; font-size: 14px; }
         code { color: #fff; font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; word-break: break-word; }
-        .mode-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }
-        .mode-button { display: block; padding: 20px; background: rgba(0,0,0,.125); border: 1px solid #444; border-radius: 3px; text-decoration: none; color: #c0c0c0; text-align: center; transition: all .2s; cursor: pointer; }
-        .mode-button:hover { background: rgba(0,0,0,.25); border-color: #666; }
+        .mode-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .mode-button {
+            display: block;
+            padding: 20px;
+            background: rgba(0, 0, 0, .125);
+            border: 1px solid #444444;
+            border-radius: 3px;
+            text-decoration: none;
+            color: #c0c0c0;
+            text-align: center;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        .mode-button:hover { background: rgba(0, 0, 0, .25); border-color: #666; }
         .mode-button strong { display: block; font-size: 18px; margin-bottom: 8px; color: #fff; }
         .mode-button span { font-size: 13px; color: #9D9D9D; }
         .form-group { margin-bottom: 20px; }
         label { display: block; margin-bottom: 8px; font-weight: 600; color: #fff; }
-        input[type="text"], input[type="password"], textarea, select { width: 100%; padding: 10px; border: 1px solid #444; border-radius: 3px; font-size: 14px; background: #2D2D2D; color: #c0c0c0; }
-        input[type="file"] { width: 100%; padding: 10px; border: 1px dashed #444; border-radius: 3px; background: #2D2D2D; color: #c0c0c0; }
-        button, .button { background: #369; color: white; padding: 12px 24px; border: none; border-radius: 3px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background .2s; display: inline-block; text-decoration: none; }
+        input[type="text"], input[type="password"], textarea, select {
+            width: 100%; padding: 10px; border: 1px solid #444444; border-radius: 3px;
+            font-size: 14px; background: #2D2D2D; color: #c0c0c0;
+        }
+        input[type="file"] {
+            width: 100%; padding: 10px; border: 1px dashed #444444; border-radius: 3px;
+            background: #2D2D2D; color: #c0c0c0;
+        }
+        button, .button {
+            background: #369; color: white; padding: 12px 24px; border: none; border-radius: 3px;
+            font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s;
+            display: inline-block; text-decoration: none;
+        }
         button:hover, .button:hover { background: #258; }
         .btn-danger { background: #c33; }
         .btn-danger:hover { background: #a22; }
         .btn-success { background: #3c3; }
         .btn-success:hover { background: #2a2; }
         .alert { padding: 15px 20px; margin-bottom: 20px; border-radius: 3px; color: #fff; }
-        .alert-success { background: rgba(60,204,60,.3); border: 1px solid #3c3; }
-        .alert-error   { background: rgba(204,51,51,.3);  border: 1px solid #c33; }
-        .alert-info    { background: rgba(51,102,153,.3); border: 1px solid #369; }
-        .alert-warning { background: rgba(204,153,51,.3); border: 1px solid #c93; }
-        /* p.info/success/error/warning (aktuell genutzt) */
-        p.info, p.success, p.error, p.warning { padding: 15px 20px; margin-bottom: 20px; border-radius: 3px; color: #fff; border: 1px solid; }
-        p.info    { background: rgba(51,102,153,.3);  border-color: #369; }
-        p.success { background: rgba(60,204,60,.3);   border-color: #3c3; }
-        p.error   { background: rgba(204,51,51,.3);   border-color: #c33; }
-        p.warning { background: rgba(204,153,51,.3);  border-color: #c93; }
-        .back-link, .recoveryBackLink { display: inline-block; margin-bottom: 20px; color: #fff; text-decoration: none; }
-        .back-link:hover, .recoveryBackLink:hover { text-decoration: underline; }
-        pre { background: #2D2D2D; padding: 15px; border-radius: 3px; overflow-x: auto; font-size: 13px; color: #c0c0c0; border: 1px solid #444; }
+        .alert-success { background: rgba(60, 204, 60, 0.3); border: 1px solid #3c3; }
+        .alert-error { background: rgba(204, 51, 51, 0.3); border: 1px solid #c33; }
+        .alert-info { background: rgba(51, 102, 153, 0.3); border: 1px solid #369; }
+        .alert-warning { background: rgba(204, 153, 51, 0.3); border: 1px solid #c93; }
+        .back-link { display: inline-block; margin-bottom: 20px; color: #fff; text-decoration: none; }
+        .back-link:hover { text-decoration: underline; }
+        pre {
+            background: #2D2D2D; padding: 15px; border-radius: 3px; overflow-x: auto;
+            font-size: 13px; color: #c0c0c0; border: 1px solid #444444;
+        }
         pre.recoveryLog { max-height: 340px; }
         small { color: #9D9D9D; }
         .table, table { width: 100%; border-collapse: collapse; margin: 15px 0; }
-        .table th, .table td, table th, table td { padding: 10px 20px; text-align: left; border-bottom: 1px solid #444; color: #c0c0c0; }
-        .table th, table th { border-top: 1px solid #444; border-bottom-width: 2px; font-weight: 600; color: #fff; }
-        .table tbody tr:nth-child(odd), table tbody tr:nth-child(odd) { background: rgba(0,0,0,.125); }
-        .table tbody tr:hover, table tbody tr:hover { background: rgba(0,0,0,.25); }
-        hr { border: none; border-top: 1px solid #444; margin: 30px 0; }
-        /* formSubmit (neue Klasse) */
-        .formSubmit { margin-top: 20px; }
-        /* section/sectionHeader aus neuer Struktur */
-        .section { background: rgba(0,0,0,.15); border: 1px solid #444; border-radius: 3px; padding: 25px; margin-bottom: 20px; }
-        .sectionTitle { color: #fff; font-size: 20px; font-weight: 300; margin: 0 0 8px; }
-        .sectionDescription { color: #9D9D9D; font-size: 13px; margin: 0 0 15px; }
-        /* mode grid (neue Klasse) */
-        .recoveryModeGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }
-        .recoveryModeCard { display: block; padding: 20px; background: rgba(0,0,0,.125); border: 1px solid #444; border-radius: 3px; text-decoration: none; color: #c0c0c0; text-align: center; transition: all .2s; }
-        .recoveryModeCard:hover { background: rgba(0,0,0,.25); border-color: #666; }
-        .recoveryModeCard strong { display: block; font-size: 18px; margin-bottom: 8px; color: #fff; }
-        .recoveryModeCard span { font-size: 13px; color: #9D9D9D; }
+        .table th, .table td, table th, table td {
+            padding: 10px 20px; text-align: left; border-bottom: 1px solid #444444; color: #c0c0c0;
+        }
+        .table th, table th { border-top: 1px solid #444444; border-bottom-width: 2px; font-weight: 600; color: #fff; }
+        .table tbody tr:nth-child(odd), table tbody tr:nth-child(odd) { background: rgba(0, 0, 0, .125); }
+        .table tbody tr:hover, table tbody tr:hover { background: rgba(0, 0, 0, .25); }
+        hr { border: none; border-top: 1px solid #444444; margin: 30px 0; }
 
-        /* ── Light Mode (automatisch per System-Einstellung) ─── */
         @media (prefers-color-scheme: light) {
             body { background: #f0f0f0; color: #333; }
             .container { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
@@ -583,148 +615,26 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle, ?a
             h1, h2 { color: #333; }
             .subtitle { color: #666; }
             code { color: #369; background: #f0f4ff; padding: 1px 5px; border-radius: 2px; }
-            .mode-button, .recoveryModeCard { background: #f9f9f9; border-color: #ddd; color: #333; }
-            .mode-button:hover, .recoveryModeCard:hover { background: #f0f4ff; border-color: #369; }
-            .mode-button strong, .recoveryModeCard strong { color: #333; }
-            .mode-button span, .recoveryModeCard span { color: #666; }
+            .mode-button { background: #f9f9f9; border-color: #ddd; color: #333; }
+            .mode-button:hover { background: #f0f4ff; border-color: #369; }
+            .mode-button strong { color: #333; }
+            .mode-button span { color: #666; }
             label { color: #333; }
             input[type="text"], input[type="password"], textarea, select { background: #fff; border-color: #ccc; color: #333; }
             input[type="file"] { background: #fff; border-color: #ccc; color: #333; }
-            button, .button, .formSubmit input[type="submit"] { background: #369; color: #fff; }
-            .alert, p.info, p.success, p.error, p.warning { color: #333; }
-            .alert-info,  p.info    { background: rgba(51,102,153,.08);  border-color: #369; }
-            .alert-success, p.success { background: rgba(51,153,51,.08); border-color: #3a3; }
-            .alert-error, p.error   { background: rgba(204,51,51,.08);   border-color: #c33; }
-            .alert-warning, p.warning { background: rgba(200,120,40,.08); border-color: #c83; }
-            .back-link, .recoveryBackLink { color: #369; }
+            .alert { color: #333; }
+            .alert-info { background: rgba(51,102,153,.08); border-color: #369; }
+            .alert-success { background: rgba(51,153,51,.08); border-color: #3a3; }
+            .alert-error { background: rgba(204,51,51,.08); border-color: #c33; }
+            .alert-warning { background: rgba(200,120,40,.08); border-color: #c83; }
+            .back-link { color: #369; }
             pre { background: #fafafa; border-color: #ddd; color: #333; }
             .table th, .table td, table th, table td { border-color: #ddd; color: #333; }
             .table th, table th { color: #555; border-top-color: #ddd; }
             .table tbody tr:nth-child(odd), table tbody tr:nth-child(odd) { background: rgba(0,0,0,.03); }
             .table tbody tr:hover, table tbody tr:hover { background: rgba(0,0,0,.06); }
             hr { border-top-color: #ddd; }
-            .section { background: #f9f9f9; border-color: #ddd; }
-            .sectionTitle { color: #333; }
-            .sectionDescription { color: #666; }
             small { color: #777; }
-        }
-    </style>
-        /* ── Standard: Dark Theme (original) ─────────────────── */
-        *, *::before, *::after { box-sizing: border-box; min-width: 0; }
-
-        html, body {
-            background: #2D2D2D;
-            color: #c0c0c0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            line-height: 1.5;
-        }
-
-        /* Header */
-        .pageHeaderContainer, .pageHeaderFacade { background: #1D1D1D !important; border-bottom: 1px solid #444 !important; }
-        .pageHeaderLogo { padding: 20px 0; }
-
-        /* Content */
-        #acpPageContentContainer, .acpPageContentContainer { background: #2D2D2D; padding: 40px 20px 60px; }
-        .layoutBoundary { max-width: 1020px; margin: 0 auto; padding: 0; }
-        .content { max-width: 980px; }
-        .contentHeader { margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #444; }
-        .contentTitle { color: #fff; font-size: 32px; font-weight: 300; margin: 0; }
-
-        /* Sections */
-        .section { background: #3D3D3D; border: 1px solid #444; border-radius: 3px; padding: 30px; margin-bottom: 20px; }
-        .sectionHeader { margin-bottom: 20px; }
-        .sectionTitle { color: #fff; font-size: 24px; font-weight: 300; margin: 0 0 6px; }
-        .sectionDescription { color: #9D9D9D; font-size: 14px; margin: 0; }
-
-        /* Alerts */
-        p.info, p.success, p.error, p.warning {
-            padding: 15px 20px; border-radius: 3px; margin: 0 0 20px; color: #fff; border: 1px solid;
-        }
-        p.info    { background: rgba(51,102,153,.3);  border-color: #369; }
-        p.success { background: rgba(60,204,60,.3);   border-color: #3c3; }
-        p.error   { background: rgba(204,51,51,.3);   border-color: #c33; }
-        p.warning { background: rgba(204,153,51,.3);  border-color: #c93; }
-
-        /* Forms */
-        dl { margin: 0 0 16px; }
-        dl dt label { display: block; font-weight: 600; color: #fff; margin-bottom: 8px; }
-        dl dd { margin: 0; }
-        input[type="text"], input[type="password"], input[type="file"], textarea, select {
-            width: 100%; padding: 10px; border: 1px solid #444; border-radius: 3px;
-            background: #2D2D2D; color: #c0c0c0; font-size: 14px;
-        }
-        input[type="text"]:focus, input[type="password"]:focus { border-color: #369; outline: none; }
-        small { color: #9D9D9D; font-size: 13px; display: block; margin-top: 4px; }
-        hr { border: none; border-top: 1px solid #444; margin: 30px 0; }
-
-        /* Buttons */
-        .formSubmit { margin-top: 20px; }
-        .formSubmit input[type="submit"], .formSubmit a, button {
-            background: #369; color: #fff; padding: 12px 24px; border: none; border-radius: 3px;
-            font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none;
-            display: inline-block; transition: background .2s;
-        }
-        .formSubmit input[type="submit"]:hover, .formSubmit a:hover, button:hover { background: #258; }
-
-        /* Tables */
-        table { width: 100%; border-collapse: collapse; margin: 15px 0; }
-        table th, table td { padding: 10px 20px; text-align: left; border-bottom: 1px solid #444; color: #c0c0c0; }
-        table th { border-top: 1px solid #444; border-bottom-width: 2px; font-weight: 600; color: #fff; }
-        table tbody tr:nth-child(odd) { background: rgba(0,0,0,.125); }
-        table tbody tr:hover { background: rgba(0,0,0,.25); }
-
-        /* Code */
-        code { color: #fff; font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; word-break: break-word; }
-        pre, pre.recoveryLog { background: #2D2D2D; border: 1px solid #444; border-radius: 3px; padding: 15px; color: #c0c0c0; font-size: 13px; overflow-x: auto; max-height: 340px; }
-
-        /* Mode grid */
-        .recoveryModeGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0 30px; }
-        .recoveryModeCard { display: block; padding: 20px; background: rgba(0,0,0,.125); border: 1px solid #444; border-radius: 3px; text-decoration: none; color: #c0c0c0; text-align: center; transition: background .2s, border-color .2s; }
-        .recoveryModeCard:hover { background: rgba(0,0,0,.25); border-color: #666; }
-        .recoveryModeCard strong { display: block; font-size: 18px; font-weight: 600; margin-bottom: 8px; color: #fff; }
-        .recoveryModeCard span { font-size: 13px; color: #9D9D9D; }
-
-        /* Back link & footer */
-        .recoveryBackLink { display: inline-block; margin-bottom: 20px; color: #fff; text-decoration: none; }
-        .recoveryBackLink:hover { text-decoration: underline; }
-        #pageFooter, .pageFooter { background: #1D1D1D; border-top: 1px solid #444; }
-        .pageFooterCopyright { padding: 10px 0; }
-        .copyright { text-align: right; color: #9D9D9D; font-size: 13px; }
-        .copyright a { color: #9D9D9D; text-decoration: none; }
-        .copyright a:hover { color: #fff; }
-
-        /* ── Light Mode (automatisch) ─────────────────────────── */
-        @media (prefers-color-scheme: light) {
-            html, body { background: #f5f5f5; color: #333; }
-            .pageHeaderContainer, .pageHeaderFacade { background: #fff !important; border-bottom-color: #ddd !important; }
-            #acpPageContentContainer, .acpPageContentContainer { background: #f5f5f5; }
-            .contentHeader { border-bottom-color: #ddd; }
-            .contentTitle { color: #333; }
-            .section { background: #fff; border-color: #ddd; }
-            .sectionTitle { color: #333; font-weight: 500; }
-            .sectionDescription { color: #777; }
-            p.info    { background: rgba(51,102,153,.08);  border-color: #369; color: #333; }
-            p.success { background: rgba(51,153,51,.08);   border-color: #3a3; color: #333; }
-            p.error   { background: rgba(204,51,51,.08);   border-color: #c33; color: #333; }
-            p.warning { background: rgba(204,153,51,.08);  border-color: #c93; color: #333; }
-            input[type="text"], input[type="password"], input[type="file"], textarea, select { background: #fff; border-color: #ccc; color: #333; }
-            dl dt label { color: #333; }
-            small { color: #777; }
-            table th, table td { border-color: #ddd; color: #333; }
-            table th { color: #555; border-top-color: #ddd; }
-            table tbody tr:nth-child(odd) { background: rgba(0,0,0,.03); }
-            table tbody tr:hover { background: rgba(0,0,0,.06); }
-            code { color: #369; }
-            pre, pre.recoveryLog { background: #fafafa; border-color: #ddd; color: #333; }
-            hr { border-top-color: #ddd; }
-            .recoveryModeCard { background: #fff; border-color: #ddd; color: #333; }
-            .recoveryModeCard:hover { background: #f0f0f0; border-color: #369; }
-            .recoveryModeCard strong { color: #333; }
-            .recoveryModeCard span { color: #777; }
-            .recoveryBackLink { color: #369; }
-            #pageFooter, .pageFooter { background: #fff; border-top-color: #ddd; }
-            .copyright, .copyright a { color: #999; }
-            .copyright a:hover { color: #369; }
         }
     </style>
 </head>
@@ -757,7 +667,7 @@ function recoveryRenderPageEnd(?array $assets = null): void
 
 function recoveryRenderBackLink(string $href): void
 {
-    echo '<a href="' . \htmlspecialchars($href) . '" class="recoveryBackLink">&#8592; Zurück zur Auswahl</a>';
+    echo '<a href="' . \htmlspecialchars($href) . '" class="back-link">&#8592; Zurück zur Auswahl</a>';
 }
 
 // ============================================================================
@@ -795,10 +705,10 @@ if ($action === 'cleanup') {
     recoveryRenderStandaloneMessage(
         'Recovery Tool entfernt',
         'Recovery Tool entfernt',
-        '<p class="success"><strong>Recovery Tool erfolgreich entfernt.</strong></p>'
+        '<div class="alert alert-success"><strong>Recovery Tool erfolgreich entfernt.</strong></div>'
         . '<p>Folgende Dateien wurden gelöscht:</p>'
         . '<ul><li>plugin-recovery-tool.php</li><li>plugin-recovery-auth.php</li><li>uploads/</li></ul>'
-        . '<p class="info"><strong>Diese Seite ist nicht mehr erreichbar.</strong></p>'
+        . '<div class="alert alert-info"><strong>Diese Seite ist nicht mehr erreichbar.</strong></div>'
     );
     exit;
 }
@@ -1649,7 +1559,7 @@ function generateCleanupSql($resources, $wcfN) {
  * Zeigt Vorschau der gefundenen Ressourcen
  */
 function displayResourcePreview($resources, $wcfN, $packageIdentifier) {
-    echo '<section class="section"><p class="info"><strong>Gefundene Ressourcen aus Package-Datei:</strong><br>';
+    echo '<div class="alert alert-info"><strong>Gefundene Ressourcen aus Package-Datei:</strong><br>';
     echo '<small>WCF_N: ' . htmlspecialchars($wcfN) . '</small><br><br>';
 
     $hasResources = false;
@@ -1733,7 +1643,7 @@ function displayResourcePreview($resources, $wcfN, $packageIdentifier) {
         echo '<em>Keine zusätzlichen Ressourcen in Package-Datei gefunden.</em><br>';
     }
 
-    echo '</p></section>';
+    echo '</div>';
 }
 
 recoveryRenderPageStart('Plugin Recovery Tool', 'Plugin Recovery Tool');
@@ -1741,40 +1651,40 @@ recoveryRenderPageStart('Plugin Recovery Tool', 'Plugin Recovery Tool');
 // Auth-Screen anzeigen wenn nicht authentifiziert
 if (!$isAuthenticated) {
 ?>
-    <p class="info">Authentifizierung erforderlich. Folgen Sie den drei Schritten.</p>
+    <h1>Plugin Recovery Tool</h1>
+    <p class="subtitle">Authentifizierung erforderlich</p>
 
-    <section class="section">
-        <header class="sectionHeader">
-            <h2 class="sectionTitle">Schritt 1: Auth-Datei herunterladen</h2>
-        </header>
-        <p class="info">
-            <a href="?action=download-auth-file&amp;t=<?= htmlspecialchars($authHash) ?>" id="downloadBtn">plugin-recovery-auth.php herunterladen</a>
-        </p>
-    </section>
+    <div class="alert alert-warning">
+        <strong>Schritt 1:</strong> Auth-Datei herunterladen<br>
+        <a href="?action=download-auth-file&amp;t=<?= htmlspecialchars($authHash) ?>" class="button" style="display: inline-block; margin-top: 10px;" id="downloadBtn">
+            plugin-recovery-auth.php herunterladen
+        </a>
+    </div>
 
-    <section class="section" id="step2" hidden>
-        <header class="sectionHeader">
-            <h2 class="sectionTitle">Schritt 2: Datei hochladen</h2>
-            <p class="sectionDescription">Laden Sie <code><?= htmlspecialchars($authFilename) ?></code> in dasselbe Verzeichnis wie <code>plugin-recovery-tool.php</code> hoch.</p>
-        </header>
-    </section>
+    <div class="alert alert-info" style="margin-top: 20px;" id="step2" style="display: none;">
+        <strong>Schritt 2:</strong> Datei hochladen<br>
+        Laden Sie die heruntergeladene Datei <code><?= htmlspecialchars($authFilename) ?></code> in dasselbe Verzeichnis hoch,
+        in dem sich diese <code>plugin-recovery-tool.php</code> befindet.
+    </div>
 
-    <section class="section" id="step3" hidden>
-        <header class="sectionHeader">
-            <h2 class="sectionTitle">Schritt 3: Recovery starten</h2>
-        </header>
-        <div class="formSubmit">
-            <a href="?t=<?= htmlspecialchars($authHash) ?>">Recovery Tool starten</a>
-        </div>
-    </section>
+    <div class="alert alert-info" style="margin-top: 20px;" id="step3" style="display: none;">
+        <strong>Schritt 3:</strong> Recovery starten<br>
+        <a href="?t=<?= htmlspecialchars($authHash) ?>" class="button btn-success" style="margin-top: 10px;">
+            Recovery Tool starten
+        </a>
+    </div>
 
-    <p class="error"><strong>Sicherheitshinweis:</strong> Löschen Sie <code>plugin-recovery-tool.php</code> und <code><?= htmlspecialchars($authFilename) ?></code> nach der Verwendung.</p>
+    <div class="alert alert-error" style="margin-top: 30px;">
+        <strong>Sicherheitshinweis:</strong><br>
+        Löschen Sie beide Dateien (<code>plugin-recovery-tool.php</code> und <code><?= htmlspecialchars($authFilename) ?></code>)
+        nach der Verwendung. Diese Dateien können ein Sicherheitsrisiko darstellen!
+    </div>
 
     <script>
     document.getElementById('downloadBtn').addEventListener('click', function() {
         setTimeout(function() {
-            document.getElementById('step2').hidden = false;
-            document.getElementById('step3').hidden = false;
+            document.getElementById('step2').style.display = 'block';
+            document.getElementById('step3').style.display = 'block';
         }, 500);
     });
     </script>
@@ -1792,8 +1702,8 @@ if (!$isAuthenticated) {
 try {
     $recoveryDb = recoveryBootstrapDatabase();
 } catch (\Throwable $e) {
-    echo '<p class="error"><strong>Bootstrap-Fehler:</strong> '
-        . htmlspecialchars($e->getMessage()) . '</p>';
+    echo '<div class="alert alert-error"><strong>Bootstrap-Fehler:</strong> '
+        . htmlspecialchars($e->getMessage()) . '</div>';
     recoveryRenderPageEnd();
     exit;
 }
@@ -1818,83 +1728,72 @@ $mode = isset($_GET['mode']) ? (int)$_GET['mode'] : RECOVERY_MODE_SELECTION;
 
 if ($mode === RECOVERY_MODE_SELECTION) {
 ?>
-    <p class="info">Wählen Sie den gewünschten Recovery-Modus. Dieses Tool arbeitet direkt auf Datenbank-Ebene und sollte nur im Notfall verwendet werden.</p>
+    <h1>WoltLab Suite Recovery Tool</h1>
+    <p class="subtitle">Wählen Sie den gewünschten Recovery-Modus</p>
 
-    <div class="recoveryModeGrid">
-        <a href="?mode=<?= RECOVERY_MODE_ACP_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="recoveryModeCard">
+    <div class="mode-grid">
+        <a href="?mode=<?= RECOVERY_MODE_ACP_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
             <strong>ACP Repair</strong>
             <span>Repariert defekte ACP-Menüeinträge eines Plugins</span>
         </a>
-        <a href="?mode=<?= RECOVERY_MODE_PLUGIN_UNINSTALL ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="recoveryModeCard">
+        <a href="?mode=<?= RECOVERY_MODE_PLUGIN_UNINSTALL ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
             <strong>Plugin Uninstall</strong>
             <span>Deinstalliert Plugin komplett (DB + Dateien)</span>
         </a>
-        <a href="?mode=<?= RECOVERY_MODE_USER_MANAGEMENT ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="recoveryModeCard">
+        <a href="?mode=<?= RECOVERY_MODE_USER_MANAGEMENT ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
             <strong>User Management</strong>
-            <span>Hinweis zum offiziellen WoltLab Recovery Tool</span>
+            <span>Admin-Passwort zurücksetzen &amp; Berechtigungen</span>
         </a>
-        <a href="?mode=<?= RECOVERY_MODE_CACHE_CLEAR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="recoveryModeCard">
+        <a href="?mode=<?= RECOVERY_MODE_CACHE_CLEAR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
             <strong>Cache Clear</strong>
-            <span>Löscht alle Caches und kompilierte Templates</span>
+            <span>Löscht alle Caches &amp; kompilierte Templates</span>
         </a>
     </div>
 
-    <section class="section">
-        <header class="sectionHeader">
-            <h2 class="sectionTitle">Recovery Tool entfernen</h2>
-            <p class="sectionDescription">Nach Abschluss aller Reparaturen sollten Sie diese Datei löschen.</p>
-        </header>
-        <div class="formSubmit">
-            <a href="?action=cleanup&amp;t=<?= htmlspecialchars($authHash) ?>" onclick="return confirm('ACHTUNG: Dies löscht plugin-recovery-tool.php, plugin-recovery-auth.php und alle Upload-Verzeichnisse. Fortfahren?')">Recovery Tool vollständig entfernen</a>
-        </div>
-    </section>
+    <div class="alert alert-info">
+        <strong>Hinweis:</strong> Dieses Tool arbeitet direkt auf Datenbank-Ebene und sollte nur im Notfall verwendet werden.
+    </div>
+
+    <div class="alert alert-warning" style="margin-top: 30px;">
+        <strong>Fertig mit Recovery?</strong><br>
+        Wenn Sie alle Reparaturen abgeschlossen haben, sollten Sie das Recovery Tool und alle zugehörigen Dateien löschen.<br><br>
+        <a href="?action=cleanup&amp;t=<?= htmlspecialchars($authHash) ?>" class="button btn-danger" onclick="return confirm('ACHTUNG: Dies löscht plugin-recovery-tool.php, plugin-recovery-auth.php und alle Upload-Verzeichnisse. Fortfahren?')">
+            Recovery Tool vollständig entfernen
+        </a>
+    </div>
 
 <?php
 }
 
-// ============================================================================
-// MODUS 1: ACP REPAIR
-// ============================================================================
-
 elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 ?>
-    <?php recoveryRenderBackLink("?t=" . $authHash); ?>
-    <p class="info">Repariert defekte ACP-Menüeinträge eines Plugins.</p>
+    <a href="?t=<?= htmlspecialchars($authHash) ?>" class="back-link">&#8592; Zurück zur Auswahl</a>
+    <h1>ACP Repair</h1>
+    <p class="subtitle">Repariert defekte ACP-Menüeinträge eines Plugins</p>
 
 <?php
     // Schritt 1: Package-Identifier eingeben oder hochladen
     if (!isset($_POST['package_identifier']) && !isset($_FILES['package_file'])) {
 ?>
     <form method="POST">
-        <section class="section">
-            <header class="sectionHeader">
-                <h2 class="sectionTitle">Package-Identifier eingeben</h2>
-                <p class="sectionDescription">Der eindeutige Bezeichner des Plugins (z.&thinsp;B. <code>de.example.my-plugin</code>).</p>
-            </header>
-            <dl>
-                <dt><label for="package_identifier_acp">Identifier</label></dt>
-                <dd><input type="text" id="package_identifier_acp" name="package_identifier" class="long" placeholder="de.example.my-plugin" autocomplete="off"></dd>
-            </dl>
-            <div class="formSubmit">
-                <input type="submit" value="Mit Identifier reparieren">
-            </div>
-        </section>
+        <div class="form-group">
+            <label>Option 1: Package-Identifier manuell eingeben</label>
+            <input type="text" name="package_identifier" placeholder="z.B. de.example.my-plugin" autocomplete="off">
+            <small style="display: block; margin-top: 5px;">
+                Der eindeutige Bezeichner des Plugins, dessen ACP-Menüeinträge repariert werden sollen.
+            </small>
+        </div>
+        <button type="submit">Mit Identifier reparieren</button>
     </form>
 
+    <hr>
+
     <form method="POST" enctype="multipart/form-data">
-        <section class="section">
-            <header class="sectionHeader">
-                <h2 class="sectionTitle">Package-Datei hochladen</h2>
-                <p class="sectionDescription">Lädt das Archiv hoch und erkennt automatisch alle Ressourcen.</p>
-            </header>
-            <dl>
-                <dt><label for="package_file_acp">Archiv (.tar, .tar.gz)</label></dt>
-                <dd><input type="file" id="package_file_acp" name="package_file" accept=".tar,.tar.gz,.tgz"></dd>
-            </dl>
-            <div class="formSubmit">
-                <input type="submit" value="Mit Datei reparieren">
-            </div>
-        </section>
+        <div class="form-group">
+            <label>Option 2: Package-Datei hochladen (.tar oder .tar.gz)</label>
+            <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz">
+        </div>
+        <button type="submit">Mit Datei reparieren</button>
     </form>
 <?php
     } else {
@@ -1925,13 +1824,13 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                     $packageIdentifier = extractPackageIdentifier($packageXml);
 
                     if (!$packageIdentifier) {
-                        echo '<p class="error">Fehler: package.xml konnte nicht gelesen werden.</p>';
+                        echo '<div class="alert alert-error">Fehler: package.xml konnte nicht gelesen werden.</div>';
                     }
                 } else {
-                    echo '<p class="error">Fehler: Archiv konnte nicht entpackt werden.</p>';
+                    echo '<div class="alert alert-error">Fehler: Archiv konnte nicht entpackt werden.</div>';
                 }
             } else {
-                echo '<p class="error">Fehler: Datei-Upload fehlgeschlagen.</p>';
+                echo '<div class="alert alert-error">Fehler: Datei-Upload fehlgeschlagen.</div>';
             }
         }
 
@@ -2000,7 +1899,7 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 
             $menuCount = count($allMenuItems);
 
-            echo '<section class="section"><p class="info"><strong>Warnung:</strong> Plugin nicht in Datenbank gefunden.<br>';
+            echo '<div class="alert alert-info"><strong>Warnung:</strong> Plugin nicht in Datenbank gefunden.<br>';
             echo 'Dies kann bedeuten, dass die Installation fehlgeschlagen ist.<br><br>';
 
             if ($menuCount > 0) {
@@ -2024,13 +1923,13 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                 echo '<form method="POST">';
                 echo '<input type="hidden" name="package_identifier" value="' . htmlspecialchars($packageIdentifier) . '">';
                 echo '<input type="hidden" name="force_cleanup" value="1">';
-                echo '<div class="formSubmit"><input type="submit" value="Diese ' . $menuCount . ' Menüeinträge löschen"></div>';
+                echo '<button type="submit" class="btn-danger">Diese ' . $menuCount . ' Menüeinträge löschen</button>';
                 echo '</form>';
             } else {
                 echo '<strong>Keine ACP-Menüeinträge mit diesen Patterns gefunden.</strong><br>';
                 echo 'Es gibt nichts zu bereinigen.';
             }
-            echo '</p>';
+            echo '</div>';
         } else {
             $packageID = $packageData ? $packageData['packageID'] : null;
             $wcfN = $resources ? $resources['wcfN'] : WCF_N;
@@ -2100,12 +1999,12 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
             }
 
             if (empty($menuItems)) {
-                echo '<p class="info">';
+                echo '<div class="alert alert-info">';
                 echo '<strong>Keine ACP-Menüeinträge gefunden</strong><br>';
                 echo 'Für dieses Plugin existieren keine ACP-Menüeinträge in der Datenbank.';
-                echo '</p>';
+                echo '</div>';
             } elseif (!isset($_POST['confirm_delete'])) {
-                echo '<p class="info">';
+                echo '<div class="alert alert-info">';
                 echo '<strong>Gefundene ACP-Menüeinträge (' . count($menuItems) . '):</strong>';
                 echo '<table>';
                 echo '<thead><tr><th>Menu Item</th><th>Controller</th></tr></thead>';
@@ -2126,9 +2025,9 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                     echo '<input type="hidden" name="force_cleanup" value="1">';
                 }
                 echo '<input type="hidden" name="confirm_delete" value="1">';
-                echo '<div class="formSubmit"><input type="submit" value="Alle löschen"></div>';
+                echo '<button type="submit" class="btn-danger">Alle löschen</button>';
                 echo '</form>';
-                echo '</p>';
+                echo '</div>';
             } else {
                 // Ressourcen erneut analysieren wenn Extract-Dir vorhanden
                 $extractDir = isset($_POST['extract_dir']) ? $_POST['extract_dir'] : null;
@@ -2185,25 +2084,25 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 
                     $db->commitTransaction();
 
-                    echo '<p class="success">';
+                    echo '<div class="alert alert-success">';
                     echo '<strong>✓ ACP-Repair erfolgreich!</strong><br>';
                     echo 'Gelöschte Menüeinträge: ' . $deletedCount . '<br>';
                     echo 'Cache wurde geleert.<br><br>';
-                    echo '<a href="' . htmlspecialchars($recoveryBaseUrl) . 'acp/">Zum ACP</a>';
-                    echo '</p>';
+                    echo '<a href="' . htmlspecialchars($recoveryBaseUrl) . 'acp/" class="btn-success">Zum ACP</a>';
+                    echo '</div>';
 
                 } catch (Exception $e) {
                     $db->rollBackTransaction();
-                    echo '<p class="error">';
+                    echo '<div class="alert alert-error">';
                     echo '<strong>Fehler:</strong> ' . htmlspecialchars($e->getMessage());
-                    echo '</p>';
+                    echo '</div>';
                 }
             }
         }
         } else {
-            echo '<p class="error">';
+            echo '<div class="alert alert-error">';
             echo '<strong>Fehler:</strong> Kein Package-Identifier konnte ermittelt werden. Bitte versuchen Sie es erneut.';
-            echo '</p>';
+            echo '</div>';
         }
     }
 }
@@ -2214,8 +2113,9 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 
 elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 ?>
-    <?php recoveryRenderBackLink("?t=" . $authHash); ?>
-    <p class="info">Deinstalliert ein Plugin komplett aus Datenbank und Dateisystem.</p>
+    <a href="?t=<?= htmlspecialchars($authHash) ?>" class="back-link">&#8592; Zurück zur Auswahl</a>
+    <h1>Plugin Uninstall</h1>
+    <p class="subtitle">Deinstalliert Plugin komplett aus Datenbank und Dateisystem</p>
 
 <?php
     // Schritt 1: Package-Identifier eingeben oder hochladen
@@ -2227,35 +2127,21 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
     if (!$hasPackageIdentifier) {
 ?>
     <form method="POST">
-        <section class="section">
-            <header class="sectionHeader">
-                <h2 class="sectionTitle">Package-Identifier eingeben</h2>
-                <p class="sectionDescription">Der eindeutige Bezeichner des Plugins (z.&thinsp;B. <code>de.example.my-plugin</code>).</p>
-            </header>
-            <dl>
-                <dt><label for="package_identifier_uni">Identifier</label></dt>
-                <dd><input type="text" id="package_identifier_uni" name="package_identifier" class="long" placeholder="de.example.my-plugin" autocomplete="off"></dd>
-            </dl>
-            <div class="formSubmit">
-                <input type="submit" value="Mit Identifier deinstallieren">
-            </div>
-        </section>
+        <div class="form-group">
+            <label>Option 1: Package-Identifier manuell eingeben</label>
+            <input type="text" name="package_identifier" placeholder="z.B. de.example.my-plugin" autocomplete="off">
+        </div>
+        <button type="submit">Mit Identifier deinstallieren</button>
     </form>
 
+    <hr>
+
     <form method="POST" enctype="multipart/form-data">
-        <section class="section">
-            <header class="sectionHeader">
-                <h2 class="sectionTitle">Package-Datei hochladen</h2>
-                <p class="sectionDescription">Lädt das Archiv hoch und erkennt automatisch alle Ressourcen.</p>
-            </header>
-            <dl>
-                <dt><label for="package_file_uni">Archiv (.tar, .tar.gz)</label></dt>
-                <dd><input type="file" id="package_file_uni" name="package_file" accept=".tar,.tar.gz,.tgz"></dd>
-            </dl>
-            <div class="formSubmit">
-                <input type="submit" value="Mit Datei deinstallieren">
-            </div>
-        </section>
+        <div class="form-group">
+            <label>Option 2: Package-Datei hochladen (.tar oder .tar.gz)</label>
+            <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz">
+        </div>
+        <button type="submit">Mit Datei deinstallieren</button>
     </form>
 <?php
     } else {
@@ -2286,13 +2172,13 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     $packageIdentifier = extractPackageIdentifier($packageXml);
 
                     if (!$packageIdentifier) {
-                        echo '<p class="error">Fehler: package.xml konnte nicht gelesen werden.</p>';
+                        echo '<div class="alert alert-error">Fehler: package.xml konnte nicht gelesen werden.</div>';
                     }
                 } else {
-                    echo '<p class="error">Fehler: Archiv konnte nicht entpackt werden.</p>';
+                    echo '<div class="alert alert-error">Fehler: Archiv konnte nicht entpackt werden.</div>';
                 }
             } else {
-                echo '<p class="error">Fehler: Datei-Upload fehlgeschlagen.</p>';
+                echo '<div class="alert alert-error">Fehler: Datei-Upload fehlgeschlagen.</div>';
             }
         }
 
@@ -2305,7 +2191,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
             $statement->execute([$packageIdentifier]);
             $packageData = $statement->fetchArray();
 
-            echo '<p class="info">';
+            echo '<div class="alert alert-info">';
             echo '<strong>Package:</strong> ' . htmlspecialchars($packageIdentifier) . '<br>';
             if ($packageData) {
                 echo '<strong>Status:</strong> In Datenbank gefunden (ID: ' . $packageData['packageID'] . ')<br>';
@@ -2313,7 +2199,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
             } else {
                 echo '<strong>Status:</strong> Nicht in Datenbank (Installation fehlgeschlagen?)<br>';
             }
-            echo '</p>';
+            echo '</div>';
 
             // Ressourcen-Analyse durchführen wenn Upload vorhanden
             $resources = null;
@@ -2334,14 +2220,12 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     
                     // SQL anzeigen Button
                     if (isset($_GET['show_sql'])) {
-                        echo '<section class="section"><p class="info"><strong>SQL Cleanup Script:</strong></p>';
+                        echo '<div class="alert alert-info"><strong>SQL Cleanup Script:</strong><br>';
                         echo '<pre class="recoveryLog">' . htmlspecialchars(generateCleanupSql($resources, $resources['wcfN'])) . '</pre>';
-                        echo '</section>';
-                    } else {
-                        echo '<div class="formSubmit">';
-                        $extractDirParam = $extractDir ? '&extract_dir=' . urlencode($extractDir) : '';
-                        echo '<a href="?mode=' . RECOVERY_MODE_PLUGIN_UNINSTALL . '&t=' . $authHash . '&show_sql=1&package_identifier=' . urlencode($packageIdentifier) . $extractDirParam . '">SQL anzeigen</a>';
                         echo '</div>';
+                    } else {
+                        $extractDirParam = $extractDir ? '&extract_dir=' . urlencode($extractDir) : '';
+                        echo '<a href="?mode=' . RECOVERY_MODE_PLUGIN_UNINSTALL . '&t=' . $authHash . '&show_sql=1&package_identifier=' . urlencode($packageIdentifier) . $extractDirParam . '" class="button">SQL anzeigen</a>';
                     }
                 }
             }
@@ -2355,7 +2239,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
             }
 
             if (!isset($_POST['confirm_uninstall'])) {
-                echo '<p class="info">';
+                echo '<div class="alert alert-info">';
                 echo '<strong>Zu löschende Daten:</strong><br><br>';
 
                 if ($packageData) {
@@ -2391,9 +2275,9 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     echo '<input type="hidden" name="extract_dir" value="' . htmlspecialchars($extractDir) . '">';
                 }
                 echo '<input type="hidden" name="confirm_uninstall" value="1">';
-                echo '<div class="formSubmit"><input type="submit" value="Jetzt deinstallieren"></div>';
+                echo '<button type="submit" class="btn-danger">Jetzt deinstallieren</button>';
                 echo '</form>';
-                echo '</p>';
+                echo '</div>';
 
             } else {
                 // Ressourcen erneut analysieren wenn Extract-Dir vorhanden
@@ -2424,17 +2308,17 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 
                     $db->commitTransaction();
 
-                    echo '<p class="success">';
+                    echo '<div class="alert alert-success">';
                     echo '<strong>✓ Plugin erfolgreich deinstalliert!</strong><br><br>';
                     echo '<strong>Durchgeführte Aktionen:</strong><br>';
                     foreach ($log as $entry) {
                         echo '• ' . htmlspecialchars($entry) . '<br>';
                     }
-                    echo '</p>';
+                    echo '</div>';
 
                 } catch (Exception $e) {
                     $db->rollBackTransaction();
-                    echo '<p class="error">';
+                    echo '<div class="alert alert-error">';
                     echo '<strong>Fehler bei Deinstallation:</strong><br>';
                     echo htmlspecialchars($e->getMessage()) . '<br><br>';
                     if (method_exists($e, 'getTraceAsString')) {
@@ -2443,7 +2327,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                         echo htmlspecialchars($e->getTraceAsString());
                         echo '</pre></details>';
                     }
-                    echo '</p>';
+                    echo '</div>';
                 }
             }
         }
@@ -2456,23 +2340,21 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 
 elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
 ?>
-    <?php recoveryRenderBackLink("?t=" . $authHash); ?>
-    <p class="info">Für User-Management nutzen Sie das offizielle WoltLab Recovery Tool.</p>
+    <a href="?t=<?= htmlspecialchars($authHash) ?>" class="back-link">&#8592; Zurück zur Auswahl</a>
+    <h1>User Management</h1>
+    <p class="subtitle">Für User-Management nutzen Sie das offizielle WoltLab Recovery Tool</p>
 
-    <section class="section">
-        <header class="sectionHeader">
-            <h2 class="sectionTitle">WoltLab Recovery Tool (wsc-recovery.php)</h2>
-            <p class="sectionDescription">Für Admin-Passwort-Reset und Benutzer-Management.</p>
-        </header>
-        <p class="info">
-            <strong>Download &amp; Anleitung:</strong>
-            <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank" rel="noopener">manual.woltlab.com/de/recovery-tool/</a>
-        </p>
-        <p class="info">
-            <strong>Funktionen:</strong> Admin-Passwort zurücksetzen, Benutzer zur Administrator-Gruppe hinzufügen,
-            E-Mail-Adressen ändern, Benutzer aktivieren/deaktivieren.
-        </p>
-    </section>
+    <div class="alert alert-info">
+        <strong>WoltLab Recovery Tool (wsc-recovery.php)</strong><br><br>
+        Für Admin-Passwort-Reset und Benutzer-Management verwenden Sie bitte das offizielle Tool von WoltLab:<br><br>
+        <strong>Download &amp; Anleitung:</strong><br>
+        <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank" rel="noopener">manual.woltlab.com/de/recovery-tool/</a><br><br>
+        <strong>Funktionen des WoltLab Tools:</strong><br>
+        Admin-Passwort zurücksetzen<br>
+        Benutzer zu Administrator-Gruppe hinzufügen<br>
+        E-Mail-Adressen ändern<br>
+        Benutzer aktivieren/deaktivieren
+    </div>
 
 <?php
 }
@@ -2483,35 +2365,34 @@ elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
 
 elseif ($mode === RECOVERY_MODE_CACHE_CLEAR) {
 ?>
-    <?php recoveryRenderBackLink("?t=" . $authHash); ?>
-    <p class="info">Löscht alle Caches und kompilierte Templates.</p>
+    <a href="?t=<?= htmlspecialchars($authHash) ?>" class="back-link">&#8592; Zurück zur Auswahl</a>
+    <h1>Cache Clear</h1>
+    <p class="subtitle">Löscht alle Caches und kompilierte Templates</p>
 
 <?php
     if (!isset($_POST['confirm_clear'])) {
 ?>
-    <p class="info">
+    <div class="alert alert-warning">
         <strong>Folgende Verzeichnisse werden geleert:</strong><br>
-        • tmp/<br>
-        • cache/<br>
-        • templates/compiled/<br>
-        • acp/templates/compiled/<br>
-    </p>
+        tmp/<br>
+        cache/<br>
+        templates/compiled/<br>
+        acp/templates/compiled/
+    </div>
 
     <form method="POST">
         <input type="hidden" name="confirm_clear" value="1">
-        <div class="formSubmit">
-            <input type="submit" value="Cache jetzt löschen" accesskey="s">
-        </div>
+        <button type="submit" class="btn-danger">Cache jetzt löschen</button>
     </form>
 <?php
     } else {
         $deletedFiles = clearCompiledTemplates();
 
-        echo '<p class="success">';
+        echo '<div class="alert alert-success">';
         echo '<strong>Cache erfolgreich geleert.</strong><br>';
         echo 'Gelöschte Dateien: ' . $deletedFiles . '<br><br>';
-        echo '<a href="' . htmlspecialchars($recoveryBaseUrl) . '">Zur Hauptseite</a>';
-        echo '</p>';
+        echo '<a href="' . htmlspecialchars($recoveryBaseUrl) . '" class="btn-success">Zur Hauptseite</a>';
+        echo '</div>';
     }
 }
 
