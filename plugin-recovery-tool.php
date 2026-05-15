@@ -3816,10 +3816,19 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                         }
                     }
 ?>
-    <div class="step-indicator">
-        <div class="si-step done">1 · Analyse &amp; Auswahl &#10003;</div>
-        <div class="si-step active">2 · Backup</div>
-        <div class="si-step">3 · <?= $isDryRun ? 'Dry-Run' : 'Ausführen' ?></div>
+    <div class="wizardSteps">
+        <div class="wizardStep completed">
+            <div class="wizardStepNumber">1</div>
+            <div class="wizardStepLabel">Analyse &amp; Auswahl</div>
+        </div>
+        <div class="wizardStep active">
+            <div class="wizardStepNumber">2</div>
+            <div class="wizardStepLabel">Backup</div>
+        </div>
+        <div class="wizardStep">
+            <div class="wizardStepNumber">3</div>
+            <div class="wizardStepLabel"><?= $isDryRun ? 'Dry-Run' : 'Ausführen' ?></div>
+        </div>
     </div>
 <?php
                     // SQL-Backup generieren
@@ -3942,10 +3951,19 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                         }
                     }
 ?>
-    <div class="step-indicator">
-        <div class="si-step done">1 · Analyse &amp; Auswahl &#10003;</div>
-        <div class="si-step done">2 · Backup &#10003;</div>
-        <div class="si-step active">3 · <?= $isDryRun ? 'Dry-Run' : 'Ausführen' ?></div>
+    <div class="wizardSteps">
+        <div class="wizardStep completed">
+            <div class="wizardStepNumber">1</div>
+            <div class="wizardStepLabel">Analyse &amp; Auswahl</div>
+        </div>
+        <div class="wizardStep completed">
+            <div class="wizardStepNumber">2</div>
+            <div class="wizardStepLabel">Backup</div>
+        </div>
+        <div class="wizardStep active">
+            <div class="wizardStepNumber">3</div>
+            <div class="wizardStepLabel"><?= $isDryRun ? 'Dry-Run' : 'Ausführen' ?></div>
+        </div>
     </div>
 <?php
                     $log = [];
