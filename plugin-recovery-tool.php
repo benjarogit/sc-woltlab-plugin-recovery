@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.2.4
+ * @version 1.2.5
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -19,11 +19,19 @@
 // KONFIGURATION
 // ============================================================================
 
+define('RECOVERY_VERSION', '1.2.5');
 define('RECOVERY_MODE_SELECTION', 0);
 define('RECOVERY_MODE_ACP_REPAIR', 1);
 define('RECOVERY_MODE_PLUGIN_UNINSTALL', 2);
 define('RECOVERY_MODE_USER_MANAGEMENT', 3);
 define('RECOVERY_MODE_CACHE_CLEAR', 4);
+define('RECOVERY_MODE_PACKAGE_LIST_REPAIR', 5);
+
+/** Stack-Traces nur bei true oder ?debug=1 (mit gültigem Auth-Token). */
+define('RECOVERY_ENABLE_DEBUG', false);
+define('RECOVERY_PACKAGE_ID_MAX_LEN', 191);
+define('RECOVERY_PACKAGE_ID_PATTERN', '/^[a-zA-Z0-9._-]+$/');
+define('RECOVERY_MAX_UPLOAD_BYTES', 104857600); // 100 MiB
 
 $authHash = '';
 $authFilename = 'plugin-recovery-auth.php';
@@ -55,10 +63,16 @@ function recoveryBootstrapDatabase()
     }
 
     require_once WCF_DIR . 'lib/system/api/autoload.php';
-    require_once WCF_DIR . 'lib/system/WCF.class.php';
 
-    // Nur WoltLab-Autoloader – core.functions.php setzt Exception-Handler für WCF,
-    // bevor die Klasse in älteren Ladereihenfolgen verfügbar war.
+    // core.functions.php registriert WCF::destruct → CacheHandler ohne vollständige Konstanten.
+    if (!\defined('NO_IMPORTS')) {
+        \define('NO_IMPORTS', true);
+    }
+
+    require_once WCF_DIR . 'lib/system/WCF.class.php';
+    recoveryDefineMinimalWcfConstants();
+
+    // Nur WoltLab-Autoloader – kein global.php / kein WCF-Vollbootstrap.
     if (!\defined('RECOVERY_WCF_AUTOLOAD')) {
         \define('RECOVERY_WCF_AUTOLOAD', true);
         \spl_autoload_register([\wcf\system\WCF::class, 'autoload'], true, true);
@@ -118,6 +132,533 @@ function recoveryInjectDatabaseIntoWcf(\wcf\system\database\Database $db): void
     $property->setValue(null, $db);
 }
 
+function recoveryIsDebugEnabled(): bool
+{
+    if (\defined('RECOVERY_ENABLE_DEBUG') && RECOVERY_ENABLE_DEBUG) {
+        return true;
+    }
+
+    return isset($_GET['debug']) && $_GET['debug'] === '1';
+}
+
+/**
+ * @throws \InvalidArgumentException
+ */
+function recoveryValidatePackageIdentifier(?string $identifier): string
+{
+    $identifier = \trim((string) $identifier);
+    if ($identifier === '') {
+        throw new \InvalidArgumentException('Bitte einen Package-Identifier angeben.');
+    }
+    if (\strlen($identifier) > RECOVERY_PACKAGE_ID_MAX_LEN) {
+        throw new \InvalidArgumentException(
+            'Package-Identifier ist zu lang (max. ' . RECOVERY_PACKAGE_ID_MAX_LEN . ' Zeichen).'
+        );
+    }
+    if (!\preg_match(RECOVERY_PACKAGE_ID_PATTERN, $identifier)) {
+        throw new \InvalidArgumentException(
+            'Ungültiger Package-Identifier. Erlaubt sind Buchstaben, Ziffern, Punkt, Unterstrich und Bindestrich.'
+        );
+    }
+
+    return $identifier;
+}
+
+function recoveryValidateSqlTableName(string $table): bool
+{
+    return (bool) \preg_match('/^[a-zA-Z0-9_]+$/', $table);
+}
+
+function recoveryValidateAppDirectoryName(string $dir): bool
+{
+    return $dir !== '' && (bool) \preg_match('/^[a-zA-Z0-9._-]+$/', $dir);
+}
+
+/**
+ * @return list<string>
+ */
+function recoveryGetProtectedDirectoryNames(): array
+{
+    return [
+        'wcf',
+        'lib',
+        'acp',
+        'cache',
+        'tmp',
+        'templates',
+        'images',
+        'js',
+        'style',
+        'icons',
+        'font',
+        'fonts',
+        'attachments',
+        'media',
+        'log',
+        'language',
+    ];
+}
+
+function recoveryFormatUserError(\Throwable $e, string $context = ''): string
+{
+    $message = $context !== '' ? $context . ': ' : '';
+    $message .= $e->getMessage();
+
+    if (recoveryIsDebugEnabled()) {
+        $message .= "\n\n" . $e->getTraceAsString();
+    }
+
+    return $message;
+}
+
+function recoveryRenderExceptionDetails(\Throwable $e): void
+{
+    if (!recoveryIsDebugEnabled()) {
+        return;
+    }
+
+    echo '<details><summary>Technische Details (Debug)</summary>';
+    echo '<pre class="recoveryLog">' . \htmlspecialchars($e->getTraceAsString()) . '</pre>';
+    echo '</details>';
+}
+
+function recoveryGetDatabaseSchemaName(\wcf\system\database\Database $db): string
+{
+    try {
+        $statement = $db->prepareStatement('SELECT DATABASE() AS dbName');
+        $statement->execute();
+        $row = $statement->fetchArray();
+
+        return (string) ($row['dbName'] ?? '');
+    } catch (\Throwable) {
+        return '';
+    }
+}
+
+function recoveryIsUnsafeArchiveRelativePath(string $path): bool
+{
+    $path = \str_replace('\\', '/', $path);
+    if ($path === '' || \str_starts_with($path, '/')) {
+        return true;
+    }
+
+    foreach (\explode('/', $path) as $segment) {
+        if ($segment === '..' || $segment === '') {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function recoveryValidateArchiveFilename(string $filename): bool
+{
+    return (bool) \preg_match('/\.(tar\.gz|tgz|tar)$/i', $filename);
+}
+
+/**
+ * @return array{ok: bool, error?: string, packageIdentifier?: string, extractDir?: string, uploadedFile?: string}
+ */
+function recoveryHandlePackageUpload(array $file): array
+{
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        return ['ok' => false, 'error' => 'Datei-Upload fehlgeschlagen (Fehlercode ' . (int) ($file['error'] ?? 0) . ').'];
+    }
+
+    if (($file['size'] ?? 0) > RECOVERY_MAX_UPLOAD_BYTES) {
+        $maxMb = (int) \round(RECOVERY_MAX_UPLOAD_BYTES / 1048576);
+
+        return ['ok' => false, 'error' => "Die Datei ist zu groß (max. {$maxMb} MiB)."];
+    }
+
+    $originalName = \basename((string) ($file['name'] ?? ''));
+    if (!recoveryValidateArchiveFilename($originalName)) {
+        return ['ok' => false, 'error' => 'Ungültiges Archivformat. Erlaubt: .tar, .tar.gz, .tgz'];
+    }
+
+    $uploadDir = __DIR__ . '/uploads';
+    if (!\is_dir($uploadDir) && !@\mkdir($uploadDir, 0755, true)) {
+        return ['ok' => false, 'error' => 'Upload-Verzeichnis konnte nicht erstellt werden.'];
+    }
+
+    $safeName = \preg_replace('/[^a-zA-Z0-9._-]/', '_', $originalName) ?: 'package.tar';
+    $uploadedFile = $uploadDir . '/' . $safeName;
+    if (!\move_uploaded_file((string) $file['tmp_name'], $uploadedFile)) {
+        return ['ok' => false, 'error' => 'Datei konnte nicht gespeichert werden.'];
+    }
+
+    $extractDir = $uploadDir . '/extracted_' . \bin2hex(\random_bytes(4));
+    if (!\is_dir($extractDir) && !@\mkdir($extractDir, 0755, true)) {
+        @\unlink($uploadedFile);
+
+        return ['ok' => false, 'error' => 'Entpack-Verzeichnis konnte nicht erstellt werden.'];
+    }
+
+    if (!extractArchive($uploadedFile, $extractDir)) {
+        recoveryCleanupUploadWorkspace($uploadDir);
+
+        return ['ok' => false, 'error' => 'Archiv konnte nicht entpackt werden.'];
+    }
+
+    $packageXml = findFileInExtractDir($extractDir, '', 'package.xml');
+    if (!$packageXml) {
+        recoveryCleanupUploadWorkspace($uploadDir);
+
+        return ['ok' => false, 'error' => 'package.xml wurde im Archiv nicht gefunden.'];
+    }
+
+    $packageIdentifier = extractPackageIdentifier($packageXml);
+    if (!$packageIdentifier) {
+        recoveryCleanupUploadWorkspace($uploadDir);
+
+        return ['ok' => false, 'error' => 'package.xml konnte nicht gelesen werden.'];
+    }
+
+    try {
+        $packageIdentifier = recoveryValidatePackageIdentifier($packageIdentifier);
+    } catch (\InvalidArgumentException $e) {
+        recoveryCleanupUploadWorkspace($uploadDir);
+
+        return ['ok' => false, 'error' => $e->getMessage()];
+    }
+
+    return [
+        'ok' => true,
+        'packageIdentifier' => $packageIdentifier,
+        'extractDir' => $extractDir,
+        'uploadedFile' => $uploadedFile,
+    ];
+}
+
+function recoveryCleanupUploadWorkspace(?string $uploadDir = null): void
+{
+    $uploadDir ??= __DIR__ . '/uploads';
+    if (!\is_dir($uploadDir)) {
+        return;
+    }
+
+    $iterator = new \RecursiveIteratorIterator(
+        new \RecursiveDirectoryIterator($uploadDir, \RecursiveDirectoryIterator::SKIP_DOTS),
+        \RecursiveIteratorIterator::CHILD_FIRST
+    );
+    foreach ($iterator as $file) {
+        $file->isDir() ? @\rmdir($file->getPathname()) : @\unlink($file->getPathname());
+    }
+}
+
+/**
+ * @param array<string, mixed>|null $packageData
+ */
+function recoveryResolvePluginDirectory(
+    ?array $packageData,
+    string $packageIdentifier,
+    ?\wcf\system\database\Database $db = null,
+    ?int $wcfN = null,
+    ?string $extractDir = null
+): ?string {
+    if ($packageData) {
+        $dir = \trim((string) ($packageData['packageDir'] ?? ''), '/\\');
+        if ($dir !== '' && recoveryValidateAppDirectoryName($dir)) {
+            return $dir;
+        }
+    }
+
+    if ($db && $wcfN && $packageData && !empty($packageData['packageID'])) {
+        try {
+            $sql = "SELECT application FROM wcf{$wcfN}_application WHERE packageID = ?";
+            $statement = $db->prepareStatement($sql);
+            $statement->execute([(int) $packageData['packageID']]);
+            $row = $statement->fetchArray();
+            $application = \trim((string) ($row['application'] ?? ''));
+            if ($application !== '' && recoveryValidateAppDirectoryName($application)) {
+                return $application;
+            }
+        } catch (\Throwable) {
+        }
+    }
+
+    if ($extractDir && \is_dir($extractDir)) {
+        $packageXml = findFileInExtractDir($extractDir, '', 'package.xml');
+        if ($packageXml) {
+            $parsed = parsePackageXml($packageXml);
+            $application = \trim((string) ($parsed['application'] ?? ''));
+            if ($application !== '' && recoveryValidateAppDirectoryName($application)) {
+                return $application;
+            }
+        }
+    }
+
+    $parts = \explode('.', $packageIdentifier);
+    if (\count($parts) < 2) {
+        return null;
+    }
+
+    $guess = (string) \end($parts);
+
+    return recoveryValidateAppDirectoryName($guess) ? $guess : null;
+}
+
+/**
+ * @return list<string>
+ */
+function recoveryInferAcpMenuSearchPatterns(string $packageIdentifier, ?array $resources = null): array
+{
+    $patterns = [];
+
+    if ($resources && !empty($resources['acpMenu']['prefix'])) {
+        $patterns[] = $resources['acpMenu']['prefix'] . '%';
+    }
+
+    if ($resources && !empty($resources['acpMenu']['items'])) {
+        $prefix = extractCommonPrefix($resources['acpMenu']['items'], '.');
+        if ($prefix !== '') {
+            $patterns[] = $prefix . '%';
+        }
+    }
+
+    $parts = \explode('.', $packageIdentifier);
+    $candidates = [];
+    if (\count($parts) >= 1) {
+        $candidates[] = (string) \end($parts);
+    }
+    if (\count($parts) >= 2) {
+        $candidates[] = $parts[\count($parts) - 2];
+    }
+    if (\count($parts) >= 3) {
+        $candidates[] = $parts[\count($parts) - 3];
+    }
+    $candidates = \array_values(\array_unique(\array_filter($candidates)));
+
+    foreach ($candidates as $appName) {
+        $patterns[] = $appName . '.acp.menu.%';
+        $patterns[] = \strtolower($appName) . '.acp.menu.%';
+        $patterns[] = $packageIdentifier . '.%';
+    }
+
+    return \array_values(\array_unique($patterns));
+}
+
+/**
+ * @return list<array{menuItem: string, menuItemController: string|null}>
+ */
+function recoveryFetchAcpMenuItemsByPatterns(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    array $patterns
+): array {
+    $items = [];
+    $seen = [];
+
+    foreach ($patterns as $pattern) {
+        if ($pattern === '' || \strlen($pattern) > 255) {
+            continue;
+        }
+
+        $sql = "SELECT menuItem, menuItemController FROM wcf{$wcfN}_acp_menu_item WHERE menuItem LIKE ?";
+        $statement = $db->prepareStatement($sql);
+        $statement->execute([$pattern]);
+
+        while ($row = $statement->fetchArray()) {
+            $key = (string) $row['menuItem'];
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $items[] = $row;
+        }
+    }
+
+    return $items;
+}
+
+/**
+ * @return array{packageIdentifier?: string, extractDir?: string|null, error?: string}
+ */
+function recoveryResolvePackageInputFromRequest(): array
+{
+    if (isset($_FILES['package_file']) && ($_FILES['package_file']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+        $upload = recoveryHandlePackageUpload($_FILES['package_file']);
+
+        return $upload['ok']
+            ? [
+                'packageIdentifier' => $upload['packageIdentifier'],
+                'extractDir' => $upload['extractDir'] ?? null,
+            ]
+            : ['error' => $upload['error'] ?? 'Upload fehlgeschlagen.'];
+    }
+
+    $raw = null;
+    if (!empty($_POST['package_identifier'])) {
+        $raw = \trim((string) $_POST['package_identifier']);
+    } elseif (!empty($_GET['package_identifier'])) {
+        $raw = \trim((string) $_GET['package_identifier']);
+    }
+
+    if ($raw !== null && $raw !== '') {
+        try {
+            return ['packageIdentifier' => recoveryValidatePackageIdentifier($raw), 'extractDir' => recoveryResolveTrustedExtractDir()];
+        } catch (\InvalidArgumentException $e) {
+            return ['error' => $e->getMessage()];
+        }
+    }
+
+    return [];
+}
+
+function recoveryResolveTrustedExtractDir(): ?string
+{
+    $postedExtract = $_POST['extract_dir'] ?? $_GET['extract_dir'] ?? null;
+    if (!$postedExtract) {
+        return null;
+    }
+
+    $uploadBase = \realpath(__DIR__ . '/uploads');
+    $extractReal = \realpath((string) $postedExtract);
+    if (
+        $uploadBase === false
+        || $extractReal === false
+        || !\str_starts_with($extractReal, $uploadBase . \DIRECTORY_SEPARATOR)
+    ) {
+        return null;
+    }
+
+    return $extractReal;
+}
+
+/**
+ * @param array<string, mixed>|null $packageData
+ * @return list<array{menuItem: string, menuItemController: string|null}>
+ */
+function recoveryFetchAcpMenuItemsForPackage(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    string $packageIdentifier,
+    ?array $packageData,
+    ?array $resources = null
+): array {
+    if ($packageData && !empty($packageData['packageID'])) {
+        $sql = "SELECT menuItem, menuItemController FROM wcf{$wcfN}_acp_menu_item WHERE packageID = ?";
+        $statement = $db->prepareStatement($sql);
+        $statement->execute([(int) $packageData['packageID']]);
+        $items = [];
+        while ($row = $statement->fetchArray()) {
+            $items[] = $row;
+        }
+
+        return $items;
+    }
+
+    if ($resources && !empty($resources['acpMenu']['prefix'])) {
+        return recoveryFetchAcpMenuItemsByPatterns($db, $wcfN, [$resources['acpMenu']['prefix'] . '%']);
+    }
+
+    return recoveryFetchAcpMenuItemsByPatterns(
+        $db,
+        $wcfN,
+        recoveryInferAcpMenuSearchPatterns($packageIdentifier, $resources)
+    );
+}
+
+/**
+ * @param array<string, mixed>|null $packageData
+ */
+function recoveryDeleteAcpMenuItemsForPackage(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    string $packageIdentifier,
+    ?array $packageData,
+    ?array $resources = null
+): int {
+    if ($packageData && !empty($packageData['packageID'])) {
+        $sql = "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE packageID = ?";
+        $statement = $db->prepareStatement($sql);
+        $statement->execute([(int) $packageData['packageID']]);
+
+        return $statement->getAffectedRows();
+    }
+
+    if ($resources && !empty($resources['acpMenu']['prefix'])) {
+        $sql = "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE menuItem LIKE ?";
+        $statement = $db->prepareStatement($sql);
+        $statement->execute([$resources['acpMenu']['prefix'] . '%']);
+
+        return $statement->getAffectedRows();
+    }
+
+    $deletedTotal = 0;
+    foreach (recoveryInferAcpMenuSearchPatterns($packageIdentifier, $resources) as $pattern) {
+        $sql = "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE menuItem LIKE ?";
+        $statement = $db->prepareStatement($sql);
+        $statement->execute([$pattern]);
+        $deletedTotal += $statement->getAffectedRows();
+    }
+
+    return $deletedTotal;
+}
+
+/**
+ * @return array{deletable: bool, reason: string, relativePath: string|null}
+ */
+function recoveryEvaluatePluginDirectoryDeletion(
+    ?array $packageData,
+    string $packageIdentifier,
+    ?\wcf\system\database\Database $db = null,
+    ?int $wcfN = null,
+    ?string $extractDir = null
+): array {
+    if (!\defined('WCF_DIR')) {
+        \define('WCF_DIR', recoveryResolveWcfDir());
+    }
+
+    $appDir = recoveryResolvePluginDirectory($packageData, $packageIdentifier, $db, $wcfN, $extractDir);
+    if (!$appDir) {
+        return [
+            'deletable' => false,
+            'reason' => 'Kein Plugin-Verzeichnis ermittelt (packageDir / application / package.xml).',
+            'relativePath' => null,
+        ];
+    }
+
+    if (\in_array(\strtolower($appDir), recoveryGetProtectedDirectoryNames(), true)) {
+        return [
+            'deletable' => false,
+            'reason' => 'Geschütztes WoltLab-Verzeichnis: ' . $appDir . '/',
+            'relativePath' => $appDir,
+        ];
+    }
+
+    $wcfRoot = \rtrim(WCF_DIR, '/\\');
+    $target = $wcfRoot . '/' . $appDir;
+
+    if (!\is_dir($target)) {
+        return [
+            'deletable' => false,
+            'reason' => 'Verzeichnis nicht vorhanden: ' . $appDir . '/',
+            'relativePath' => $appDir,
+        ];
+    }
+
+    $wcfReal = \realpath($wcfRoot);
+    $targetReal = \realpath($target);
+    if (
+        $wcfReal === false
+        || $targetReal === false
+        || (!\str_starts_with($targetReal, $wcfReal . \DIRECTORY_SEPARATOR) && $targetReal !== $wcfReal)
+    ) {
+        return [
+            'deletable' => false,
+            'reason' => 'Sicherheitsprüfung fehlgeschlagen (Pfad außerhalb von WCF_DIR).',
+            'relativePath' => $appDir,
+        ];
+    }
+
+    return [
+        'deletable' => true,
+        'reason' => 'Wird entfernt: ' . $appDir . '/',
+        'relativePath' => $appDir,
+    ];
+}
+
 function recoveryGetSiteBaseUrl(): string
 {
     $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
@@ -148,9 +689,25 @@ function recoveryCollectOptionConstantNames(\wcf\system\database\Database $db, i
     return $constants;
 }
 
+function recoveryDefineMinimalWcfConstants(): void
+{
+    if (\defined('CACHE_SOURCE_TYPE')) {
+        return;
+    }
+
+    if (\defined('WCF_DIR') && \is_file(WCF_DIR . 'options.inc.php')) {
+        require_once WCF_DIR . 'options.inc.php';
+    }
+
+    if (!\defined('CACHE_SOURCE_TYPE')) {
+        \define('CACHE_SOURCE_TYPE', 'disk');
+    }
+}
+
 function recoveryRebuildOptionsIncPhp(): bool
 {
     try {
+        recoveryDefineMinimalWcfConstants();
         require_once WCF_DIR . 'lib/data/option/OptionEditor.class.php';
         \wcf\data\option\OptionEditor::rebuild();
 
@@ -234,53 +791,41 @@ function recoveryTryDeleteByPackageId(
  */
 function recoveryDiscoverPackageIdTables(\wcf\system\database\Database $db, int $wcfN): array
 {
+    if ($wcfN < 1 || $wcfN > 99) {
+        return [];
+    }
+
+    $schema = recoveryGetDatabaseSchemaName($db);
+    if ($schema === '') {
+        return [];
+    }
+
     $prefix = "wcf{$wcfN}_";
     $tables = [];
 
     try {
-        $statement = $db->prepareStatement('SHOW TABLES');
-        $statement->execute();
+        $sql = 'SELECT TABLE_NAME FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = ? AND TABLE_NAME LIKE ? AND COLUMN_NAME = ?';
+        $statement = $db->prepareStatement($sql);
+        $statement->execute([$schema, $prefix . '%', 'packageID']);
+
         while ($row = $statement->fetchArray()) {
-            $fullName = (string) \reset($row);
+            $fullName = (string) ($row['TABLE_NAME'] ?? '');
             if (!\str_starts_with($fullName, $prefix)) {
                 continue;
             }
 
             $shortName = \substr($fullName, \strlen($prefix));
-            if ($shortName === 'package') {
+            if ($shortName === '' || $shortName === 'package' || !recoveryValidateSqlTableName($shortName)) {
                 continue;
             }
 
-            try {
-                $col = $db->prepareStatement("SHOW COLUMNS FROM `{$fullName}` LIKE 'packageID'");
-                $col->execute();
-                if ($col->fetchArray()) {
-                    $tables[] = $shortName;
-                }
-            } catch (\Throwable) {
-            }
+            $tables[] = $shortName;
         }
     } catch (\Throwable) {
     }
 
     return \array_values(\array_unique($tables));
-}
-
-function recoveryResolvePluginDirectory(?array $packageData, string $packageIdentifier): ?string
-{
-    if ($packageData) {
-        $dir = \trim((string) ($packageData['packageDir'] ?? ''), '/\\');
-        if ($dir !== '') {
-            return $dir;
-        }
-    }
-
-    $parts = \explode('.', $packageIdentifier);
-    if (\count($parts) < 2) {
-        return null;
-    }
-
-    return (string) \end($parts);
 }
 
 function recoveryDeleteDirectoryRecursive(string $directory): bool
@@ -308,48 +853,48 @@ function recoveryDeleteDirectoryRecursive(string $directory): bool
 function recoveryDeletePluginFilesOnDisk(
     ?array $packageData,
     string $packageIdentifier,
-    array &$log
+    array &$log,
+    bool $performDelete = false,
+    ?\wcf\system\database\Database $db = null,
+    ?int $wcfN = null,
+    ?string $extractDir = null
 ): void {
+    $evaluation = recoveryEvaluatePluginDirectoryDeletion(
+        $packageData,
+        $packageIdentifier,
+        $db,
+        $wcfN,
+        $extractDir
+    );
+
+    if (!$evaluation['deletable']) {
+        $log[] = 'Dateisystem: ' . $evaluation['reason'];
+
+        return;
+    }
+
+    $appDir = (string) $evaluation['relativePath'];
+    if (!$performDelete) {
+        $log[] = 'Dateisystem (Vorschau): ' . $evaluation['reason'];
+
+        return;
+    }
+
     if (!\defined('WCF_DIR')) {
         \define('WCF_DIR', recoveryResolveWcfDir());
     }
 
-    $appDir = recoveryResolvePluginDirectory($packageData, $packageIdentifier);
-    if (!$appDir || !\preg_match('/^[a-zA-Z0-9_-]+$/', $appDir)) {
-        $log[] = 'Plugin-Verzeichnis auf Disk: kein sicheres Verzeichnis ermittelt';
-
-        return;
-    }
-
-    $wcfRoot = \rtrim(WCF_DIR, '/\\');
-    $target = $wcfRoot . '/' . $appDir;
-    $wcfReal = \realpath($wcfRoot);
-    if ($wcfReal === false) {
-        $log[] = 'Plugin-Verzeichnis auf Disk: WCF_DIR nicht auflösbar';
-
-        return;
-    }
-
-    if (!\is_dir($target)) {
-        $log[] = 'Plugin-Verzeichnis auf Disk: nicht vorhanden (' . $appDir . '/)';
-
-        return;
-    }
-
-    $targetReal = \realpath($target);
-    if (
-        $targetReal === false
-        || (!\str_starts_with($targetReal, $wcfReal . \DIRECTORY_SEPARATOR) && $targetReal !== $wcfReal)
-    ) {
-        $log[] = 'Plugin-Verzeichnis auf Disk: Sicherheitsprüfung fehlgeschlagen (' . $appDir . '/)';
+    $targetReal = \realpath(\rtrim(WCF_DIR, '/\\') . '/' . $appDir);
+    if ($targetReal === false || !\is_dir($targetReal)) {
+        $log[] = 'Dateisystem: Verzeichnis nicht mehr vorhanden (' . $appDir . '/)';
 
         return;
     }
 
     if (recoveryDeleteDirectoryRecursive($targetReal)) {
-        $log[] = 'Plugin-Verzeichnis gelöscht: ' . $appDir . '/';
+        $log[] = 'Dateisystem gelöscht: ' . $appDir . '/';
     } else {
-        $log[] = 'Plugin-Verzeichnis konnte nicht vollständig gelöscht werden: ' . $appDir . '/';
+        $log[] = 'Dateisystem: Verzeichnis konnte nicht vollständig gelöscht werden (' . $appDir . '/)';
     }
 }
 
@@ -389,7 +934,8 @@ function recoveryDisplayDbCleanupPreview(
     \wcf\system\database\Database $db,
     int $wcfN,
     array $packageData,
-    string $packageIdentifier
+    string $packageIdentifier,
+    ?string $extractDir = null
 ): void {
     $packageID = (int) $packageData['packageID'];
     $preview = recoveryPreviewDbCleanupByPackageId($db, $wcfN, $packageID, $packageIdentifier);
@@ -422,9 +968,20 @@ function recoveryDisplayDbCleanupPreview(
         echo '</ul>';
     }
 
-    $appDir = recoveryResolvePluginDirectory($packageData, $packageIdentifier);
-    if ($appDir) {
-        echo '<br><strong>Dateisystem:</strong> Verzeichnis <code>' . \htmlspecialchars($appDir) . '/</code> unter WCF_DIR wird entfernt (falls vorhanden).';
+    $fsEval = recoveryEvaluatePluginDirectoryDeletion(
+        $packageData,
+        $packageIdentifier,
+        $db,
+        $wcfN,
+        $extractDir
+    );
+    echo '<br><strong>Dateisystem:</strong> ';
+    if ($fsEval['relativePath']) {
+        echo '<code>' . \htmlspecialchars((string) $fsEval['relativePath']) . '/</code> – ';
+    }
+    echo \htmlspecialchars($fsEval['reason']);
+    if ($fsEval['deletable']) {
+        echo '<br><small>Entfernung nur nach expliziter Bestätigung im Deinstallationsformular.</small>';
     }
 
     echo '</div>';
@@ -456,6 +1013,267 @@ function recoverySafeRollBackTransaction(\wcf\system\database\Database $db): voi
 }
 
 /**
+ * @return list<int>
+ */
+function recoveryFetchQueueIdsForPackage(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    ?int $packageID,
+    string $packageIdentifier
+): array {
+    $queueIds = [];
+
+    try {
+        $sql = "SELECT queueID FROM wcf{$wcfN}_package_installation_queue WHERE package = ?";
+        $params = [$packageIdentifier];
+        if ($packageID !== null) {
+            $sql .= ' OR packageID = ?';
+            $params[] = $packageID;
+        }
+
+        $statement = $db->prepareStatement($sql);
+        $statement->execute($params);
+
+        while ($row = $statement->fetchArray()) {
+            $queueIds[] = (int) $row['queueID'];
+        }
+    } catch (\Throwable) {
+    }
+
+    return \array_values(\array_unique($queueIds));
+}
+
+/**
+ * Entfernt Installations-/Deinstallations-Warteschlangen inkl. Knoten (generisch).
+ */
+function recoveryCleanupPackageInstallationArtifacts(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    ?int $packageID,
+    string $packageIdentifier,
+    array &$log
+): void {
+    $queueIds = recoveryFetchQueueIdsForPackage($db, $wcfN, $packageID, $packageIdentifier);
+
+    if (!empty($queueIds)) {
+        $placeholders = \implode(',', \array_fill(0, \count($queueIds), '?'));
+
+        recoveryExecuteDelete(
+            $db,
+            "DELETE FROM wcf{$wcfN}_package_installation_node WHERE queueID IN ({$placeholders})",
+            $queueIds,
+            'Package-Installationsknoten',
+            $log
+        );
+
+        recoveryExecuteDelete(
+            $db,
+            "DELETE FROM wcf{$wcfN}_package_installation_form WHERE queueID IN ({$placeholders})",
+            $queueIds,
+            'Package-Installationsformulare',
+            $log
+        );
+    }
+
+    recoveryExecuteDelete(
+        $db,
+        "DELETE FROM wcf{$wcfN}_package_installation_queue WHERE package = ?"
+            . ($packageID !== null ? ' OR packageID = ?' : ''),
+        $packageID !== null ? [$packageIdentifier, $packageID] : [$packageIdentifier],
+        'Installationsqueue',
+        $log
+    );
+}
+
+/**
+ * Entfernt Update-Metadaten für ein Package (package_update / *_version per CASCADE).
+ */
+function recoveryCleanupPackageUpdateEntries(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    string $packageIdentifier,
+    array &$log
+): void {
+    recoveryExecuteDelete(
+        $db,
+        "DELETE FROM wcf{$wcfN}_package_update WHERE package = ?",
+        [$packageIdentifier],
+        'Package-Updates',
+        $log
+    );
+}
+
+/**
+ * Bereinigt verwaiste Package-Referenzen (ACP-Paketliste, hängende Deinstallation).
+ *
+ * @return array{log: list<string>, sql: string}
+ */
+function recoveryRepairOrphanedPackageReferences(
+    \wcf\system\database\Database $db,
+    int $wcfN
+): array {
+    if ($wcfN < 1 || $wcfN > 99) {
+        throw new \InvalidArgumentException('Ungültige WCF-Instanznummer.');
+    }
+
+    $log = [];
+    $prefix = "wcf{$wcfN}_";
+
+    // Verwaiste Applications (PackageListPage: getPackage() → null)
+    recoveryExecuteDelete(
+        $db,
+        "DELETE a FROM {$prefix}application a
+         LEFT JOIN {$prefix}package p ON a.packageID = p.packageID
+         WHERE p.packageID IS NULL",
+        [],
+        'Verwaiste Applications',
+        $log
+    );
+
+    // Verwaiste Installationsqueue (packageID zeigt auf gelöschtes Paket)
+    $orphanQueueIds = [];
+    try {
+        $sql = "SELECT q.queueID FROM {$prefix}package_installation_queue q
+                LEFT JOIN {$prefix}package p ON q.packageID = p.packageID
+                WHERE q.packageID IS NOT NULL AND p.packageID IS NULL";
+        $statement = $db->prepareStatement($sql);
+        $statement->execute();
+
+        while ($row = $statement->fetchArray()) {
+            $orphanQueueIds[] = (int) $row['queueID'];
+        }
+    } catch (\Throwable $e) {
+        $log[] = 'Verwaiste Queue-Prüfung übersprungen: ' . $e->getMessage();
+    }
+
+    if (!empty($orphanQueueIds)) {
+        $placeholders = \implode(',', \array_fill(0, \count($orphanQueueIds), '?'));
+
+        recoveryExecuteDelete(
+            $db,
+            "DELETE FROM {$prefix}package_installation_node WHERE queueID IN ({$placeholders})",
+            $orphanQueueIds,
+            'Verwaiste Installationsknoten',
+            $log
+        );
+
+        recoveryExecuteDelete(
+            $db,
+            "DELETE FROM {$prefix}package_installation_form WHERE queueID IN ({$placeholders})",
+            $orphanQueueIds,
+            'Verwaiste Installationsformulare',
+            $log
+        );
+
+        recoveryExecuteDelete(
+            $db,
+            "DELETE FROM {$prefix}package_installation_queue WHERE queueID IN ({$placeholders})",
+            $orphanQueueIds,
+            'Verwaiste Installationsqueue',
+            $log
+        );
+    }
+
+    recoveryExecuteDelete(
+        $db,
+        "DELETE r FROM {$prefix}package_requirements r
+         LEFT JOIN {$prefix}package p ON r.packageID = p.packageID
+         WHERE p.packageID IS NULL",
+        [],
+        'Verwaiste Package-Requirements (packageID)',
+        $log
+    );
+
+    recoveryExecuteDelete(
+        $db,
+        "DELETE r FROM {$prefix}package_requirements r
+         LEFT JOIN {$prefix}package p ON r.requirement = p.packageID
+         WHERE p.packageID IS NULL",
+        [],
+        'Verwaiste Package-Requirements (requirement)',
+        $log
+    );
+
+    recoveryExecuteDelete(
+        $db,
+        "DELETE e FROM {$prefix}package_exclusion e
+         LEFT JOIN {$prefix}package p ON e.packageID = p.packageID
+         WHERE p.packageID IS NULL",
+        [],
+        'Verwaiste Package-Exclusions',
+        $log
+    );
+
+    recoveryExecuteDelete(
+        $db,
+        "DELETE l FROM {$prefix}package_installation_file_log l
+         LEFT JOIN {$prefix}package p ON l.packageID = p.packageID
+         WHERE p.packageID IS NULL",
+        [],
+        'Verwaiste Package-File-Logs',
+        $log
+    );
+
+    recoveryExecuteDelete(
+        $db,
+        "DELETE pl FROM {$prefix}package_installation_plugin pl
+         LEFT JOIN {$prefix}package p ON pl.packageID = p.packageID
+         WHERE p.packageID IS NULL",
+        [],
+        'Verwaiste Package-Installation-Plugins',
+        $log
+    );
+
+    return [
+        'log' => $log,
+        'sql' => recoveryGenerateOrphanRepairSql($wcfN),
+    ];
+}
+
+function recoveryGenerateOrphanRepairSql(int $wcfN): string
+{
+    $p = "wcf{$wcfN}_";
+
+    return <<<SQL
+-- WoltLab Recovery Tool: Paketliste reparieren (verwaiste Referenzen)
+-- WCF_N: {$wcfN} – vor Ausführung Backup anlegen!
+
+-- ACP-Paketliste: tainted application ohne Package-Zeile
+DELETE a FROM {$p}application a
+LEFT JOIN {$p}package p ON a.packageID = p.packageID
+WHERE p.packageID IS NULL;
+
+-- Hängende Deinstallation / Installation (z. B. packageID 3 oder 4 fehlt)
+DELETE n FROM {$p}package_installation_node n
+INNER JOIN {$p}package_installation_queue q ON n.queueID = q.queueID
+LEFT JOIN {$p}package p ON q.packageID = p.packageID
+WHERE q.packageID IS NOT NULL AND p.packageID IS NULL;
+
+DELETE f FROM {$p}package_installation_form f
+INNER JOIN {$p}package_installation_queue q ON f.queueID = q.queueID
+LEFT JOIN {$p}package p ON q.packageID = p.packageID
+WHERE q.packageID IS NOT NULL AND p.packageID IS NULL;
+
+DELETE q FROM {$p}package_installation_queue q
+LEFT JOIN {$p}package p ON q.packageID = p.packageID
+WHERE q.packageID IS NOT NULL AND p.packageID IS NULL;
+
+DELETE r FROM {$p}package_requirements r
+LEFT JOIN {$p}package p ON r.packageID = p.packageID
+WHERE p.packageID IS NULL;
+
+DELETE r FROM {$p}package_requirements r
+LEFT JOIN {$p}package p ON r.requirement = p.packageID
+WHERE p.packageID IS NULL;
+
+DELETE e FROM {$p}package_exclusion e
+LEFT JOIN {$p}package p ON e.packageID = p.packageID
+WHERE p.packageID IS NULL;
+
+SQL;
+}
+
+/**
  * Generische Vollbereinigung für jedes Plugin (ohne WoltLab-Paket-Deinstaller).
  *
  * @param array<string, mixed>|null $resources
@@ -467,8 +1285,16 @@ function recoveryPerformFullPluginCleanup(
     string $packageIdentifier,
     ?array $packageData,
     ?array $resources,
-    array &$log
+    array &$log,
+    bool $deleteFilesOnDisk = false,
+    ?string $extractDir = null
 ): void {
+    $packageIdentifier = recoveryValidatePackageIdentifier($packageIdentifier);
+
+    if ($wcfN < 1 || $wcfN > 99) {
+        throw new \InvalidArgumentException('Ungültige WCF-Instanznummer.');
+    }
+
     $packageID = $packageData ? (int) $packageData['packageID'] : null;
 
     $optionConstants = recoveryCollectOptionConstantNames($db, $wcfN, $packageID);
@@ -478,6 +1304,9 @@ function recoveryPerformFullPluginCleanup(
         }
     }
     $optionConstants = \array_values(\array_unique($optionConstants));
+
+    recoveryCleanupPackageInstallationArtifacts($db, $wcfN, $packageID, $packageIdentifier, $log);
+    recoveryCleanupPackageUpdateEntries($db, $wcfN, $packageIdentifier, $log);
 
     if ($packageID) {
         $packageIdTables = [
@@ -496,6 +1325,10 @@ function recoveryPerformFullPluginCleanup(
             'user_notification_event' => 'Benachrichtigungen',
             'bbcode' => 'BBCodes',
             'smiley' => 'Smileys',
+            'application' => 'Application',
+            'package_exclusion' => 'Package-Exclusions',
+            'package_installation_plugin' => 'Package-Installation-Plugins',
+            'package_installation_file_log' => 'Package-File-Log',
         ];
 
         foreach (recoveryDiscoverPackageIdTables($db, $wcfN) as $discoveredTable) {
@@ -507,6 +1340,14 @@ function recoveryPerformFullPluginCleanup(
         foreach ($packageIdTables as $table => $label) {
             recoveryTryDeleteByPackageId($db, $wcfN, $table, $packageID, $label, $log);
         }
+
+        recoveryExecuteDelete(
+            $db,
+            "DELETE FROM wcf{$wcfN}_package_requirements WHERE packageID = ? OR requirement = ?",
+            [$packageID, $packageID],
+            'Package-Requirements',
+            $log
+        );
 
         recoveryExecuteDelete(
             $db,
@@ -628,14 +1469,6 @@ function recoveryPerformFullPluginCleanup(
         }
     }
 
-    recoveryExecuteDelete(
-        $db,
-        "DELETE FROM wcf{$wcfN}_package_installation_queue WHERE package = ?",
-        [$packageIdentifier],
-        'Installationsqueue',
-        $log
-    );
-
     $tables = [];
     if ($resources && !empty($resources['tables'])) {
         $tables = $resources['tables'];
@@ -651,6 +1484,22 @@ function recoveryPerformFullPluginCleanup(
 
     foreach ($tables as $table) {
         $safeTable = \str_replace('`', '', (string) $table);
+        if (!recoveryValidateSqlTableName($safeTable)) {
+            $log[] = 'Tabelle übersprungen (ungültiger Name): ' . $safeTable;
+
+            continue;
+        }
+
+        $baseTables = \array_map(
+            static fn(string $name): string => \str_replace('`', '', $name),
+            getBasePluginTables($wcfN)
+        );
+        if (\in_array($safeTable, $baseTables, true)) {
+            $log[] = 'Tabelle übersprungen (WoltLab-Basistabelle): ' . $safeTable;
+
+            continue;
+        }
+
         $sql = 'DROP TABLE IF EXISTS `' . $safeTable . '`';
         $statement = $db->prepareStatement($sql);
         $statement->execute();
@@ -664,7 +1513,15 @@ function recoveryPerformFullPluginCleanup(
         $log[] = 'options.inc.php bereinigt (Plugin-Konstanten entfernt)';
     }
 
-    recoveryDeletePluginFilesOnDisk($packageData, $packageIdentifier, $log);
+    recoveryDeletePluginFilesOnDisk(
+        $packageData,
+        $packageIdentifier,
+        $log,
+        $deleteFilesOnDisk,
+        $db,
+        $wcfN,
+        $extractDir
+    );
 }
 
 
@@ -970,18 +1827,21 @@ if ($action === 'download-auth-file') {
     exit;
 }
 
-// Auth-Datei prüfen
+// Auth-Datei prüfen (fester Dateiname in __DIR__, kein Benutzer-Pfad)
 $isAuthenticated = false;
-if (file_exists(__DIR__ . '/' . $authFilename)) {
-    $authFileContent = file_get_contents(__DIR__ . '/' . $authFilename);
-    $lines = explode("\n", $authFileContent);
+$authFilePath = __DIR__ . '/plugin-recovery-auth.php';
+if (\is_file($authFilePath) && \is_readable($authFilePath)) {
+    $authFileContent = \file_get_contents($authFilePath);
+    if ($authFileContent !== false) {
+        $lines = \explode("\n", $authFileContent);
 
-    if (count($lines) >= 3) {
-        $expiresTimestamp = (int)$lines[1];
-        $storedHash = trim($lines[2]);
+        if (\count($lines) >= 3) {
+            $expiresTimestamp = (int) $lines[1];
+            $storedHash = \trim($lines[2]);
 
-        if ($expiresTimestamp > time() && hash_equals($storedHash, $authHash)) {
-            $isAuthenticated = true;
+            if ($expiresTimestamp > \time() && \hash_equals($storedHash, $authHash)) {
+                $isAuthenticated = true;
+            }
         }
     }
 }
@@ -1026,14 +1886,52 @@ function extractPackageIdentifier($packageXmlPath) {
 }
 
 /**
- * Entpackt TAR/TAR.GZ Archive
+ * Entfernt unsichere Pfade nach dem Entpacken (Path-Traversal).
+ */
+function recoverySanitizeExtractedArchive(string $destination): void
+{
+    if (!\is_dir($destination)) {
+        return;
+    }
+
+    $baseReal = \realpath($destination);
+    if ($baseReal === false) {
+        return;
+    }
+
+    $iterator = new \RecursiveIteratorIterator(
+        new \RecursiveDirectoryIterator($destination, \RecursiveDirectoryIterator::SKIP_DOTS),
+        \RecursiveIteratorIterator::CHILD_FIRST
+    );
+
+    foreach ($iterator as $file) {
+        $pathname = $file->getPathname();
+        $relative = \ltrim(\str_replace('\\', '/', \substr($pathname, \strlen($baseReal))), '/');
+        if (recoveryIsUnsafeArchiveRelativePath($relative)) {
+            $file->isDir() ? @\rmdir($pathname) : @\unlink($pathname);
+        }
+    }
+}
+
+/**
+ * Entpackt TAR/TAR.GZ Archive (mit nachträglicher Pfad-Validierung).
  */
 function extractArchive($archivePath, $destination) {
+    if (!\is_file($archivePath) || !recoveryValidateArchiveFilename(\basename($archivePath))) {
+        return false;
+    }
+
     try {
-        $phar = new PharData($archivePath);
+        if (!\is_dir($destination) && !@\mkdir($destination, 0755, true)) {
+            return false;
+        }
+
+        $phar = new \PharData($archivePath);
         $phar->extractTo($destination, null, true);
+        recoverySanitizeExtractedArchive($destination);
+
         return true;
-    } catch (Exception) {
+    } catch (\Throwable) {
         return false;
     }
 }
@@ -1042,106 +1940,107 @@ function extractArchive($archivePath, $destination) {
  * Findet alle Tabellen eines Plugins anhand des Präfixes
  */
 function findPackageTables($db, $packageIdentifier, $wcfN = null) {
-    // App-Name aus Package-Identifier extrahieren
-    // z.B. de.julian-pfeil.urlshort.featuredLinks -> urlshort
-    // z.B. info.benjaro.urlshort.affiliate -> urlshort (Basis-Plugin)
-    $parts = explode('.', $packageIdentifier);
-    
-    // Versuche verschiedene App-Namen:
-    // 1. Letzter Teil (für direkte Plugins)
-    // 2. Vorletzter Teil (für Erweiterungen, z.B. urlshort.affiliate -> urlshort)
-    $appNames = [];
-    if (count($parts) >= 2) {
-        $appNames[] = $parts[count($parts) - 2]; // Vorletzter Teil (Basis-Plugin)
+    try {
+        $packageIdentifier = recoveryValidatePackageIdentifier($packageIdentifier);
+    } catch (\InvalidArgumentException) {
+        return [];
     }
-    $appNames[] = end($parts); // Letzter Teil (Erweiterung oder direktes Plugin)
-    
-    // Entferne Duplikate und leere Werte
-    $appNames = array_unique(array_filter($appNames));
 
-    // Alle Tabellen holen und in PHP filtern (WCF hat kein getHandle())
-    $sql = "SHOW TABLES";
+    $parts = \explode('.', $packageIdentifier);
+    $appNames = [];
+    if (\count($parts) >= 2) {
+        $appNames[] = $parts[\count($parts) - 2];
+    }
+    $appNames[] = (string) \end($parts);
+    $appNames = \array_values(\array_unique(\array_filter($appNames)));
+
+    $sql = 'SHOW TABLES';
     $statement = $db->prepareStatement($sql);
     $statement->execute();
 
     $tables = [];
-    
-    // Basis-Tabellen für alle möglichen WCF_N Werte sammeln
     $allBaseTables = [];
-    for ($n = 1; $n <= 10; $n++) {
-        $allBaseTables = array_merge($allBaseTables, getBasePluginTables($n));
+    if ($wcfN !== null && $wcfN >= 1 && $wcfN <= 99) {
+        $allBaseTables = getBasePluginTables((int) $wcfN);
+    } else {
+        for ($n = 1; $n <= 10; $n++) {
+            $allBaseTables = \array_merge($allBaseTables, getBasePluginTables($n));
+        }
     }
-    $allBaseTables = array_unique($allBaseTables);
-    
+    $allBaseTables = \array_unique($allBaseTables);
+
     while ($row = $statement->fetchArray()) {
-        $tableName = reset($row);
-        
-        // Überspringe Basis-Tabellen
-        if (in_array($tableName, $allBaseTables)) {
+        $tableName = (string) \reset($row);
+        if (!recoveryValidateSqlTableName($tableName)) {
             continue;
         }
 
-        // Prüfe ob Tabellenname mit einem der App-Namen beginnt
-        // Unterstützt verschiedene Formate:
-        // - urlshort1_table (mit WCF_N)
-        // - urlshort_table (ohne WCF_N)
-        // - urlshort1table (ohne Unterstrich)
+        if (\in_array($tableName, $allBaseTables, true)) {
+            continue;
+        }
+
         foreach ($appNames as $appName) {
-            $appNameLower = strtolower($appName);
-            
-            // Pattern 1: appname{N}_table (z.B. urlshort1_url)
-            if (preg_match('/^' . preg_quote($appName, '/') . '\d+_/i', $tableName)) {
+            if ($appName === '' || !\preg_match('/^[a-zA-Z0-9._-]+$/', $appName)) {
+                continue;
+            }
+
+            if (\preg_match('/^' . \preg_quote($appName, '/') . '\d+_/i', $tableName)) {
                 $tables[] = $tableName;
                 break;
             }
-            
-            // Pattern 2: appname_table (ohne Nummer)
-            if (preg_match('/^' . preg_quote($appName, '/') . '_/i', $tableName)) {
+            if (\preg_match('/^' . \preg_quote($appName, '/') . '_/i', $tableName)) {
                 $tables[] = $tableName;
                 break;
             }
-            
-            // Pattern 3: appname{N}table (ohne Unterstrich)
-            if (preg_match('/^' . preg_quote($appName, '/') . '\d+/i', $tableName)) {
+            if (\preg_match('/^' . \preg_quote($appName, '/') . '\d+/i', $tableName)) {
                 $tables[] = $tableName;
                 break;
             }
-            
-            // Pattern 4: appname (direkt, ohne alles)
-            if (stripos($tableName, $appName) === 0) {
+            if (\stripos($tableName, $appName) === 0) {
                 $tables[] = $tableName;
                 break;
             }
         }
     }
 
-    return array_unique($tables);
+    return \array_values(\array_unique($tables));
 }
 
 /**
- * Löscht alle kompilierten Templates und Caches
+ * Löscht kompilierte Templates und Datei-Caches per Filesystem (ohne WCF/CacheHandler).
  */
-function clearCompiledTemplates() {
+function clearCompiledTemplates(): int
+{
+    if (!\defined('WCF_DIR')) {
+        \define('WCF_DIR', recoveryResolveWcfDir());
+    }
+
+    $wcfRoot = \rtrim(WCF_DIR, '/\\') . '/';
     $dirs = [
-        __DIR__ . '/tmp',
-        __DIR__ . '/cache',
-        __DIR__ . '/templates/compiled',
-        __DIR__ . '/acp/templates/compiled'
+        $wcfRoot . 'tmp',
+        $wcfRoot . 'cache',
+        $wcfRoot . 'templates/compiled',
+        $wcfRoot . 'acp/templates/compiled',
     ];
 
     $deletedFiles = 0;
     foreach ($dirs as $dir) {
-        if (is_dir($dir)) {
-            $files = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS),
-                RecursiveIteratorIterator::CHILD_FIRST
-            );
+        if (!\is_dir($dir)) {
+            continue;
+        }
 
-            foreach ($files as $fileinfo) {
-                $todo = ($fileinfo->isDir() ? 'rmdir' : 'unlink');
-                @$todo($fileinfo->getRealPath());
-                $deletedFiles++;
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST
+        );
+
+        foreach ($iterator as $fileinfo) {
+            if ($fileinfo->isDir()) {
+                @\rmdir($fileinfo->getRealPath());
+            } else {
+                @\unlink($fileinfo->getRealPath());
             }
+            $deletedFiles++;
         }
     }
 
@@ -2001,7 +2900,8 @@ try {
     $recoveryDb = recoveryBootstrapDatabase();
 } catch (\Throwable $e) {
     echo '<div class="alert alert-error"><strong>Bootstrap-Fehler:</strong> '
-        . htmlspecialchars($e->getMessage()) . '</div>';
+        . \nl2br(\htmlspecialchars(recoveryFormatUserError($e))) . '</div>';
+    recoveryRenderExceptionDetails($e);
     recoveryRenderPageEnd();
     exit;
 }
@@ -2056,6 +2956,10 @@ if ($mode === RECOVERY_MODE_SELECTION) {
             <strong>Cache Clear</strong>
             <span>Löscht alle Caches &amp; kompilierte Templates</span>
         </a>
+        <a href="?mode=<?= RECOVERY_MODE_PACKAGE_LIST_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
+            <strong>Paketliste reparieren</strong>
+            <span>Entfernt verwaiste Queue-/Application-Einträge (ACP-Paketliste)</span>
+        </a>
     </div>
 
     <div class="alert alert-info">
@@ -2097,63 +3001,28 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 
     <form method="POST" enctype="multipart/form-data">
         <div class="form-group">
-            <label>Option 2: Package-Datei hochladen (.tar oder .tar.gz)</label>
+            <label>Option 2: Package-Datei hochladen (.tar, .tar.gz, .tgz – max. 100 MiB)</label>
             <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz">
         </div>
         <button type="submit">Mit Datei reparieren</button>
     </form>
 <?php
     } else {
-        $packageIdentifier = null;
-
-        // Package-Identifier ermitteln (aus POST, GET oder Upload)
-        if (isset($_POST['package_identifier']) && !empty($_POST['package_identifier'])) {
-            $packageIdentifier = trim($_POST['package_identifier']);
-        } elseif (isset($_GET['package_identifier']) && !empty($_GET['package_identifier'])) {
-            $packageIdentifier = trim($_GET['package_identifier']);
-        } elseif (isset($_FILES['package_file']) && $_FILES['package_file']['error'] === UPLOAD_ERR_OK) {
-            // Upload verarbeiten
-            $uploadDir = __DIR__ . '/uploads';
-            if (!is_dir($uploadDir)) {
-                mkdir($uploadDir, 0755, true);
-            }
-
-            $uploadedFile = $uploadDir . '/' . basename($_FILES['package_file']['name']);
-            if (move_uploaded_file($_FILES['package_file']['tmp_name'], $uploadedFile)) {
-                // Entpacken
-                $extractDir = $uploadDir . '/extracted';
-                if (!is_dir($extractDir)) {
-                    mkdir($extractDir, 0755, true);
-                }
-
-                if (extractArchive($uploadedFile, $extractDir)) {
-                    $packageXml = $extractDir . '/package.xml';
-                    $packageIdentifier = extractPackageIdentifier($packageXml);
-
-                    if (!$packageIdentifier) {
-                        echo '<div class="alert alert-error">Fehler: package.xml konnte nicht gelesen werden.</div>';
-                    }
-                } else {
-                    echo '<div class="alert alert-error">Fehler: Archiv konnte nicht entpackt werden.</div>';
-                }
-            } else {
-                echo '<div class="alert alert-error">Fehler: Datei-Upload fehlgeschlagen.</div>';
-            }
+        $packageInput = recoveryResolvePackageInputFromRequest();
+        if (isset($packageInput['error'])) {
+            echo '<div class="alert alert-error"><strong>Fehler:</strong> '
+                . \htmlspecialchars($packageInput['error']) . '</div>';
         }
 
+        $packageIdentifier = $packageInput['packageIdentifier'] ?? null;
+        $extractDir = $packageInput['extractDir'] ?? recoveryResolveTrustedExtractDir();
+
         if ($packageIdentifier) {
-            // Ressourcen-Analyse durchführen wenn Upload vorhanden
             $resources = null;
-            $extractDir = null;
-            if (isset($_FILES['package_file']) && $_FILES['package_file']['error'] === UPLOAD_ERR_OK) {
-                $uploadDir = __DIR__ . '/uploads';
-                $extractDir = $uploadDir . '/extracted';
-                if (is_dir($extractDir)) {
-                    $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
-                    if ($resources && !empty($resources['acpMenu']['prefix'])) {
-                        // Zeige gefundene ACP-Menü-Einträge aus Analyse
-                        displayResourcePreview($resources, $resources['wcfN'], $packageIdentifier);
-                    }
+            if ($extractDir && \is_dir($extractDir)) {
+                $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
+                if ($resources && !empty($resources['acpMenu']['prefix'])) {
+                    displayResourcePreview($resources, $resources['wcfN'], $packageIdentifier);
                 }
             }
 
@@ -2165,247 +3034,104 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
             $statement->execute([$packageIdentifier]);
             $packageData = $statement->fetchArray();
 
+            $wcfN = $resources ? (int) $resources['wcfN'] : WCF_N;
+
             if (!$packageData && !isset($_POST['force_cleanup'])) {
-            // App-Name extrahieren für Pattern-Suche
-            // Versuche sowohl letzten als auch vorletzten Teil (für Erweiterungen)
-            $parts = explode('.', $packageIdentifier);
-            $appNames = [];
-            if (count($parts) >= 2) {
-                $appNames[] = $parts[count($parts) - 2]; // Vorletzter Teil (Basis-Plugin)
-            }
-            $appNames[] = end($parts); // Letzter Teil (Erweiterung oder direktes Plugin)
-            $appNames = array_unique($appNames);
+                $menuItems = recoveryFetchAcpMenuItemsForPackage($db, $wcfN, $packageIdentifier, null, $resources);
+                $foundPatterns = recoveryInferAcpMenuSearchPatterns($packageIdentifier, $resources);
+                $menuCount = \count($menuItems);
 
-            // Prüfe alle möglichen Patterns
-            $allMenuItems = [];
-            $foundPatterns = [];
-            
-            foreach ($appNames as $appName) {
-                $patterns = [
-                    $appName . '.acp.menu.%',
-                    strtolower($appName) . '.acp.menu.%',
-                ];
-                
-                foreach ($patterns as $pattern) {
-                    $sql = "SELECT menuItem, menuItemController
-                            FROM wcf" . WCF_N . "_acp_menu_item
-                            WHERE menuItem LIKE ?";
-                    $statement = $db->prepareStatement($sql);
-                    $statement->execute([$pattern]);
-                    
-                    while ($row = $statement->fetchArray()) {
-                        if (!in_array($row['menuItem'], array_column($allMenuItems, 'menuItem'))) {
-                            $allMenuItems[] = $row;
-                            if (!in_array($pattern, $foundPatterns)) {
-                                $foundPatterns[] = $pattern;
-                            }
-                        }
+                echo '<div class="alert alert-info"><strong>Warnung:</strong> Plugin nicht in Datenbank gefunden.<br>';
+                echo 'Dies kann bedeuten, dass die Installation fehlgeschlagen ist.<br><br>';
+
+                if ($menuCount > 0) {
+                    echo '<strong>Gefundene ACP-Menüeinträge (' . $menuCount . '):</strong><br>';
+                    if ($foundPatterns !== []) {
+                        echo '<small>Suchmuster: ' . \htmlspecialchars(\implode(', ', $foundPatterns)) . '</small><br><br>';
                     }
-                }
-            }
-
-            $menuCount = count($allMenuItems);
-
-            echo '<div class="alert alert-info"><strong>Warnung:</strong> Plugin nicht in Datenbank gefunden.<br>';
-            echo 'Dies kann bedeuten, dass die Installation fehlgeschlagen ist.<br><br>';
-
-            if ($menuCount > 0) {
-                echo '<strong>Gefundene ACP-Menüeinträge (' . $menuCount . '):</strong><br>';
-                if (count($foundPatterns) > 0) {
-                    echo '<small>Patterns: ' . htmlspecialchars(implode(', ', $foundPatterns)) . '</small><br><br>';
-                }
-                
-                // Zeige gefundene Einträge
-                echo '<table>';
-                echo '<thead><tr><th>Menu Item</th><th>Controller</th></tr></thead>';
-                echo '<tbody>';
-                foreach ($allMenuItems as $item) {
-                    echo '<tr>';
-                    echo '<td>' . htmlspecialchars($item['menuItem']) . '</td>';
-                    echo '<td>' . htmlspecialchars($item['menuItemController'] ?: '-') . '</td>';
-                    echo '</tr>';
-                }
-                echo '</tbody></table><br>';
-                
-                echo '<form method="POST">';
-                echo '<input type="hidden" name="package_identifier" value="' . htmlspecialchars($packageIdentifier) . '">';
-                echo '<input type="hidden" name="force_cleanup" value="1">';
-                echo '<button type="submit" class="btn-danger">Diese ' . $menuCount . ' Menüeinträge löschen</button>';
-                echo '</form>';
-            } else {
-                echo '<strong>Keine ACP-Menüeinträge mit diesen Patterns gefunden.</strong><br>';
-                echo 'Es gibt nichts zu bereinigen.';
-            }
-            echo '</div>';
-        } else {
-            $packageID = $packageData ? $packageData['packageID'] : null;
-            $wcfN = $resources ? $resources['wcfN'] : WCF_N;
-
-            // ACP-Menüeinträge finden (aus Analyse oder Datenbank)
-            if ($resources && !empty($resources['acpMenu']['prefix'])) {
-                // Verwende Präfix aus Analyse
-                $prefix = addslashes($resources['acpMenu']['prefix']);
-                $sql = "SELECT menuItem, menuItemController
-                        FROM wcf{$wcfN}_acp_menu_item
-                        WHERE menuItem LIKE ?";
-                $statement = $db->prepareStatement($sql);
-                $statement->execute([$prefix . '%']);
-            } elseif ($packageID) {
-                $sql = "SELECT menuItem, menuItemController
-                        FROM wcf{$wcfN}_acp_menu_item
-                        WHERE packageID = ?";
-                $statement = $db->prepareStatement($sql);
-                $statement->execute([$packageID]);
-            } else {
-                // Fallback: Nach Pattern suchen (versuche mehrere App-Namen)
-                $parts = explode('.', $packageIdentifier);
-                $appNames = [];
-                if (count($parts) >= 2) {
-                    $appNames[] = $parts[count($parts) - 2]; // Vorletzter Teil
-                }
-                $appNames[] = end($parts); // Letzter Teil
-                $appNames = array_unique($appNames);
-                
-                // Sammle alle Menüeinträge für alle Patterns
-                $allMenuItems = [];
-                foreach ($appNames as $appName) {
-                    $patterns = [
-                        $appName . '.acp.menu.%',
-                        strtolower($appName) . '.acp.menu.%',
-                    ];
-                    
-                    foreach ($patterns as $pattern) {
-                        $sql = "SELECT menuItem, menuItemController
-                                FROM wcf{$wcfN}_acp_menu_item
-                                WHERE menuItem LIKE ?";
-                        $statement = $db->prepareStatement($sql);
-                        $statement->execute([$pattern]);
-                        
-                        while ($row = $statement->fetchArray()) {
-                            if (!in_array($row['menuItem'], array_column($allMenuItems, 'menuItem'))) {
-                                $allMenuItems[] = $row;
-                            }
-                        }
+                    echo '<table><thead><tr><th>Menu Item</th><th>Controller</th></tr></thead><tbody>';
+                    foreach ($menuItems as $item) {
+                        echo '<tr><td>' . \htmlspecialchars($item['menuItem']) . '</td>';
+                        echo '<td>' . \htmlspecialchars($item['menuItemController'] ?: '-') . '</td></tr>';
                     }
-                }
-                
-                // Erstelle ein Statement-Objekt für die spätere Verwendung
-                // (Wir haben bereits die Daten, aber für Kompatibilität)
-                $menuItems = $allMenuItems;
-                $statement = null; // Wird nicht mehr benötigt, da wir $menuItems direkt haben
-            }
-
-            // Wenn $menuItems noch nicht gesetzt wurde (aus Fallback), hole Daten aus Statement
-            if (!isset($menuItems)) {
-                $menuItems = [];
-                if ($statement) {
-                    while ($row = $statement->fetchArray()) {
-                        $menuItems[] = $row;
+                    echo '</tbody></table><br>';
+                    echo '<form method="POST">';
+                    echo '<input type="hidden" name="package_identifier" value="' . \htmlspecialchars($packageIdentifier) . '">';
+                    if ($extractDir) {
+                        echo '<input type="hidden" name="extract_dir" value="' . \htmlspecialchars($extractDir) . '">';
                     }
-                }
-            }
-
-            if (empty($menuItems)) {
-                echo '<div class="alert alert-info">';
-                echo '<strong>Keine ACP-Menüeinträge gefunden</strong><br>';
-                echo 'Für dieses Plugin existieren keine ACP-Menüeinträge in der Datenbank.';
-                echo '</div>';
-            } elseif (!isset($_POST['confirm_delete'])) {
-                echo '<div class="alert alert-info">';
-                echo '<strong>Gefundene ACP-Menüeinträge (' . count($menuItems) . '):</strong>';
-                echo '<table>';
-                echo '<thead><tr><th>Menu Item</th><th>Controller</th></tr></thead>';
-                echo '<tbody>';
-                foreach ($menuItems as $item) {
-                    echo '<tr>';
-                    echo '<td>' . htmlspecialchars($item['menuItem']) . '</td>';
-                    echo '<td>' . htmlspecialchars($item['menuItemController'] ?: '-') . '</td>';
-                    echo '</tr>';
-                }
-                echo '</tbody></table>';
-                echo '<form method="POST">';
-                echo '<input type="hidden" name="package_identifier" value="' . htmlspecialchars($packageIdentifier) . '">';
-                if ($extractDir) {
-                    echo '<input type="hidden" name="extract_dir" value="' . htmlspecialchars($extractDir) . '">';
-                }
-                if (!$packageID) {
                     echo '<input type="hidden" name="force_cleanup" value="1">';
+                    echo '<button type="submit" class="btn-danger">Diese ' . $menuCount . ' Menüeinträge löschen</button>';
+                    echo '</form>';
+                } else {
+                    echo '<strong>Keine ACP-Menüeinträge mit den ermittelten Mustern gefunden.</strong><br>';
+                    echo 'Es gibt nichts zu bereinigen.';
                 }
-                echo '<input type="hidden" name="confirm_delete" value="1">';
-                echo '<button type="submit" class="btn-danger">Alle löschen</button>';
-                echo '</form>';
                 echo '</div>';
             } else {
-                // Ressourcen erneut analysieren wenn Extract-Dir vorhanden
-                $extractDir = isset($_POST['extract_dir']) ? $_POST['extract_dir'] : null;
-                if ($extractDir && is_dir($extractDir)) {
-                    $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
-                }
-                $wcfN = $resources ? $resources['wcfN'] : WCF_N;
+                $menuItems = recoveryFetchAcpMenuItemsForPackage($db, $wcfN, $packageIdentifier, $packageData ?: null, $resources);
 
-                // Löschen ausführen
-                $db->beginTransaction();
-
-                try {
-                    // Verwende Analyse-Ergebnisse wenn vorhanden
-                    if ($resources && !empty($resources['acpMenu']['prefix'])) {
-                        $prefix = addslashes($resources['acpMenu']['prefix']);
-                        $sql = "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE menuItem LIKE ?";
-                        $statement = $db->prepareStatement($sql);
-                        $statement->execute([$prefix . '%']);
-                    } elseif ($packageID) {
-                        $sql = "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE packageID = ?";
-                        $statement = $db->prepareStatement($sql);
-                        $statement->execute([$packageID]);
-                    } else {
-                        // Fallback: Nach Pattern suchen (versuche mehrere App-Namen)
-                        $parts = explode('.', $packageIdentifier);
-                        $appNames = [];
-                        if (count($parts) >= 2) {
-                            $appNames[] = $parts[count($parts) - 2]; // Vorletzter Teil
-                        }
-                        $appNames[] = end($parts); // Letzter Teil
-                        $appNames = array_unique($appNames);
-                        
-                        $deletedTotal = 0;
-                        foreach ($appNames as $appName) {
-                            $patterns = [
-                                $appName . '.acp.menu.%',
-                                strtolower($appName) . '.acp.menu.%',
-                            ];
-                            
-                            foreach ($patterns as $pattern) {
-                                $sql = "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE menuItem LIKE ?";
-                                $statement = $db->prepareStatement($sql);
-                                $statement->execute([$pattern]);
-                                $deletedTotal += $statement->getAffectedRows();
-                            }
-                        }
-                        $deletedCount = $deletedTotal;
+                if (empty($menuItems)) {
+                    echo '<div class="alert alert-info">';
+                    echo '<strong>Keine ACP-Menüeinträge gefunden</strong><br>';
+                    echo 'Für dieses Plugin existieren keine ACP-Menüeinträge in der Datenbank.';
+                    echo '</div>';
+                } elseif (!isset($_POST['confirm_delete'])) {
+                    echo '<div class="alert alert-info">';
+                    echo '<strong>Gefundene ACP-Menüeinträge (' . \count($menuItems) . '):</strong>';
+                    echo '<table><thead><tr><th>Menu Item</th><th>Controller</th></tr></thead><tbody>';
+                    foreach ($menuItems as $item) {
+                        echo '<tr><td>' . \htmlspecialchars($item['menuItem']) . '</td>';
+                        echo '<td>' . \htmlspecialchars($item['menuItemController'] ?: '-') . '</td></tr>';
                     }
-
-                    $deletedCount = $statement->getAffectedRows();
-
-                    // Cache löschen
-                    clearCompiledTemplates();
-
-                    $db->commitTransaction();
-
-                    echo '<div class="alert alert-success">';
-                    echo '<strong>✓ ACP-Repair erfolgreich!</strong><br>';
-                    echo 'Gelöschte Menüeinträge: ' . $deletedCount . '<br>';
-                    echo 'Cache wurde geleert.<br><br>';
-                    recoveryRenderAcpSuccessLink($recoveryBaseUrl, '→ Zum ACP');
+                    echo '</tbody></table>';
+                    echo '<form method="POST">';
+                    echo '<input type="hidden" name="package_identifier" value="' . \htmlspecialchars($packageIdentifier) . '">';
+                    if ($extractDir) {
+                        echo '<input type="hidden" name="extract_dir" value="' . \htmlspecialchars($extractDir) . '">';
+                    }
+                    if (!$packageData) {
+                        echo '<input type="hidden" name="force_cleanup" value="1">';
+                    }
+                    echo '<input type="hidden" name="confirm_delete" value="1">';
+                    echo '<button type="submit" class="btn-danger">Alle löschen</button>';
+                    echo '</form>';
                     echo '</div>';
+                } else {
+                    $extractDir = recoveryResolveTrustedExtractDir();
+                    if ($extractDir && \is_dir($extractDir)) {
+                        $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
+                    }
+                    $wcfN = $resources ? (int) $resources['wcfN'] : WCF_N;
 
-                } catch (Exception $e) {
-                    $db->rollBackTransaction();
-                    echo '<div class="alert alert-error">';
-                    echo '<strong>Fehler:</strong> ' . htmlspecialchars($e->getMessage());
-                    echo '</div>';
+                    $db->beginTransaction();
+                    try {
+                        $deletedCount = recoveryDeleteAcpMenuItemsForPackage(
+                            $db,
+                            $wcfN,
+                            $packageIdentifier,
+                            $packageData ?: null,
+                            $resources
+                        );
+                        clearCompiledTemplates();
+                        $db->commitTransaction();
+                        recoveryCleanupUploadWorkspace();
+
+                        echo '<div class="alert alert-success">';
+                        echo '<strong>✓ ACP-Repair erfolgreich!</strong><br>';
+                        echo 'Gelöschte Menüeinträge: ' . $deletedCount . '<br>';
+                        echo 'Cache wurde geleert.<br><br>';
+                        recoveryRenderAcpSuccessLink($recoveryBaseUrl, '→ Zum ACP');
+                        echo '</div>';
+                    } catch (\Throwable $e) {
+                        recoverySafeRollBackTransaction($db);
+                        echo '<div class="alert alert-error">';
+                        echo '<strong>Fehler:</strong> ' . \nl2br(\htmlspecialchars(recoveryFormatUserError($e)));
+                        recoveryRenderExceptionDetails($e);
+                        echo '</div>';
+                    }
                 }
             }
-        }
         } else {
             echo '<div class="alert alert-error">';
             echo '<strong>Fehler:</strong> Kein Package-Identifier konnte ermittelt werden. Bitte versuchen Sie es erneut.';
@@ -2451,46 +3177,18 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
     </form>
 <?php
     } else {
-        $packageIdentifier = null;
-
-        // Package-Identifier ermitteln (aus POST, GET oder Upload)
-        if (isset($_POST['package_identifier']) && !empty($_POST['package_identifier'])) {
-            $packageIdentifier = trim($_POST['package_identifier']);
-        } elseif (isset($_GET['package_identifier']) && !empty($_GET['package_identifier'])) {
-            $packageIdentifier = trim($_GET['package_identifier']);
-        } elseif (isset($_FILES['package_file']) && $_FILES['package_file']['error'] === UPLOAD_ERR_OK) {
-            // Upload verarbeiten
-            $uploadDir = __DIR__ . '/uploads';
-            if (!is_dir($uploadDir)) {
-                mkdir($uploadDir, 0755, true);
-            }
-
-            $uploadedFile = $uploadDir . '/' . basename($_FILES['package_file']['name']);
-            if (move_uploaded_file($_FILES['package_file']['tmp_name'], $uploadedFile)) {
-                // Entpacken
-                $extractDir = $uploadDir . '/extracted';
-                if (!is_dir($extractDir)) {
-                    mkdir($extractDir, 0755, true);
-                }
-
-                if (extractArchive($uploadedFile, $extractDir)) {
-                    $packageXml = $extractDir . '/package.xml';
-                    $packageIdentifier = extractPackageIdentifier($packageXml);
-
-                    if (!$packageIdentifier) {
-                        echo '<div class="alert alert-error">Fehler: package.xml konnte nicht gelesen werden.</div>';
-                    }
-                } else {
-                    echo '<div class="alert alert-error">Fehler: Archiv konnte nicht entpackt werden.</div>';
-                }
-            } else {
-                echo '<div class="alert alert-error">Fehler: Datei-Upload fehlgeschlagen.</div>';
-            }
+        $packageInput = recoveryResolvePackageInputFromRequest();
+        if (isset($packageInput['error'])) {
+            echo '<div class="alert alert-error"><strong>Fehler:</strong> '
+                . \htmlspecialchars($packageInput['error']) . '</div>';
         }
+
+        $packageIdentifier = $packageInput['packageIdentifier'] ?? null;
+        $extractDir = $packageInput['extractDir'] ?? recoveryResolveTrustedExtractDir();
 
         if ($packageIdentifier) {
             // Package in DB suchen
-            $sql = "SELECT packageID, package, packageName
+            $sql = "SELECT packageID, package, packageName, packageDir, isApplication
                     FROM wcf" . WCF_N . "_package
                     WHERE package = ?";
             $statement = $db->prepareStatement($sql);
@@ -2507,25 +3205,16 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
             }
             echo '</div>';
 
-            // Ressourcen-Analyse durchführen wenn Upload vorhanden
             $resources = null;
-            $extractDir = null;
-            
-            // Prüfe ob Upload gerade erfolgt oder Extract-Dir bereits bekannt
-            if (isset($_FILES['package_file']) && $_FILES['package_file']['error'] === UPLOAD_ERR_OK) {
-                $uploadDir = __DIR__ . '/uploads';
-                $extractDir = $uploadDir . '/extracted';
-            } elseif (isset($_GET['extract_dir']) || isset($_POST['extract_dir'])) {
-                $extractDir = isset($_GET['extract_dir']) ? $_GET['extract_dir'] : $_POST['extract_dir'];
-            }
-            
-            if ($packageData) {
-                recoveryDisplayDbCleanupPreview($db, WCF_N, $packageData, $packageIdentifier);
+            if ($extractDir && \is_dir($extractDir)) {
+                $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
             }
 
-            if ($extractDir && is_dir($extractDir)) {
-                $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
-                if ($resources) {
+            if ($packageData) {
+                recoveryDisplayDbCleanupPreview($db, WCF_N, $packageData, $packageIdentifier, $extractDir);
+            }
+
+            if ($resources) {
                     displayResourcePreview($resources, $resources['wcfN'], $packageIdentifier);
                     
                     // SQL anzeigen Button
@@ -2579,25 +3268,39 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     echo '<br>Keine spezifischen Tabellen gefunden.<br>';
                 }
 
+                $fsEval = recoveryEvaluatePluginDirectoryDeletion(
+                    $packageData ?: null,
+                    $packageIdentifier,
+                    $db,
+                    $resources ? (int) $resources['wcfN'] : WCF_N,
+                    $extractDir
+                );
+                echo '<br><strong>Dateisystem:</strong> ' . \htmlspecialchars($fsEval['reason']) . '<br>';
+
                 echo '<br><form method="POST">';
-                echo '<input type="hidden" name="package_identifier" value="' . htmlspecialchars($packageIdentifier) . '">';
+                echo '<input type="hidden" name="package_identifier" value="' . \htmlspecialchars($packageIdentifier) . '">';
                 if ($extractDir) {
-                    echo '<input type="hidden" name="extract_dir" value="' . htmlspecialchars($extractDir) . '">';
+                    echo '<input type="hidden" name="extract_dir" value="' . \htmlspecialchars($extractDir) . '">';
                 }
                 echo '<input type="hidden" name="confirm_uninstall" value="1">';
-                echo '<button type="submit" class="btn-danger">Jetzt deinstallieren</button>';
+                if ($fsEval['deletable']) {
+                    echo '<label style="display:block;margin:12px 0;">';
+                    echo '<input type="checkbox" name="confirm_delete_files" value="1"> ';
+                    echo 'Plugin-Verzeichnis <code>' . \htmlspecialchars((string) $fsEval['relativePath']) . '/</code> auf dem Server löschen';
+                    echo '</label>';
+                }
+                echo '<button type="submit" class="btn-danger">Datenbank bereinigen</button>';
                 echo '</form>';
                 echo '</div>';
 
             } else {
-                // Ressourcen erneut analysieren wenn Extract-Dir vorhanden
-                $extractDir = isset($_POST['extract_dir']) ? $_POST['extract_dir'] : null;
-                $resources = null;
-                if ($extractDir && is_dir($extractDir)) {
+                $extractDir = recoveryResolveTrustedExtractDir();
+                if ($extractDir && \is_dir($extractDir) && !$resources) {
                     $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
                 }
 
-                // Deinstallation ohne Transaktion (DROP TABLE beendet MySQL-Transaktionen implizit)
+                $deleteFilesOnDisk = isset($_POST['confirm_delete_files']) && $_POST['confirm_delete_files'] === '1';
+
                 try {
                     $log = [];
                     $wcfN = $resources ? (int) $resources['wcfN'] : WCF_N;
@@ -2608,31 +3311,29 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                         $packageIdentifier,
                         $packageData ?: null,
                         $resources,
-                        $log
+                        $log,
+                        $deleteFilesOnDisk,
+                        $extractDir
                     );
 
                     $deletedFiles = clearCompiledTemplates();
                     $log[] = 'Cache gelöscht: ' . $deletedFiles . ' Dateien';
+                    recoveryCleanupUploadWorkspace();
 
                     echo '<div class="alert alert-success">';
-                    echo '<strong>✓ Plugin erfolgreich deinstalliert!</strong><br><br>';
+                    echo '<strong>✓ Plugin-Bereinigung abgeschlossen!</strong><br><br>';
                     echo '<strong>Durchgeführte Aktionen:</strong><br>';
                     foreach ($log as $entry) {
-                        echo '• ' . htmlspecialchars($entry) . '<br>';
+                        echo '• ' . \htmlspecialchars($entry) . '<br>';
                     }
                     recoveryRenderAcpSuccessLink($recoveryBaseUrl);
                     echo '</div>';
 
-                } catch (Exception $e) {
+                } catch (\Throwable $e) {
                     echo '<div class="alert alert-error">';
                     echo '<strong>Fehler bei Deinstallation:</strong><br>';
-                    echo htmlspecialchars($e->getMessage()) . '<br><br>';
-                    if (method_exists($e, 'getTraceAsString')) {
-                        echo '<details><summary>Technische Details (für Debugging)</summary>';
-                        echo '<pre style="font-size: 11px; max-height: 200px; overflow-y: auto;">';
-                        echo htmlspecialchars($e->getTraceAsString());
-                        echo '</pre></details>';
-                    }
+                    echo \nl2br(\htmlspecialchars(recoveryFormatUserError($e)));
+                    recoveryRenderExceptionDetails($e);
                     echo '</div>';
                 }
             }
@@ -2697,6 +3398,60 @@ elseif ($mode === RECOVERY_MODE_CACHE_CLEAR) {
         echo 'Gelöschte Dateien: ' . $deletedFiles . '<br><br>';
         recoveryRenderAcpSuccessLink($recoveryBaseUrl);
         echo '</div>';
+    }
+}
+
+// ============================================================================
+// MODUS 5: PAKETLISTE REPARIEREN
+// ============================================================================
+
+elseif ($mode === RECOVERY_MODE_PACKAGE_LIST_REPAIR) {
+?>
+    <h1>Paketliste reparieren</h1>
+    <p class="subtitle">Entfernt verwaiste Datenbankeinträge, die die ACP-Paketliste oder Deinstallation blockieren</p>
+
+<?php
+    $orphanSql = recoveryGenerateOrphanRepairSql(WCF_N);
+
+    if (!isset($_POST['confirm_repair'])) {
+?>
+    <div class="alert alert-warning">
+        <strong>Typische Symptome:</strong><br>
+        • ACP-Paketliste: <code>Attempt to read property "packageID" on null</code><br>
+        • Deinstallation: <code>assert($package !== null)</code> bei hängender Queue<br><br>
+        <strong>Bereinigt (generisch, alle Plugins):</strong> verwaiste <code>application</code>-Zeilen,
+        <code>package_installation_queue</code> / <code>node</code> / <code>form</code>,
+        <code>package_requirements</code>, <code>package_exclusion</code>, File-Logs.
+    </div>
+
+    <details style="margin: 1rem 0;">
+        <summary>SQL für phpMyAdmin / manuelle Ausführung (WCF_N=<?= (int) WCF_N ?>)</summary>
+        <pre class="recoveryLog"><?= \htmlspecialchars($orphanSql) ?></pre>
+    </details>
+
+    <form method="POST">
+        <input type="hidden" name="confirm_repair" value="1">
+        <button type="submit" class="btn-danger">Verwaiste Einträge jetzt bereinigen</button>
+    </form>
+<?php
+    } else {
+        try {
+            $result = recoveryRepairOrphanedPackageReferences($db, WCF_N);
+            $deletedFiles = clearCompiledTemplates();
+
+            echo '<div class="alert alert-success">';
+            echo '<strong>Paketliste-Reparatur abgeschlossen.</strong><br><br>';
+            foreach ($result['log'] as $entry) {
+                echo '• ' . \htmlspecialchars($entry) . '<br>';
+            }
+            echo '<br>Cache-Dateien gelöscht: ' . (int) $deletedFiles . '<br>';
+            recoveryRenderAcpSuccessLink($recoveryBaseUrl, '→ ACP-Paketliste testen');
+            echo '</div>';
+        } catch (\Throwable $e) {
+            echo '<div class="alert alert-error"><strong>Fehler:</strong> '
+                . \htmlspecialchars(recoveryFormatUserError($e)) . '</div>';
+            recoveryRenderExceptionDetails($e);
+        }
     }
 }
 
