@@ -360,6 +360,14 @@ Problem: Wenn die Erweiterung Dateien fälschlicherweise im
 
 ## 📝 Changelog
 
+### v1.2.2 (2026-05-15)
+- 🎨 **UI:** Offizielles WoltLab-Layout (`WCFSetup.css` + Suite-Logo aus der Installation, wie Rescue Mode)
+- 🗑️ Eigenes Dark-Theme entfernt – einheitliche Optik mit Setup/Recovery der Suite
+- 📐 Formulare und Meldungen nach WoltLab-Konventionen (`section`, `formSubmit`, `p.info` / `p.success` / `p.error`)
+
+### v1.2.1 (2026-05-15)
+- 🐛 Bootstrap-Fix: `class wcf\system\WCF not found` beim minimalen Autoload
+
 ### v1.2.0 (2026-05-15)
 - 📦 **Eine Datei für Nutzer:** nur `plugin-recovery-tool.php`; Auth-Datei wird im Tool heruntergeladen
 - 🚫 **Kein `global.php`-Bootstrap** — funktioniert, wenn das ACP durch fehlerhafte Plugins kaputt ist

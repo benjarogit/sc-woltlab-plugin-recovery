@@ -329,6 +329,14 @@ Problem: If the extension incorrectly placed files in
 
 ## 📝 Changelog
 
+### v1.2.2 (2026-05-15)
+- 🎨 **UI:** Official WoltLab layout (`WCFSetup.css` + suite logo from your installation, like Rescue Mode)
+- 🗑️ Removed custom dark theme – consistent look with suite setup/recovery
+- 📐 Forms and notices follow WoltLab conventions (`section`, `formSubmit`, `p.info` / `p.success` / `p.error`)
+
+### v1.2.1 (2026-05-15)
+- 🐛 Bootstrap fix: `class wcf\system\WCF not found` with minimal autoload
+
 ### v1.2.0 (2026-05-15)
 - 📦 **Single file for users:** `plugin-recovery-tool.php` only; auth file downloaded from the tool
 - 🚫 **No `global.php` bootstrap** — works when the ACP is broken by faulty plugins

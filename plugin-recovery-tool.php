@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.2.1
+ * @version 1.2.2
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -433,6 +433,152 @@ function recoveryPerformFullPluginCleanup(
     }
 }
 
+
+// ============================================================================
+// UI (WoltLab WCFSetup.css – wie Rescue Mode / offizielles Recovery Tool)
+// ============================================================================
+
+/**
+ * @return array{WCFSetup.css: string, woltlabSuite.png: string}
+ */
+function recoveryGetSetupAssets(): array
+{
+    if (!\defined('WCF_DIR')) {
+        try {
+            \define('WCF_DIR', recoveryResolveWcfDir());
+        } catch (\Throwable) {
+            return ['WCFSetup.css' => '', 'woltlabSuite.png' => ''];
+        }
+    }
+
+    $assets = ['WCFSetup.css' => '', 'woltlabSuite.png' => ''];
+    $cssPath = WCF_DIR . 'acp/style/setup/WCFSetup.css';
+    $imgPath = WCF_DIR . 'acp/images/woltlabSuite.png';
+
+    if (\is_readable($cssPath)) {
+        $assets['WCFSetup.css'] = \sprintf(
+            'data:text/css;base64,%s',
+            \base64_encode((string) \file_get_contents($cssPath))
+        );
+    }
+    if (\is_readable($imgPath)) {
+        $assets['woltlabSuite.png'] = \sprintf(
+            'data:image/png;base64,%s',
+            \base64_encode((string) \file_get_contents($imgPath))
+        );
+    }
+
+    return $assets;
+}
+
+function recoveryRenderStandaloneMessage(string $documentTitle, string $contentTitle, string $bodyHtml): void
+{
+    $assets = recoveryGetSetupAssets();
+    recoveryRenderPageStart($documentTitle, $contentTitle, $assets);
+    echo $bodyHtml;
+    recoveryRenderPageEnd($assets);
+}
+
+function recoveryRenderPageStart(string $documentTitle, string $contentTitle, ?array $assets = null): void
+{
+    $assets ??= recoveryGetSetupAssets();
+    ?>
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="robots" content="noindex">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><?= \htmlspecialchars($documentTitle) ?> - WoltLab Suite</title>
+    <?php if ($assets['WCFSetup.css'] !== ''): ?>
+    <link rel="stylesheet" href="<?= \htmlspecialchars($assets['WCFSetup.css']) ?>">
+    <?php endif; ?>
+    <style>
+        .content { margin: 0 auto; max-width: 980px; }
+        .recoveryModeGrid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .recoveryModeCard {
+            display: block;
+            padding: 20px;
+            border: 1px solid #d0d7de;
+            border-radius: 3px;
+            text-decoration: none;
+            color: inherit;
+        }
+        .recoveryModeCard:hover { border-color: #369; }
+        .recoveryModeCard strong { display: block; margin-bottom: 8px; font-size: 1.05em; }
+        .recoveryModeCard span { font-size: 13px; opacity: .85; }
+        pre.recoveryLog { overflow-x: auto; max-height: 320px; }
+    </style>
+</head>
+<body id="tplPluginRecovery" data-template="pluginRecovery" data-application="wcf" class="wcfAcp">
+<a id="top"></a>
+<div id="pageContainer" class="pageContainer acpPageHiddenMenu">
+    <div class="pageHeaderContainer">
+        <header id="pageHeaderFacade" class="pageHeaderFacade">
+            <div class="layoutBoundary">
+                <div id="pageHeaderLogo" class="pageHeaderLogo">
+                    <?php if ($assets['woltlabSuite.png'] !== ''): ?>
+                    <img src="<?= \htmlspecialchars($assets['woltlabSuite.png']) ?>" alt="" class="pageHeaderLogoLarge" style="width: 281px;height: 40px;display: inline !important;">
+                    <?php else: ?>
+                    <strong>WoltLab Suite</strong>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </header>
+    </div>
+    <div id="acpPageContentContainer" class="acpPageContentContainer">
+        <section id="main" class="main" role="main">
+            <div class="layoutBoundary">
+                <div id="content" class="content">
+                    <header class="contentHeader">
+                        <h1 class="contentTitle"><?= \htmlspecialchars($contentTitle) ?></h1>
+                    </header>
+<?php
+}
+
+function recoveryRenderPageEnd(?array $assets = null): void
+{
+    $assets ??= recoveryGetSetupAssets();
+    $baseUrl = '';
+    try {
+        $baseUrl = recoveryGetSiteBaseUrl();
+    } catch (\Throwable) {
+    }
+    ?>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+<footer id="pageFooter" class="pageFooter">
+    <div id="pageFooterCopyright" class="pageFooterCopyright">
+        <div class="layoutBoundary">
+            <div class="copyright">
+                <a href="https://github.com/benjarogit/sc-woltlab-plugin-recovery" target="_blank" rel="noopener">Plugin Recovery Tool</a>
+                &copy; <?= \date('Y') ?> Sunny C.
+                <?php if ($baseUrl !== ''): ?>
+                · <a href="<?= \htmlspecialchars($baseUrl) ?>">Installation</a>
+                <?php endif; ?>
+                · <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank" rel="noopener">WoltLab Recovery</a>
+            </div>
+        </div>
+    </div>
+</footer>
+</body>
+</html>
+<?php
+}
+
+function recoveryRenderBackLink(string $href): void
+{
+    echo '<p><a href="' . \htmlspecialchars($href) . '">&larr; Zurück zur Auswahl</a></p>';
+}
+
 // ============================================================================
 // AUTHENTIFIZIERUNG (wie WoltLab wsc-recovery.php)
 // ============================================================================
@@ -465,17 +611,14 @@ if ($action === 'download-auth-file') {
 // Cleanup-Action: Alle Recovery-Dateien löschen
 if ($action === 'cleanup') {
     cleanupRecoveryFiles();
-
-    echo '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Cleanup abgeschlossen</title></head><body>';
-    echo '<h1 style="color: green;">✓ Recovery Tool erfolgreich entfernt!</h1>';
-    echo '<p>Alle Dateien wurden gelöscht:</p>';
-    echo '<ul>';
-    echo '<li>plugin-recovery-tool.php</li>';
-    echo '<li>plugin-recovery-auth.php</li>';
-    echo '<li>uploads/</li>';
-    echo '</ul>';
-    echo '<p><strong>Diese Seite wird nicht mehr funktionieren.</strong></p>';
-    echo '</body></html>';
+    recoveryRenderStandaloneMessage(
+        'Recovery Tool entfernt',
+        'Recovery Tool entfernt',
+        '<p class="success"><strong>Recovery Tool erfolgreich entfernt.</strong></p>'
+        . '<p>Folgende Dateien wurden gelöscht:</p>'
+        . '<ul><li>plugin-recovery-tool.php</li><li>plugin-recovery-auth.php</li><li>uploads/</li></ul>'
+        . '<p class="info"><strong>Diese Seite ist nicht mehr erreichbar.</strong></p>'
+    );
     exit;
 }
 
@@ -1325,8 +1468,7 @@ function generateCleanupSql($resources, $wcfN) {
  * Zeigt Vorschau der gefundenen Ressourcen
  */
 function displayResourcePreview($resources, $wcfN, $packageIdentifier) {
-    echo '<div class="alert alert-info" style="margin-top: 20px;">';
-    echo '<strong>📦 Gefundene Ressourcen aus Package-Datei:</strong><br>';
+    echo '<section class="section"><p class="info"><strong>Gefundene Ressourcen aus Package-Datei:</strong><br>';
     echo '<small>WCF_N: ' . htmlspecialchars($wcfN) . '</small><br><br>';
 
     $hasResources = false;
@@ -1410,282 +1552,53 @@ function displayResourcePreview($resources, $wcfN, $packageIdentifier) {
         echo '<em>Keine zusätzlichen Ressourcen in Package-Datei gefunden.</em><br>';
     }
 
-    echo '</div>';
+    echo '</p></section>';
 }
 
-?>
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>Plugin Recovery Tool</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #2D2D2D;
-            color: #c0c0c0;
-            padding: 50px 20px;
-            line-height: 1.5;
-        }
-        .container {
-            max-width: 980px;
-            margin: 0 auto;
-            background: #3D3D3D;
-            padding: 40px;
-            border-radius: 3px;
-        }
-        footer {
-            max-width: 980px;
-            margin: 20px auto 0;
-            padding: 10px 0;
-            text-align: right;
-            color: #9D9D9D;
-            font-size: 13px;
-        }
-        footer a {
-            color: inherit;
-            text-decoration: none;
-        }
-        footer a:hover {
-            color: #fff;
-        }
-        h1 {
-            color: #fff;
-            margin-bottom: 10px;
-            font-size: 32px;
-            font-weight: 300;
-        }
-        h2 {
-            color: #fff;
-            margin: 40px 0 10px 0;
-            font-size: 24px;
-            font-weight: 300;
-        }
-        .subtitle {
-            color: #9D9D9D;
-            margin-bottom: 30px;
-            font-size: 14px;
-        }
-        code {
-            color: #fff;
-            font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            word-break: break-word;
-        }
-        .mode-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 30px;
-        }
-        .mode-button {
-            display: block;
-            padding: 20px;
-            background: rgba(0, 0, 0, .125);
-            border: 1px solid #444444;
-            border-radius: 3px;
-            text-decoration: none;
-            color: #c0c0c0;
-            text-align: center;
-            transition: all 0.2s;
-            cursor: pointer;
-        }
-        .mode-button:hover {
-            background: rgba(0, 0, 0, .25);
-            border-color: #666;
-        }
-        .mode-button strong {
-            display: block;
-            font-size: 18px;
-            margin-bottom: 8px;
-            color: #fff;
-        }
-        .mode-button span {
-            font-size: 13px;
-            color: #9D9D9D;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #fff;
-        }
-        input[type="text"],
-        input[type="password"],
-        textarea,
-        select {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #444444;
-            border-radius: 3px;
-            font-size: 14px;
-            background: #2D2D2D;
-            color: #c0c0c0;
-        }
-        input[type="file"] {
-            width: 100%;
-            padding: 10px;
-            border: 1px dashed #444444;
-            border-radius: 3px;
-            background: #2D2D2D;
-            color: #c0c0c0;
-        }
-        button, .button {
-            background: #369;
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 3px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
-            display: inline-block;
-            text-decoration: none;
-        }
-        button:hover, .button:hover {
-            background: #258;
-        }
-        .btn-danger {
-            background: #c33;
-        }
-        .btn-danger:hover {
-            background: #a22;
-        }
-        .btn-success {
-            background: #3c3;
-        }
-        .btn-success:hover {
-            background: #2a2;
-        }
-        .alert {
-            padding: 15px 20px;
-            margin-bottom: 20px;
-            border-radius: 3px;
-            color: #fff;
-        }
-        .alert-success {
-            background: rgba(60, 204, 60, 0.3);
-            border: 1px solid #3c3;
-        }
-        .alert-error {
-            background: rgba(204, 51, 51, 0.3);
-            border: 1px solid #c33;
-        }
-        .alert-info {
-            background: rgba(51, 102, 153, 0.3);
-            border: 1px solid #369;
-        }
-        .alert-warning {
-            background: rgba(204, 153, 51, 0.3);
-            border: 1px solid #c93;
-        }
-        .back-link {
-            display: inline-block;
-            margin-bottom: 20px;
-            color: #fff;
-            text-decoration: none;
-        }
-        .back-link:hover {
-            text-decoration: underline;
-        }
-        pre {
-            background: #2D2D2D;
-            padding: 15px;
-            border-radius: 3px;
-            overflow-x: auto;
-            font-size: 13px;
-            color: #c0c0c0;
-            border: 1px solid #444444;
-        }
-        small {
-            color: #9D9D9D;
-        }
-        .table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 15px 0;
-        }
-        .table th,
-        .table td {
-            padding: 10px 20px;
-            text-align: left;
-            border-bottom: 1px solid #444444;
-        }
-        .table th {
-            border-top: 1px solid #444444;
-            border-bottom-width: 2px;
-            font-weight: 600;
-        }
-        .table tbody tr:nth-child(odd) {
-            background: rgba(0, 0, 0, .125);
-        }
-        .table tbody tr:hover {
-            background: rgba(0, 0, 0, .25);
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-
-<?php
+recoveryRenderPageStart('Plugin Recovery Tool', 'Plugin Recovery Tool');
 
 // Auth-Screen anzeigen wenn nicht authentifiziert
 if (!$isAuthenticated) {
 ?>
-    <h1>Plugin Recovery Tool</h1>
-    <p class="subtitle">Authentifizierung erforderlich</p>
+    <p class="info">Authentifizierung erforderlich. Folgen Sie den drei Schritten.</p>
 
-    <div class="alert alert-warning">
-        <strong>Schritt 1:</strong> Auth-Datei herunterladen<br>
-        <a href="?action=download-auth-file&t=<?= $authHash ?>" class="button" style="display: inline-block; margin-top: 10px;" id="downloadBtn">
-            📥 plugin-recovery-auth.php herunterladen
-        </a>
-    </div>
+    <section class="section">
+        <header class="sectionHeader">
+            <h2 class="sectionTitle">Schritt 1: Auth-Datei herunterladen</h2>
+        </header>
+        <p class="info">
+            <a href="?action=download-auth-file&amp;t=<?= htmlspecialchars($authHash) ?>" id="downloadBtn">plugin-recovery-auth.php herunterladen</a>
+        </p>
+    </section>
 
-    <div class="alert alert-info" style="margin-top: 20px;" id="step2" style="display: none;">
-        <strong>Schritt 2:</strong> Datei hochladen<br>
-        Laden Sie die heruntergeladene Datei <code><?= $authFilename ?></code> in dasselbe Verzeichnis hoch,
-        in dem sich diese <code>plugin-recovery-tool.php</code> befindet.
-    </div>
+    <section class="section" id="step2" hidden>
+        <header class="sectionHeader">
+            <h2 class="sectionTitle">Schritt 2: Datei hochladen</h2>
+            <p class="sectionDescription">Laden Sie <code><?= htmlspecialchars($authFilename) ?></code> in dasselbe Verzeichnis wie <code>plugin-recovery-tool.php</code> hoch.</p>
+        </header>
+    </section>
 
-    <div class="alert alert-info" style="margin-top: 20px;" id="step3" style="display: none;">
-        <strong>Schritt 3:</strong> Recovery starten<br>
-        <a href="?t=<?= $authHash ?>" class="button btn-success" style="margin-top: 10px;">
-            🚀 Recovery Tool starten
-        </a>
-    </div>
+    <section class="section" id="step3" hidden>
+        <header class="sectionHeader">
+            <h2 class="sectionTitle">Schritt 3: Recovery starten</h2>
+        </header>
+        <div class="formSubmit">
+            <a href="?t=<?= htmlspecialchars($authHash) ?>">Recovery Tool starten</a>
+        </div>
+    </section>
 
-    <div class="alert alert-error" style="margin-top: 30px;">
-        <strong>⚠️ Sicherheitshinweis:</strong><br>
-        Löschen Sie beide Dateien (<code>plugin-recovery-tool.php</code> und <code><?= $authFilename ?></code>)
-        nach der Verwendung. Diese Dateien können ein Sicherheitsrisiko darstellen!
-    </div>
-
-    <footer>
-        <a href="https://github.com/benjarogit/sc-woltlab-plugin-recovery" target="_blank">Plugin Recovery Tool</a> &copy; 2025 Sunny C. |
-        Inspiriert von <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank">WoltLab</a> |
-        <a href="https://github.com/benjarogit/simple-woltlab-plugin-manager" target="_blank">Simple Plugin Manager</a> |
-        <a href="https://www.woltlab.com/user/1350052-sunny-c/" target="_blank">WoltLab Profil</a> |
-        <a href="https://github.com/benjarogit/photoshopCClinux" target="_blank">Photoshop CC Linux</a>
-    </footer>
+    <p class="error"><strong>Sicherheitshinweis:</strong> Löschen Sie <code>plugin-recovery-tool.php</code> und <code><?= htmlspecialchars($authFilename) ?></code> nach der Verwendung.</p>
 
     <script>
     document.getElementById('downloadBtn').addEventListener('click', function() {
         setTimeout(function() {
-            document.getElementById('step2').style.display = 'block';
-            document.getElementById('step3').style.display = 'block';
+            document.getElementById('step2').hidden = false;
+            document.getElementById('step3').hidden = false;
         }, 500);
     });
     </script>
-
-    </div>
-</body>
-</html>
 <?php
+    recoveryRenderPageEnd();
     exit;
 }
 
@@ -1698,9 +1611,9 @@ if (!$isAuthenticated) {
 try {
     $recoveryDb = recoveryBootstrapDatabase();
 } catch (\Throwable $e) {
-    echo '<div class="alert alert-error"><strong>Bootstrap-Fehler:</strong> '
-        . htmlspecialchars($e->getMessage()) . '</div>';
-    echo '</div></body></html>';
+    echo '<p class="error"><strong>Bootstrap-Fehler:</strong> '
+        . htmlspecialchars($e->getMessage()) . '</p>';
+    recoveryRenderPageEnd();
     exit;
 }
 
@@ -1724,42 +1637,36 @@ $mode = isset($_GET['mode']) ? (int)$_GET['mode'] : RECOVERY_MODE_SELECTION;
 
 if ($mode === RECOVERY_MODE_SELECTION) {
 ?>
-    <h1>WoltLab Suite Recovery Tool</h1>
-    <p class="subtitle">Wählen Sie den gewünschten Recovery-Modus</p>
+    <p class="info">Wählen Sie den gewünschten Recovery-Modus. Dieses Tool arbeitet direkt auf Datenbank-Ebene und sollte nur im Notfall verwendet werden.</p>
 
-    <div class="mode-grid">
-        <a href="?mode=<?= RECOVERY_MODE_ACP_REPAIR ?>&t=<?= $authHash ?>" class="mode-button">
-            <strong>🔧 ACP Repair</strong>
+    <div class="recoveryModeGrid">
+        <a href="?mode=<?= RECOVERY_MODE_ACP_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="recoveryModeCard">
+            <strong>ACP Repair</strong>
             <span>Repariert defekte ACP-Menüeinträge eines Plugins</span>
         </a>
-
-        <a href="?mode=<?= RECOVERY_MODE_PLUGIN_UNINSTALL ?>&t=<?= $authHash ?>" class="mode-button">
-            <strong>🗑️ Plugin Uninstall</strong>
+        <a href="?mode=<?= RECOVERY_MODE_PLUGIN_UNINSTALL ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="recoveryModeCard">
+            <strong>Plugin Uninstall</strong>
             <span>Deinstalliert Plugin komplett (DB + Dateien)</span>
         </a>
-
-        <a href="?mode=<?= RECOVERY_MODE_USER_MANAGEMENT ?>&t=<?= $authHash ?>" class="mode-button">
-            <strong>👤 User Management</strong>
-            <span>Admin-Passwort zurücksetzen & Berechtigungen</span>
+        <a href="?mode=<?= RECOVERY_MODE_USER_MANAGEMENT ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="recoveryModeCard">
+            <strong>User Management</strong>
+            <span>Hinweis zum offiziellen WoltLab Recovery Tool</span>
         </a>
-
-        <a href="?mode=<?= RECOVERY_MODE_CACHE_CLEAR ?>&t=<?= $authHash ?>" class="mode-button">
-            <strong>🧹 Cache Clear</strong>
-            <span>Löscht alle Caches & kompilierte Templates</span>
+        <a href="?mode=<?= RECOVERY_MODE_CACHE_CLEAR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="recoveryModeCard">
+            <strong>Cache Clear</strong>
+            <span>Löscht alle Caches und kompilierte Templates</span>
         </a>
     </div>
 
-    <div class="alert alert-info">
-        <strong>ℹ️ Hinweis:</strong> Dieses Tool arbeitet direkt auf Datenbank-Ebene und sollte nur im Notfall verwendet werden.
-    </div>
-
-    <div class="alert alert-warning" style="margin-top: 30px;">
-        <strong>⚠️ Fertig mit Recovery?</strong><br>
-        Wenn Sie alle Reparaturen abgeschlossen haben, sollten Sie das Recovery Tool und alle zugehörigen Dateien löschen.<br><br>
-        <a href="?action=cleanup&t=<?= $authHash ?>" class="button btn-danger" onclick="return confirm('ACHTUNG: Dies löscht plugin-recovery-tool.php, plugin-recovery-auth.php und alle Upload-Verzeichnisse. Fortfahren?')">
-            🗑️ Recovery Tool vollständig entfernen
-        </a>
-    </div>
+    <section class="section">
+        <header class="sectionHeader">
+            <h2 class="sectionTitle">Recovery Tool entfernen</h2>
+            <p class="sectionDescription">Nach Abschluss aller Reparaturen sollten Sie diese Datei löschen.</p>
+        </header>
+        <div class="formSubmit">
+            <a href="?action=cleanup&amp;t=<?= htmlspecialchars($authHash) ?>" onclick="return confirm('ACHTUNG: Dies löscht plugin-recovery-tool.php, plugin-recovery-auth.php und alle Upload-Verzeichnisse. Fortfahren?')">Recovery Tool vollständig entfernen</a>
+        </div>
+    </section>
 
 <?php
 }
@@ -1770,9 +1677,8 @@ if ($mode === RECOVERY_MODE_SELECTION) {
 
 elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 ?>
-    <a href="?t=<?= $authHash ?>" class="back-link">← Zurück zur Auswahl</a>
-    <h1>🔧 ACP Repair</h1>
-    <p class="subtitle">Repariert defekte ACP-Menüeinträge eines Plugins</p>
+    <?php recoveryRenderBackLink("?t=" . $authHash); ?>
+    <p class="info">Repariert defekte ACP-Menüeinträge eines Plugins.</p>
 
 <?php
     // Schritt 1: Package-Identifier eingeben oder hochladen
@@ -1789,7 +1695,7 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
         <button type="submit">Mit Identifier reparieren</button>
     </form>
 
-    <hr style="margin: 30px 0; border: none; border-top: 1px solid #444444;">
+    <hr>
 
     <form method="POST" enctype="multipart/form-data">
         <div class="form-group">
@@ -1827,13 +1733,13 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                     $packageIdentifier = extractPackageIdentifier($packageXml);
 
                     if (!$packageIdentifier) {
-                        echo '<div class="alert alert-error">Fehler: package.xml konnte nicht gelesen werden.</div>';
+                        echo '<p class="error">Fehler: package.xml konnte nicht gelesen werden.</p>';
                     }
                 } else {
-                    echo '<div class="alert alert-error">Fehler: Archiv konnte nicht entpackt werden.</div>';
+                    echo '<p class="error">Fehler: Archiv konnte nicht entpackt werden.</p>';
                 }
             } else {
-                echo '<div class="alert alert-error">Fehler: Datei-Upload fehlgeschlagen.</div>';
+                echo '<p class="error">Fehler: Datei-Upload fehlgeschlagen.</p>';
             }
         }
 
@@ -1902,8 +1808,7 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 
             $menuCount = count($allMenuItems);
 
-            echo '<div class="alert alert-warning">';
-            echo '<strong>Warnung:</strong> Plugin nicht in Datenbank gefunden.<br>';
+            echo '<section class="section"><p class="info"><strong>Warnung:</strong> Plugin nicht in Datenbank gefunden.<br>';
             echo 'Dies kann bedeuten, dass die Installation fehlgeschlagen ist.<br><br>';
 
             if ($menuCount > 0) {
@@ -1927,13 +1832,13 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                 echo '<form method="POST">';
                 echo '<input type="hidden" name="package_identifier" value="' . htmlspecialchars($packageIdentifier) . '">';
                 echo '<input type="hidden" name="force_cleanup" value="1">';
-                echo '<button type="submit" class="btn-danger">Diese ' . $menuCount . ' Menüeinträge löschen</button>';
+                echo '<div class="formSubmit"><input type="submit" value="Diese ' . $menuCount . ' Menüeinträge löschen"></div>';
                 echo '</form>';
             } else {
                 echo '<strong>Keine ACP-Menüeinträge mit diesen Patterns gefunden.</strong><br>';
                 echo 'Es gibt nichts zu bereinigen.';
             }
-            echo '</div>';
+            echo '</p>';
         } else {
             $packageID = $packageData ? $packageData['packageID'] : null;
             $wcfN = $resources ? $resources['wcfN'] : WCF_N;
@@ -2003,12 +1908,12 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
             }
 
             if (empty($menuItems)) {
-                echo '<div class="alert alert-info">';
+                echo '<p class="info">';
                 echo '<strong>Keine ACP-Menüeinträge gefunden</strong><br>';
                 echo 'Für dieses Plugin existieren keine ACP-Menüeinträge in der Datenbank.';
-                echo '</div>';
+                echo '</p>';
             } elseif (!isset($_POST['confirm_delete'])) {
-                echo '<div class="alert alert-warning">';
+                echo '<p class="info">';
                 echo '<strong>Gefundene ACP-Menüeinträge (' . count($menuItems) . '):</strong>';
                 echo '<table class="table" style="margin-top: 15px;">';
                 echo '<thead><tr><th>Menu Item</th><th>Controller</th></tr></thead>';
@@ -2029,9 +1934,9 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                     echo '<input type="hidden" name="force_cleanup" value="1">';
                 }
                 echo '<input type="hidden" name="confirm_delete" value="1">';
-                echo '<button type="submit" class="btn-danger">Alle löschen</button>';
+                echo '<div class="formSubmit"><input type="submit" value="Alle löschen"></div>';
                 echo '</form>';
-                echo '</div>';
+                echo '</p>';
             } else {
                 // Ressourcen erneut analysieren wenn Extract-Dir vorhanden
                 $extractDir = isset($_POST['extract_dir']) ? $_POST['extract_dir'] : null;
@@ -2088,25 +1993,25 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 
                     $db->commitTransaction();
 
-                    echo '<div class="alert alert-success">';
+                    echo '<p class="success">';
                     echo '<strong>✓ ACP-Repair erfolgreich!</strong><br>';
                     echo 'Gelöschte Menüeinträge: ' . $deletedCount . '<br>';
                     echo 'Cache wurde geleert.<br><br>';
-                    echo '<a href="' . htmlspecialchars($recoveryBaseUrl) . 'acp/" class="btn-success">→ Zum ACP</a>';
-                    echo '</div>';
+                    echo '<a href="' . htmlspecialchars($recoveryBaseUrl) . 'acp/">Zum ACP</a>';
+                    echo '</p>';
 
                 } catch (Exception $e) {
                     $db->rollBackTransaction();
-                    echo '<div class="alert alert-error">';
+                    echo '<p class="error">';
                     echo '<strong>Fehler:</strong> ' . htmlspecialchars($e->getMessage());
-                    echo '</div>';
+                    echo '</p>';
                 }
             }
         }
         } else {
-            echo '<div class="alert alert-error">';
+            echo '<p class="error">';
             echo '<strong>Fehler:</strong> Kein Package-Identifier konnte ermittelt werden. Bitte versuchen Sie es erneut.';
-            echo '</div>';
+            echo '</p>';
         }
     }
 }
@@ -2117,9 +2022,8 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 
 elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 ?>
-    <a href="?t=<?= $authHash ?>" class="back-link">← Zurück zur Auswahl</a>
-    <h1>🗑️ Plugin Uninstall</h1>
-    <p class="subtitle">Deinstalliert Plugin komplett aus Datenbank und Dateisystem</p>
+    <?php recoveryRenderBackLink("?t=" . $authHash); ?>
+    <p class="info">Deinstalliert ein Plugin komplett aus Datenbank und Dateisystem.</p>
 
 <?php
     // Schritt 1: Package-Identifier eingeben oder hochladen
@@ -2176,13 +2080,13 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     $packageIdentifier = extractPackageIdentifier($packageXml);
 
                     if (!$packageIdentifier) {
-                        echo '<div class="alert alert-error">Fehler: package.xml konnte nicht gelesen werden.</div>';
+                        echo '<p class="error">Fehler: package.xml konnte nicht gelesen werden.</p>';
                     }
                 } else {
-                    echo '<div class="alert alert-error">Fehler: Archiv konnte nicht entpackt werden.</div>';
+                    echo '<p class="error">Fehler: Archiv konnte nicht entpackt werden.</p>';
                 }
             } else {
-                echo '<div class="alert alert-error">Fehler: Datei-Upload fehlgeschlagen.</div>';
+                echo '<p class="error">Fehler: Datei-Upload fehlgeschlagen.</p>';
             }
         }
 
@@ -2195,7 +2099,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
             $statement->execute([$packageIdentifier]);
             $packageData = $statement->fetchArray();
 
-            echo '<div class="alert alert-info">';
+            echo '<p class="info">';
             echo '<strong>Package:</strong> ' . htmlspecialchars($packageIdentifier) . '<br>';
             if ($packageData) {
                 echo '<strong>Status:</strong> In Datenbank gefunden (ID: ' . $packageData['packageID'] . ')<br>';
@@ -2203,7 +2107,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
             } else {
                 echo '<strong>Status:</strong> Nicht in Datenbank (Installation fehlgeschlagen?)<br>';
             }
-            echo '</div>';
+            echo '</p>';
 
             // Ressourcen-Analyse durchführen wenn Upload vorhanden
             $resources = null;
@@ -2224,14 +2128,13 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     
                     // SQL anzeigen Button
                     if (isset($_GET['show_sql'])) {
-                        echo '<div class="alert alert-info" style="margin-top: 20px;">';
-                        echo '<strong>SQL Cleanup Script:</strong><br>';
-                        echo '<pre style="max-height: 400px; overflow-y: auto;">' . htmlspecialchars(generateCleanupSql($resources, $resources['wcfN'])) . '</pre>';
-                        echo '</div>';
+                        echo '<section class="section"><p class="info"><strong>SQL Cleanup Script:</strong></p>';
+                        echo '<pre class="recoveryLog">' . htmlspecialchars(generateCleanupSql($resources, $resources['wcfN'])) . '</pre>';
+                        echo '</section>';
                     } else {
                         echo '<div style="margin-top: 10px;">';
                         $extractDirParam = $extractDir ? '&extract_dir=' . urlencode($extractDir) : '';
-                        echo '<a href="?mode=' . RECOVERY_MODE_PLUGIN_UNINSTALL . '&t=' . $authHash . '&show_sql=1&package_identifier=' . urlencode($packageIdentifier) . $extractDirParam . '" class="button">SQL anzeigen</a>';
+                        echo '<a href="?mode=' . RECOVERY_MODE_PLUGIN_UNINSTALL . '&t=' . $authHash . '&show_sql=1&package_identifier=' . urlencode($packageIdentifier) . $extractDirParam . '">SQL anzeigen</a>';
                         echo '</div>';
                     }
                 }
@@ -2246,7 +2149,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
             }
 
             if (!isset($_POST['confirm_uninstall'])) {
-                echo '<div class="alert alert-warning">';
+                echo '<p class="info">';
                 echo '<strong>Zu löschende Daten:</strong><br><br>';
 
                 if ($packageData) {
@@ -2282,9 +2185,9 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     echo '<input type="hidden" name="extract_dir" value="' . htmlspecialchars($extractDir) . '">';
                 }
                 echo '<input type="hidden" name="confirm_uninstall" value="1">';
-                echo '<button type="submit" class="btn-danger">JETZT DEINSTALLIEREN</button>';
+                echo '<div class="formSubmit"><input type="submit" value="Jetzt deinstallieren"></div>';
                 echo '</form>';
-                echo '</div>';
+                echo '</p>';
 
             } else {
                 // Ressourcen erneut analysieren wenn Extract-Dir vorhanden
@@ -2315,17 +2218,17 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 
                     $db->commitTransaction();
 
-                    echo '<div class="alert alert-success">';
+                    echo '<p class="success">';
                     echo '<strong>✓ Plugin erfolgreich deinstalliert!</strong><br><br>';
                     echo '<strong>Durchgeführte Aktionen:</strong><br>';
                     foreach ($log as $entry) {
                         echo '• ' . htmlspecialchars($entry) . '<br>';
                     }
-                    echo '</div>';
+                    echo '</p>';
 
                 } catch (Exception $e) {
                     $db->rollBackTransaction();
-                    echo '<div class="alert alert-error">';
+                    echo '<p class="error">';
                     echo '<strong>Fehler bei Deinstallation:</strong><br>';
                     echo htmlspecialchars($e->getMessage()) . '<br><br>';
                     if (method_exists($e, 'getTraceAsString')) {
@@ -2334,7 +2237,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                         echo htmlspecialchars($e->getTraceAsString());
                         echo '</pre></details>';
                     }
-                    echo '</div>';
+                    echo '</p>';
                 }
             }
         }
@@ -2347,25 +2250,23 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 
 elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
 ?>
-    <a href="?t=<?= $authHash ?>" class="back-link">← Zurück zur Auswahl</a>
-    <h1>👤 User Management</h1>
-    <p class="subtitle">Für User-Management nutzen Sie das offizielle WoltLab Recovery Tool</p>
+    <?php recoveryRenderBackLink("?t=" . $authHash); ?>
+    <p class="info">Für User-Management nutzen Sie das offizielle WoltLab Recovery Tool.</p>
 
-    <div class="alert alert-info">
-        <strong>WoltLab Recovery Tool (wsc-recovery.php)</strong><br><br>
-        Für Admin-Passwort-Reset und Benutzer-Management verwenden Sie bitte das offizielle Tool von WoltLab:<br><br>
-
-        <strong>Download & Anleitung:</strong><br>
-        <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank" style="color: #007bff;">
-            → https://manual.woltlab.com/de/recovery-tool/
-        </a><br><br>
-
-        <strong>Funktionen des WoltLab Tools:</strong><br>
-        • Admin-Passwort zurücksetzen<br>
-        • Benutzer zu Administrator-Gruppe hinzufügen<br>
-        • E-Mail-Adressen ändern<br>
-        • Benutzer aktivieren/deaktivieren<br>
-    </div>
+    <section class="section">
+        <header class="sectionHeader">
+            <h2 class="sectionTitle">WoltLab Recovery Tool (wsc-recovery.php)</h2>
+            <p class="sectionDescription">Für Admin-Passwort-Reset und Benutzer-Management.</p>
+        </header>
+        <p class="info">
+            <strong>Download &amp; Anleitung:</strong>
+            <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank" rel="noopener">manual.woltlab.com/de/recovery-tool/</a>
+        </p>
+        <p class="info">
+            <strong>Funktionen:</strong> Admin-Passwort zurücksetzen, Benutzer zur Administrator-Gruppe hinzufügen,
+            E-Mail-Adressen ändern, Benutzer aktivieren/deaktivieren.
+        </p>
+    </section>
 
 <?php
 }
@@ -2376,47 +2277,38 @@ elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
 
 elseif ($mode === RECOVERY_MODE_CACHE_CLEAR) {
 ?>
-    <a href="?t=<?= $authHash ?>" class="back-link">← Zurück zur Auswahl</a>
-    <h1>🧹 Cache Clear</h1>
-    <p class="subtitle">Löscht alle Caches und kompilierte Templates</p>
+    <?php recoveryRenderBackLink("?t=" . $authHash); ?>
+    <p class="info">Löscht alle Caches und kompilierte Templates.</p>
 
 <?php
     if (!isset($_POST['confirm_clear'])) {
 ?>
-    <div class="alert alert-warning">
+    <p class="info">
         <strong>Folgende Verzeichnisse werden geleert:</strong><br>
         • tmp/<br>
         • cache/<br>
         • templates/compiled/<br>
         • acp/templates/compiled/<br>
-    </div>
+    </p>
 
     <form method="POST">
         <input type="hidden" name="confirm_clear" value="1">
-        <button type="submit" class="btn-danger">Cache jetzt löschen</button>
+        <div class="formSubmit">
+            <input type="submit" value="Cache jetzt löschen" accesskey="s">
+        </div>
     </form>
 <?php
     } else {
         $deletedFiles = clearCompiledTemplates();
 
-        echo '<div class="alert alert-success">';
-        echo '<strong>✓ Cache erfolgreich geleert!</strong><br>';
+        echo '<p class="success">';
+        echo '<strong>Cache erfolgreich geleert.</strong><br>';
         echo 'Gelöschte Dateien: ' . $deletedFiles . '<br><br>';
-        echo '<a href="' . htmlspecialchars($recoveryBaseUrl) . '" class="btn-success">→ Zur Hauptseite</a>';
-        echo '</div>';
+        echo '<a href="' . htmlspecialchars($recoveryBaseUrl) . '">Zur Hauptseite</a>';
+        echo '</p>';
     }
 }
 
 ?>
-
-    </div>
-
-    <footer>
-        <a href="https://github.com/benjarogit/sc-woltlab-plugin-recovery" target="_blank">Plugin Recovery Tool</a> &copy; 2025 Sunny C. |
-        Inspiriert von <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank">WoltLab</a> |
-        <a href="https://github.com/benjarogit/simple-woltlab-plugin-manager" target="_blank">Simple Plugin Manager</a> |
-        <a href="https://www.woltlab.com/user/1350052-sunny-c/" target="_blank">WoltLab Profil</a> |
-        <a href="https://github.com/benjarogit/photoshopCClinux" target="_blank">Photoshop CC Linux</a>
-    </footer>
-</body>
-</html>
+<?php
+recoveryRenderPageEnd();
