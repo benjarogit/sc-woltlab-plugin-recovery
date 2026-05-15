@@ -9,7 +9,8 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.0
+ * @version 1.5.1
+ * @requires PHP >= 8.3
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -19,20 +20,19 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.0');
+define('RECOVERY_VERSION', '1.5.1');
+define('RECOVERY_MIN_PHP_VERSION', '8.3.0');
 
-// PHP 7.4 polyfills (str_* in PHP 8.0+)
-if (!\function_exists('str_starts_with')) {
-    function str_starts_with(string $haystack, string $needle): bool
-    {
-        return $needle === '' || \strncmp($haystack, $needle, \strlen($needle)) === 0;
-    }
-}
-if (!\function_exists('str_contains')) {
-    function str_contains(string $haystack, string $needle): bool
-    {
-        return $needle === '' || \strpos($haystack, $needle) !== false;
-    }
+if (\PHP_VERSION_ID < 80300) {
+    \header('Content-Type: text/html; charset=utf-8');
+    \http_response_code(500);
+    echo '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Recovery Tool</title></head><body>';
+    echo '<h1>PHP-Version zu alt</h1>';
+    echo '<p>Dieses Recovery Tool benötigt <strong>PHP 8.3</strong> oder neuer.</p>';
+    echo '<p>Aktuell: <code>' . \htmlspecialchars(\PHP_VERSION) . '</code></p>';
+    echo '<p>Bitte PHP beim Hoster aktualisieren (WoltLab Suite 6.2 empfiehlt PHP 8.1+).</p>';
+    echo '</body></html>';
+    exit;
 }
 define('RECOVERY_MODE_SELECTION', 0);
 define('RECOVERY_MODE_ACP_REPAIR', 1);
