@@ -9,8 +9,8 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.8
- * @requires PHP >= 8.3
+ * @version 1.5.9
+ * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Universelles Recovery nach Stressoren wie kaputter Installation: DB gemäß WoltLab-PIP-Zuordnung,
@@ -21,17 +21,17 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.8');
-define('RECOVERY_MIN_PHP_VERSION', '8.3.0');
+define('RECOVERY_VERSION', '1.5.9');
+define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
-if (\PHP_VERSION_ID < 80300) {
+if (\PHP_VERSION_ID < 80100) {
     \header('Content-Type: text/html; charset=utf-8');
     \http_response_code(500);
     echo '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Recovery Tool</title></head><body>';
     echo '<h1>PHP-Version zu alt</h1>';
-    echo '<p>Dieses Recovery Tool benötigt <strong>PHP 8.3</strong> oder neuer.</p>';
+    echo '<p>Dieses Recovery Tool benötigt mindestens <strong>PHP 8.1</strong> (wie WoltLab Suite 6.x).</p>';
     echo '<p>Aktuell: <code>' . \htmlspecialchars(\PHP_VERSION) . '</code></p>';
-    echo '<p>Bitte PHP beim Hoster aktualisieren (WoltLab Suite 6.2 empfiehlt PHP 8.1+).</p>';
+    echo '<p>Bitte PHP beim Hoster auf 8.1 oder neuer stellen.</p>';
     echo '</body></html>';
     exit;
 }
