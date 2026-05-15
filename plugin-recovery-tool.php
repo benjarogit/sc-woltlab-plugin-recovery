@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.3.3
+ * @version 1.3.4
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -19,7 +19,21 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.3.3');
+define('RECOVERY_VERSION', '1.3.4');
+
+// PHP 7.4 polyfills (str_* in PHP 8.0+)
+if (!\function_exists('str_starts_with')) {
+    function str_starts_with(string $haystack, string $needle): bool
+    {
+        return $needle === '' || \strncmp($haystack, $needle, \strlen($needle)) === 0;
+    }
+}
+if (!\function_exists('str_contains')) {
+    function str_contains(string $haystack, string $needle): bool
+    {
+        return $needle === '' || \strpos($haystack, $needle) !== false;
+    }
+}
 define('RECOVERY_MODE_SELECTION', 0);
 define('RECOVERY_MODE_ACP_REPAIR', 1);
 define('RECOVERY_MODE_PLUGIN_UNINSTALL', 2);
@@ -70,6 +84,12 @@ function recoveryBootstrapDatabase()
     }
 
     require_once WCF_DIR . 'lib/system/WCF.class.php';
+
+    // Vor options.inc.php: verhindert Aufruf von wcf\getRequestId() ohne core.functions.php (NO_IMPORTS).
+    if (!\defined('ENABLE_PRODUCTION_DEBUG_MODE')) {
+        \define('ENABLE_PRODUCTION_DEBUG_MODE', false);
+    }
+
     recoveryDefineMinimalWcfConstants();
     recoveryDefineMinimalWcfFunctions();
 
@@ -118,7 +138,7 @@ function recoveryDetectWcfN(\wcf\system\database\Database $db): int
             if ($statement->fetchArray()) {
                 return $n;
             }
-        } catch (\Throwable) {
+        } catch (\Throwable $ignored) {
         }
     }
 
@@ -262,7 +282,7 @@ function recoveryGetDatabaseSchemaName(\wcf\system\database\Database $db): strin
         $row = $statement->fetchArray();
 
         return (string) ($row['dbName'] ?? '');
-    } catch (\Throwable) {
+    } catch (\Throwable $ignored) {
         return '';
     }
 }
@@ -405,7 +425,7 @@ function recoveryResolvePluginDirectory(
             if ($application !== '' && recoveryValidateAppDirectoryName($application)) {
                 return $application;
             }
-        } catch (\Throwable) {
+        } catch (\Throwable $ignored) {
         }
     }
 
@@ -979,37 +999,14 @@ function recoveryDefineMinimalWcfConstants(): void
 }
 
 /**
- * Stubs für wcf\*-Hilfsfunktionen aus core.functions.php (ohne global.php).
- * Database::prepareStatement() ruft bei ENABLE_PRODUCTION_DEBUG_MODE \wcf\getRequestId() auf.
+ * Minimaler WCF-Hilfsfunktionen-Stub-Pfad (ohne global.php / core.functions.php).
+ * Database::prepareStatement() ruft bei ENABLE_PRODUCTION_DEBUG_MODE \wcf\getRequestId() auf –
+ * wird durch frühes ENABLE_PRODUCTION_DEBUG_MODE=false in recoveryBootstrapDatabase() vermieden.
  */
 function recoveryDefineMinimalWcfFunctions(): void
 {
-    if (\function_exists('wcf\getRequestId')) {
-        return;
-    }
-}
-
-namespace wcf {
-    if (!\function_exists(__NAMESPACE__ . '\\getRequestId')) {
-        function getRequestId(): string
-        {
-            if (!\defined('WCF_REQUEST_ID_HEADER') || !WCF_REQUEST_ID_HEADER) {
-                return '';
-            }
-
-            return $_SERVER[WCF_REQUEST_ID_HEADER] ?? '';
-        }
-    }
-
-    if (!\function_exists(__NAMESPACE__ . '\\getMinorVersion')) {
-        function getMinorVersion(): string
-        {
-            if (!\defined('WCF_VERSION')) {
-                return '0.0';
-            }
-
-            return \preg_replace('/^(\d+\.\d+)\..*$/', '\\1', WCF_VERSION);
-        }
+    if (!\defined('ENABLE_PRODUCTION_DEBUG_MODE')) {
+        \define('ENABLE_PRODUCTION_DEBUG_MODE', false);
     }
 }
 
@@ -1022,7 +1019,7 @@ function recoveryRebuildOptionsIncPhp(): bool
         \wcf\data\option\OptionEditor::rebuild();
 
         return true;
-    } catch (\Throwable) {
+    } catch (\Throwable $ignored) {
         return false;
     }
 }
@@ -1132,7 +1129,7 @@ function recoveryDiscoverPackageIdTables(\wcf\system\database\Database $db, int 
 
             $tables[] = $shortName;
         }
-    } catch (\Throwable) {
+    } catch (\Throwable $ignored) {
     }
 
     return \array_values(\array_unique($tables));
@@ -1318,7 +1315,7 @@ function recoverySafeRollBackTransaction(\wcf\system\database\Database $db): voi
 {
     try {
         $db->rollBackTransaction();
-    } catch (\Throwable) {
+    } catch (\Throwable $ignored) {
     }
 }
 
@@ -1347,7 +1344,7 @@ function recoveryFetchQueueIdsForPackage(
         while ($row = $statement->fetchArray()) {
             $queueIds[] = (int) $row['queueID'];
         }
-    } catch (\Throwable) {
+    } catch (\Throwable $ignored) {
     }
 
     return \array_values(\array_unique($queueIds));
@@ -1925,7 +1922,7 @@ function recoveryGetPipDbCounts(
             $statement->execute([$packageID]);
             $row = $statement->fetchArray();
             $counts[$pipName] = (int)($row['cnt'] ?? 0);
-        } catch (\Throwable) {
+        } catch (\Throwable $ignored) {
             $counts[$pipName] = -1;
         }
     }
@@ -2151,7 +2148,7 @@ function recoveryGetSetupAssets(): array
     if (!\defined('WCF_DIR')) {
         try {
             \define('WCF_DIR', recoveryResolveWcfDir());
-        } catch (\Throwable) {
+        } catch (\Throwable $ignored) {
             return ['WCFSetup.css' => '', 'woltlabSuite.png' => ''];
         }
     }
@@ -2425,7 +2422,7 @@ function recoveryRenderPageEnd(?array $assets = null): void
     $baseUrl = '';
     try {
         $baseUrl = recoveryGetSiteBaseUrl();
-    } catch (\Throwable) {
+    } catch (\Throwable $ignored) {
     }
     ?>
 </div>
@@ -2608,7 +2605,7 @@ function extractArchive($archivePath, $destination) {
         recoverySanitizeExtractedArchive($destination);
 
         return true;
-    } catch (\Throwable) {
+    } catch (\Throwable $ignored) {
         return false;
     }
 }
@@ -2619,7 +2616,7 @@ function extractArchive($archivePath, $destination) {
 function findPackageTables($db, $packageIdentifier, $wcfN = null) {
     try {
         $packageIdentifier = recoveryValidatePackageIdentifier($packageIdentifier);
-    } catch (\InvalidArgumentException) {
+    } catch (\InvalidArgumentException $ignored) {
         return [];
     }
 
@@ -3638,10 +3635,8 @@ if ($recoveryBootstrapError !== null) {
     exit;
 }
 
-use wcf\system\WCF;
-
 $recoveryBaseUrl = recoveryGetSiteBaseUrl();
-$db = WCF::getDB();
+$db = \wcf\system\WCF::getDB();
 
 recoveryRenderGlobalNav($mode, $authHash, $recoveryBaseUrl);
 
@@ -4103,7 +4098,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                                 $st = $db->prepareStatement('SELECT COUNT(*) AS c FROM `' . $safeTable . '`');
                                 $st->execute();
                                 $cnt = (int)($st->fetchArray()['c'] ?? 0);
-                            } catch (\Throwable) {}
+                            } catch (\Throwable $ignored) {}
                             echo '<tr>';
                             echo '<td><input type="checkbox" name="drop_tables[]" value="' . \htmlspecialchars($safeTable) . '" checked></td>';
                             echo '<td><code>' . \htmlspecialchars($safeTable) . '</code></td>';
