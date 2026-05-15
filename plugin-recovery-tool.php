@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.11
+ * @version 1.5.12
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.11');
+define('RECOVERY_VERSION', '1.5.12');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
 if (\PHP_VERSION_ID < 80100) {
@@ -37,12 +37,32 @@ if (\PHP_VERSION_ID < 80100) {
 }
 
 // #region agent log
-/** NDJSON-Debug: Ziel über Umgebung oder Datei neben diesem Skript (öffentliches Repo ohne festen User-Pfad). */
+/**
+ * NDJSON-Debug: optional RECOVERY_AGENT_LOG_PATH, sonst beschreibbares Verzeichnis.
+ * Viele Webroots sind nicht beschreibbar → Fallback {@see sys_get_temp_dir()} (sonst „keine Logs“).
+ */
 function recoveryAgentDebugLogPath(): string
 {
-    $p = \getenv('RECOVERY_AGENT_LOG_PATH');
+    static $resolved = null;
+    if ($resolved !== null) {
+        return $resolved;
+    }
 
-    return (\is_string($p) && $p !== '') ? $p : (__DIR__ . '/plugin-recovery-agent-debug.ndjson');
+    $fromEnv = \getenv('RECOVERY_AGENT_LOG_PATH');
+    if (\is_string($fromEnv) && $fromEnv !== '') {
+        return $resolved = $fromEnv;
+    }
+
+    $beside = __DIR__ . '/plugin-recovery-agent-debug.ndjson';
+    if (@\is_writable(__DIR__)) {
+        return $resolved = $beside;
+    }
+
+    $tmp = \rtrim((string) \sys_get_temp_dir(), \DIRECTORY_SEPARATOR)
+        . \DIRECTORY_SEPARATOR . 'plugin_recovery_agent_54d5f7_'
+        . \substr(\sha1(__DIR__), 0, 16) . '.ndjson';
+
+    return $resolved = $tmp;
 }
 
 /** @internal NDJSON-Zeilen für gezieltes Debugging (Hypothesen / Fatals). */
@@ -95,6 +115,7 @@ function recoveryAgentDebugLog(string $hypothesisId, string $location, string $m
 recoveryAgentDebugLog('H1', 'tool:boot', 'php_version_gate_passed', [
     'phpVersion' => \PHP_VERSION,
     'sapi' => \PHP_SAPI,
+    'debugLogPath' => recoveryAgentDebugLogPath(),
 ]);
 // #endregion
 

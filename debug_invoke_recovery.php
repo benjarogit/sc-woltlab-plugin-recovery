@@ -4,8 +4,8 @@
  * CLI-Harness für Debug-Session: simuliert GET mit gültigem ?t= (kein Redirect),
  * damit plugin-recovery-tool.php bis zur HTML-Ausgabe läuft und NDJSON-Logs schreibt.
  *
- * Logs: standardmäßig `plugin-recovery-agent-debug.ndjson` neben `plugin-recovery-tool.php`,
- * oder Ziel per Umgebung `RECOVERY_AGENT_LOG_PATH=/pfad/zur/datei.ndjson`.
+ * Logs: optional `RECOVERY_AGENT_LOG_PATH`, sonst neben dem Tool falls beschreibbar,
+ * sonst System-Temp (`plugin_recovery_agent_54d5f7_*.ndjson` — Pfad steht in Logzeile H1 `debugLogPath`).
  *
  * Ausführung: php debug_invoke_recovery.php (im gleichen Verzeichnis wie das Tool)
  */
