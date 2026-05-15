@@ -494,92 +494,122 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle, ?a
     <link rel="stylesheet" href="<?= \htmlspecialchars($assets['WCFSetup.css']) ?>">
     <?php endif; ?>
     <style>
-        /* ── Recovery-spezifische Ergänzungen zu WCFSetup.css ── */
-        .recoveryModeGrid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 14px;
-            margin: 20px 0 28px;
+        /* ── Standard: Dark Theme (original) ─────────────────── */
+        *, *::before, *::after { box-sizing: border-box; min-width: 0; }
+
+        html, body {
+            background: #2D2D2D;
+            color: #c0c0c0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            line-height: 1.5;
         }
-        .recoveryModeCard {
-            display: block;
-            padding: 22px;
-            border: 1px solid #d0d0d0;
-            border-radius: 6px;
-            text-decoration: none;
-            color: inherit;
-            transition: border-color .15s, box-shadow .15s;
+
+        /* Header */
+        .pageHeaderContainer, .pageHeaderFacade { background: #1D1D1D !important; border-bottom: 1px solid #444 !important; }
+        .pageHeaderLogo { padding: 20px 0; }
+
+        /* Content */
+        #acpPageContentContainer, .acpPageContentContainer { background: #2D2D2D; padding: 40px 20px 60px; }
+        .layoutBoundary { max-width: 1020px; margin: 0 auto; padding: 0; }
+        .content { max-width: 980px; }
+        .contentHeader { margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #444; }
+        .contentTitle { color: #fff; font-size: 32px; font-weight: 300; margin: 0; }
+
+        /* Sections */
+        .section { background: #3D3D3D; border: 1px solid #444; border-radius: 3px; padding: 30px; margin-bottom: 20px; }
+        .sectionHeader { margin-bottom: 20px; }
+        .sectionTitle { color: #fff; font-size: 24px; font-weight: 300; margin: 0 0 6px; }
+        .sectionDescription { color: #9D9D9D; font-size: 14px; margin: 0; }
+
+        /* Alerts */
+        p.info, p.success, p.error, p.warning {
+            padding: 15px 20px; border-radius: 3px; margin: 0 0 20px; color: #fff; border: 1px solid;
         }
-        .recoveryModeCard:hover { border-color: #369; box-shadow: 0 2px 8px rgba(51,102,153,.12); }
-        .recoveryModeCard strong { display: block; font-size: 15px; font-weight: 600; margin-bottom: 6px; }
-        .recoveryModeCard span   { font-size: 13px; opacity: .75; }
-        .recoveryBackLink { display: inline-flex; align-items: center; gap: 5px; text-decoration: none; font-size: 13px; opacity: .7; margin-bottom: 20px; }
-        .recoveryBackLink:hover { opacity: 1; }
-        pre.recoveryLog { overflow-x: auto; max-height: 340px; }
+        p.info    { background: rgba(51,102,153,.3);  border-color: #369; }
+        p.success { background: rgba(60,204,60,.3);   border-color: #3c3; }
+        p.error   { background: rgba(204,51,51,.3);   border-color: #c33; }
+        p.warning { background: rgba(204,153,51,.3);  border-color: #c93; }
 
-        /* ── Dark Mode (automatisch per prefers-color-scheme) ─── */
-        @media (prefers-color-scheme: dark) {
-            html, body { background: #1a1a2e; color: #cdd6f4; }
+        /* Forms */
+        dl { margin: 0 0 16px; }
+        dl dt label { display: block; font-weight: 600; color: #fff; margin-bottom: 8px; }
+        dl dd { margin: 0; }
+        input[type="text"], input[type="password"], input[type="file"], textarea, select {
+            width: 100%; padding: 10px; border: 1px solid #444; border-radius: 3px;
+            background: #2D2D2D; color: #c0c0c0; font-size: 14px;
+        }
+        input[type="text"]:focus, input[type="password"]:focus { border-color: #369; outline: none; }
+        small { color: #9D9D9D; font-size: 13px; display: block; margin-top: 4px; }
+        hr { border: none; border-top: 1px solid #444; margin: 30px 0; }
 
-            .pageHeaderContainer,
-            .pageHeaderFacade { background: #0f0f1a !important; border-bottom-color: #2e2e45 !important; }
+        /* Buttons */
+        .formSubmit { margin-top: 20px; }
+        .formSubmit input[type="submit"], .formSubmit a, button {
+            background: #369; color: #fff; padding: 12px 24px; border: none; border-radius: 3px;
+            font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none;
+            display: inline-block; transition: background .2s;
+        }
+        .formSubmit input[type="submit"]:hover, .formSubmit a:hover, button:hover { background: #258; }
 
-            .pageFooter,
-            #pageFooter { background: #0f0f1a; border-top-color: #2e2e45; }
-            .copyright, .copyright a { color: #6c7086; }
-            .copyright a:hover { color: #89b4fa; }
+        /* Tables */
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        table th, table td { padding: 10px 20px; text-align: left; border-bottom: 1px solid #444; color: #c0c0c0; }
+        table th { border-top: 1px solid #444; border-bottom-width: 2px; font-weight: 600; color: #fff; }
+        table tbody tr:nth-child(odd) { background: rgba(0,0,0,.125); }
+        table tbody tr:hover { background: rgba(0,0,0,.25); }
 
-            #acpPageContentContainer,
-            .acpPageContentContainer { background: #1a1a2e; }
+        /* Code */
+        code { color: #fff; font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; word-break: break-word; }
+        pre, pre.recoveryLog { background: #2D2D2D; border: 1px solid #444; border-radius: 3px; padding: 15px; color: #c0c0c0; font-size: 13px; overflow-x: auto; max-height: 340px; }
 
-            .contentHeader { border-bottom-color: #2e2e45; }
-            .contentTitle { color: #e6edf3; }
+        /* Mode grid */
+        .recoveryModeGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0 30px; }
+        .recoveryModeCard { display: block; padding: 20px; background: rgba(0,0,0,.125); border: 1px solid #444; border-radius: 3px; text-decoration: none; color: #c0c0c0; text-align: center; transition: background .2s, border-color .2s; }
+        .recoveryModeCard:hover { background: rgba(0,0,0,.25); border-color: #666; }
+        .recoveryModeCard strong { display: block; font-size: 18px; font-weight: 600; margin-bottom: 8px; color: #fff; }
+        .recoveryModeCard span { font-size: 13px; color: #9D9D9D; }
 
-            .section { background: #1e1e2e; border-color: #2e2e45; }
-            .sectionTitle { color: #cdd6f4; }
-            .sectionDescription { color: #6c7086; }
+        /* Back link & footer */
+        .recoveryBackLink { display: inline-block; margin-bottom: 20px; color: #fff; text-decoration: none; }
+        .recoveryBackLink:hover { text-decoration: underline; }
+        #pageFooter, .pageFooter { background: #1D1D1D; border-top: 1px solid #444; }
+        .pageFooterCopyright { padding: 10px 0; }
+        .copyright { text-align: right; color: #9D9D9D; font-size: 13px; }
+        .copyright a { color: #9D9D9D; text-decoration: none; }
+        .copyright a:hover { color: #fff; }
 
-            p.info    { background: rgba(137,220,235,.08); border-left: 3px solid #89dceb; color: #cdd6f4; }
-            p.success { background: rgba(166,227,161,.10); border-left: 3px solid #a6e3a1; color: #cdd6f4; }
-            p.error   { background: rgba(243,139,168,.10); border-left: 3px solid #f38ba8; color: #cdd6f4; }
-            p.warning { background: rgba(250,179,135,.10); border-left: 3px solid #fab387; color: #cdd6f4; }
-
-            input[type="text"], input[type="password"], input[type="file"],
-            input[type="url"], input[type="date"], textarea, select {
-                background: #13131f;
-                border-color: #2e2e45;
-                color: #cdd6f4;
-            }
-            input[type="text"]:focus, input[type="password"]:focus {
-                border-color: #89b4fa;
-                box-shadow: 0 0 0 3px rgba(137,180,250,.15);
-                outline: none;
-            }
-            label { color: #cdd6f4; }
-            small { color: #6c7086; }
-
-            .formSubmit input[type="submit"],
-            .formSubmit a,
-            button[type="submit"], button {
-                background: #89b4fa;
-                color: #1e1e2e;
-                border-color: transparent;
-            }
-            .formSubmit input[type="submit"]:hover,
-            .formSubmit a:hover,
-            button:hover { opacity: .85; }
-
-            table th, table td { border-bottom-color: #2e2e45; color: #cdd6f4; }
-            table th { color: #6c7086; border-top-color: #2e2e45; }
-            table tbody tr:hover { background: rgba(255,255,255,.03); }
-
-            code { background: rgba(255,255,255,.07); color: #89b4fa; }
-            pre, pre.recoveryLog { background: #13131f; border-color: #2e2e45; color: #cdd6f4; }
-            hr { border-top-color: #2e2e45; }
-
-            .recoveryModeCard { border-color: #2e2e45; color: #cdd6f4; background: #1e1e2e; }
-            .recoveryModeCard:hover { border-color: #89b4fa; box-shadow: 0 2px 10px rgba(137,180,250,.1); }
-            .recoveryModeCard strong { color: #e6edf3; }
+        /* ── Light Mode (automatisch) ─────────────────────────── */
+        @media (prefers-color-scheme: light) {
+            html, body { background: #f5f5f5; color: #333; }
+            .pageHeaderContainer, .pageHeaderFacade { background: #fff !important; border-bottom-color: #ddd !important; }
+            #acpPageContentContainer, .acpPageContentContainer { background: #f5f5f5; }
+            .contentHeader { border-bottom-color: #ddd; }
+            .contentTitle { color: #333; }
+            .section { background: #fff; border-color: #ddd; }
+            .sectionTitle { color: #333; font-weight: 500; }
+            .sectionDescription { color: #777; }
+            p.info    { background: rgba(51,102,153,.08);  border-color: #369; color: #333; }
+            p.success { background: rgba(51,153,51,.08);   border-color: #3a3; color: #333; }
+            p.error   { background: rgba(204,51,51,.08);   border-color: #c33; color: #333; }
+            p.warning { background: rgba(204,153,51,.08);  border-color: #c93; color: #333; }
+            input[type="text"], input[type="password"], input[type="file"], textarea, select { background: #fff; border-color: #ccc; color: #333; }
+            dl dt label { color: #333; }
+            small { color: #777; }
+            table th, table td { border-color: #ddd; color: #333; }
+            table th { color: #555; border-top-color: #ddd; }
+            table tbody tr:nth-child(odd) { background: rgba(0,0,0,.03); }
+            table tbody tr:hover { background: rgba(0,0,0,.06); }
+            code { color: #369; }
+            pre, pre.recoveryLog { background: #fafafa; border-color: #ddd; color: #333; }
+            hr { border-top-color: #ddd; }
+            .recoveryModeCard { background: #fff; border-color: #ddd; color: #333; }
+            .recoveryModeCard:hover { background: #f0f0f0; border-color: #369; }
+            .recoveryModeCard strong { color: #333; }
+            .recoveryModeCard span { color: #777; }
+            .recoveryBackLink { color: #369; }
+            #pageFooter, .pageFooter { background: #fff; border-top-color: #ddd; }
+            .copyright, .copyright a { color: #999; }
+            .copyright a:hover { color: #369; }
         }
     </style>
 </head>
