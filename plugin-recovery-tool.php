@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.2
+ * @version 1.5.3
  * @requires PHP >= 8.3
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -20,7 +20,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.2');
+define('RECOVERY_VERSION', '1.5.3');
 define('RECOVERY_MIN_PHP_VERSION', '8.3.0');
 
 if (\PHP_VERSION_ID < 80300) {
@@ -1156,6 +1156,86 @@ function recoveryGuessTableLabelColumns(array $row): array
 /**
  * @return array{columns: list<string>, rows: list<array<string, mixed>>, total: int, table: string}
  */
+/**
+ * @param mixed $value
+ */
+function recoverySanitizeJsonValue($value): mixed
+{
+    if ($value === null || \is_bool($value) || \is_int($value) || \is_float($value)) {
+        return $value;
+    }
+    if (\is_string($value)) {
+        if (!\mb_check_encoding($value, 'UTF-8')) {
+            $value = \mb_convert_encoding($value, 'UTF-8', 'ISO-8859-1');
+        }
+        if (\strlen($value) > 8192) {
+            return \substr($value, 0, 8192) . '… [' . \strlen($value) . ' Zeichen]';
+        }
+
+        return $value;
+    }
+    if (\is_array($value)) {
+        return '[Array]';
+    }
+
+    return (string) $value;
+}
+
+/**
+ * @param array<string, mixed> $row
+ * @return array<string, mixed>
+ */
+function recoverySanitizeRowForJson(array $row): array
+{
+    $out = [];
+    foreach ($row as $key => $value) {
+        $out[(string) $key] = recoverySanitizeJsonValue($value);
+    }
+
+    return $out;
+}
+
+function recoveryJsonResponse(array $data, int $statusCode = 200): void
+{
+    while (\ob_get_level() > 0) {
+        \ob_end_clean();
+    }
+
+    $flags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE;
+    $json = \json_encode($data, $flags);
+    if ($json === false) {
+        $json = \json_encode(['ok' => false, 'error' => 'JSON-Ausgabe fehlgeschlagen: ' . \json_last_error_msg()], $flags);
+        $statusCode = 500;
+    }
+
+    \http_response_code($statusCode);
+    \header('Content-Type: application/json; charset=utf-8');
+    \header('Cache-Control: no-store');
+    echo $json;
+    exit;
+}
+
+function recoveryFormatUserGroupLabel(int $groupID, string $groupName): string
+{
+    $known = [
+        1 => 'Everyone (Alle)',
+        2 => 'Registered Users (Registrierte)',
+        3 => 'Moderators (Moderatoren)',
+        4 => 'Administrators (Administratoren)',
+        5 => 'Guests (Gäste)',
+        6 => 'Super-Moderators',
+    ];
+    if (isset($known[$groupID])) {
+        return $known[$groupID];
+    }
+
+    if (\str_contains($groupName, '.')) {
+        return $groupName . ' <small style="color:#9D9D9D">(Sprachvariable)</small>';
+    }
+
+    return $groupName;
+}
+
 function recoveryFetchPackageIdTablePreview(
     \wcf\system\database\Database $db,
     int $wcfN,
@@ -1180,7 +1260,7 @@ function recoveryFetchPackageIdTablePreview(
         $stmt->execute([$packageID]);
         $rows = [];
         while ($row = $stmt->fetchArray()) {
-            $rows[] = $row;
+            $rows[] = recoverySanitizeRowForJson($row);
         }
 
         $columns = $rows !== [] ? recoveryGuessTableLabelColumns($rows[0]) : [];
@@ -2426,6 +2506,15 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         .mode-button:hover { background: rgba(0, 0, 0, .25); border-color: #666; }
         .mode-button strong { display: block; font-size: 18px; margin-bottom: 8px; color: #fff; }
         .mode-button span { font-size: 13px; color: #9D9D9D; }
+        .recovery-card {
+            background: rgba(0, 0, 0, .125); border: 1px solid #444; border-radius: 3px;
+            padding: 20px; margin-bottom: 20px;
+        }
+        .recovery-option-cards {
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 24px;
+        }
+        @media (max-width: 720px) { .recovery-option-cards { grid-template-columns: 1fr; } }
+        .recovery-option-card h3 { margin: 0 0 12px; font-size: 16px; color: #fff; }
         .form-group { margin-bottom: 20px; }
         label { display: block; margin-bottom: 8px; font-weight: 600; color: #fff; }
         input[type="text"], input[type="password"], textarea, select {
@@ -2716,11 +2805,8 @@ if ($action === 'auth-status') {
 
 // Vorschau: Zeilen einer Tabelle mit packageID (Plugin Uninstall Schritt 1)
 if ($action === 'pip-preview') {
-    \header('Content-Type: application/json; charset=utf-8');
     if (!$isAuthenticated) {
-        \http_response_code(403);
-        echo \json_encode(['ok' => false, 'error' => 'Nicht authentifiziert.']);
-        exit;
+        recoveryJsonResponse(['ok' => false, 'error' => 'Nicht authentifiziert.'], 403);
     }
 
     try {
@@ -2728,12 +2814,13 @@ if ($action === 'pip-preview') {
         $packageID = (int) ($_GET['package_id'] ?? 0);
         $tableName = \str_replace('`', '', (string) ($_GET['table'] ?? ''));
         $preview = recoveryFetchPackageIdTablePreview($db, WCF_N, $tableName, $packageID);
-        echo \json_encode(['ok' => true] + $preview, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        if (isset($preview['error'])) {
+            recoveryJsonResponse(['ok' => false, 'error' => $preview['error']], 500);
+        }
+        recoveryJsonResponse(['ok' => true] + $preview);
     } catch (\Throwable $e) {
-        \http_response_code(500);
-        echo \json_encode(['ok' => false, 'error' => $e->getMessage()]);
+        recoveryJsonResponse(['ok' => false, 'error' => $e->getMessage()], 500);
     }
-    exit;
 }
 
 // ============================================================================
@@ -4331,10 +4418,25 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                                         modalTitle.textContent = "Lade …";
                                         modalBody.innerHTML = "<p>Bitte warten …</p>";
                                         modal.hidden = false;
-                                        fetch("?action=pip-preview&t=" + encodeURIComponent(authToken)
-                                            + "&table=" + encodeURIComponent(table)
-                                            + "&package_id=" + encodeURIComponent(packageId))
-                                            .then(function (r) { return r.json(); })
+                                        var previewUrl = new URL(window.location.href);
+                                        previewUrl.search = "";
+                                        previewUrl.searchParams.set("action", "pip-preview");
+                                        previewUrl.searchParams.set("t", authToken);
+                                        previewUrl.searchParams.set("table", table);
+                                        previewUrl.searchParams.set("package_id", packageId);
+                                        fetch(previewUrl.toString(), { credentials: "same-origin" })
+                                            .then(function (r) {
+                                                return r.text().then(function (text) {
+                                                    if (!text) {
+                                                        throw new Error("Leere Server-Antwort (HTTP " + r.status + ")");
+                                                    }
+                                                    try {
+                                                        return JSON.parse(text);
+                                                    } catch (parseErr) {
+                                                        throw new Error("Keine gültige JSON-Antwort: " + text.substring(0, 200));
+                                                    }
+                                                });
+                                            })
                                             .then(function (data) {
                                                 if (!data.ok) {
                                                     modalBody.innerHTML = "<p class=\\"alert alert-error\\">"
@@ -4833,20 +4935,27 @@ elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
 
     <!-- ── Passwort zurücksetzen ──────────────────────────────────────── -->
     <h2><i class="fa-solid fa-key"></i> Passwort zurücksetzen</h2>
-    <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start;">
-        <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>" style="flex:1; min-width:200px;">
-            <input type="hidden" name="um_action" value="reset_password">
-            <p style="margin-bottom:12px; font-size:13px; color:#9D9D9D;">Generiert ein zufälliges sicheres Passwort und zeigt es einmalig an.</p>
-            <button type="submit" class="btn-danger"><i class="fa-solid fa-key"></i> Zufälliges Passwort setzen</button>
-        </form>
-        <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>" style="flex:2; min-width:280px;">
-            <input type="hidden" name="um_action" value="reset_password_custom">
-            <div class="form-group">
-                <label for="um_custom_pwd">Eigenes Passwort setzen (min. 8 Zeichen)</label>
-                <input type="password" id="um_custom_pwd" name="custom_password" autocomplete="new-password" placeholder="Neues Passwort eingeben">
-            </div>
-            <button type="submit"><i class="fa-solid fa-key"></i> Passwort setzen</button>
-        </form>
+    <p style="margin:0 0 16px; font-size:13px; color:#9D9D9D;">Wie im <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank" rel="noopener">offiziellen WoltLab Recovery Tool</a>: zufälliges Passwort bestätigen oder ein eigenes setzen.</p>
+    <div class="recovery-option-cards">
+        <div class="recovery-option-card recovery-card">
+            <h3><i class="fa-solid fa-dice"></i> Zufälliges Passwort</h3>
+            <p style="margin:0 0 16px; font-size:13px; color:#9D9D9D;">Wird nach dem Setzen <strong>einmalig</strong> angezeigt – bitte sofort notieren.</p>
+            <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>">
+                <input type="hidden" name="um_action" value="reset_password">
+                <button type="submit" class="btn-danger"><i class="fa-solid fa-key"></i> Zufälliges Passwort setzen</button>
+            </form>
+        </div>
+        <div class="recovery-option-card recovery-card">
+            <h3><i class="fa-solid fa-pen"></i> Eigenes Passwort</h3>
+            <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>">
+                <input type="hidden" name="um_action" value="reset_password_custom">
+                <div class="form-group" style="margin-bottom:16px;">
+                    <label for="um_custom_pwd">Neues Passwort (min. 8 Zeichen)</label>
+                    <input type="password" id="um_custom_pwd" name="custom_password" autocomplete="new-password" placeholder="Passwort eingeben">
+                </div>
+                <button type="submit"><i class="fa-solid fa-key"></i> Passwort setzen</button>
+            </form>
+        </div>
     </div>
 
     <!-- ── E-Mail ändern ──────────────────────────────────────────────── -->
@@ -4937,7 +5046,7 @@ elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
                         <?php endif; ?>
                     </td>
                     <td><?= $gid ?></td>
-                    <td><label for="grp_<?= $gid ?>"><?= \htmlspecialchars($grp['groupName']) ?></label></td>
+                    <td><label for="grp_<?= $gid ?>"><?= recoveryFormatUserGroupLabel($gid, (string) $grp['groupName']) ?></label></td>
                     <td><small><?= $gType ?></small></td>
                 </tr>
             <?php endforeach; ?>
