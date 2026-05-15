@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.10
+ * @version 1.5.11
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.10');
+define('RECOVERY_VERSION', '1.5.11');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
 if (\PHP_VERSION_ID < 80100) {
@@ -2946,7 +2946,12 @@ function recoveryUserDisable2FA(\wcf\system\database\Database $db, int $userID):
 // ============================================================================
 
 /**
- * @return array{WCFSetup.css: string, woltlabSuite.png: string}
+ * Setup-Assets für die Recovery-Oberfläche.
+ *
+ * Früher: komplette CSS/PNG als data:-URI (base64) — bei großen Dateien oder knappem memory_limit
+ * häufig **fatal / HTTP 500 ohne Ausgabe** auf Shared Hosting.
+ *
+ * @return array{WCFSetup.css: string, woltlabSuite.png: string} Relative URLs zur Installations-Root (leer wenn nicht lesbar)
  */
 function recoveryGetSetupAssets(): array
 {
@@ -2963,16 +2968,10 @@ function recoveryGetSetupAssets(): array
     $imgPath = WCF_DIR . 'acp/images/woltlabSuite.png';
 
     if (\is_readable($cssPath)) {
-        $assets['WCFSetup.css'] = \sprintf(
-            'data:text/css;base64,%s',
-            \base64_encode((string) \file_get_contents($cssPath))
-        );
+        $assets['WCFSetup.css'] = 'acp/style/setup/WCFSetup.css';
     }
     if (\is_readable($imgPath)) {
-        $assets['woltlabSuite.png'] = \sprintf(
-            'data:image/png;base64,%s',
-            \base64_encode((string) \file_get_contents($imgPath))
-        );
+        $assets['woltlabSuite.png'] = 'acp/images/woltlabSuite.png';
     }
 
     return $assets;
@@ -2988,7 +2987,11 @@ function recoveryRenderStandaloneMessage(string $documentTitle, string $contentT
 
 function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '', ?array $assets = null): void
 {
-    $assets ??= recoveryGetSetupAssets();
+    try {
+        $assets ??= recoveryGetSetupAssets();
+    } catch (\Throwable $ignored) {
+        $assets = ['WCFSetup.css' => '', 'woltlabSuite.png' => ''];
+    }
     ?>
 <!DOCTYPE html>
 <html lang="de">
