@@ -298,8 +298,10 @@ Problem: Wenn die Erweiterung Dateien fälschlicherweise im
 - Lädt `config.inc.php` und nur benötigte WoltLab-Klassen
 - Datenbankzugriff über WoltLabs DB-Schicht nach minimalem Bootstrap (kein vollständiger Frontend-Bootstrap)
 - Prepared Statements; Transaktionen für sichere Rollbacks
-- **Generische Deinstallation** per `packageID` für jedes installierte Plugin
+- **Generische Deinstallation** per `packageID` für jedes installierte Plugin (nicht an ein einzelnes Plugin gebunden)
+- Ermittelt App-Verzeichnisse aus `packageDir`, `application` (DB/XML) oder letztem Segment des Package-Namens
 - Baut `options.inc.php` nach Optionen-Bereinigung per `OptionEditor::rebuild()` neu
+- Entdeckt `packageID`-Tabellen dynamisch über `information_schema` (beliebiges `wcf{N}`)
 
 **Unterstützte Archive:**
 - `.tar`
@@ -359,6 +361,13 @@ Problem: Wenn die Erweiterung Dateien fälschlicherweise im
 3. Verwenden Sie manuellen Package-Identifier als Fallback
 
 ## 📝 Changelog
+
+### v1.2.5 (2026-05-15)
+- 🔒 **Generisch für alle Plugins:** Keine plugin-spezifischen Pfade oder Identifier mehr; Ermittlung über `package.xml`, `wcf{N}_package` / `wcf{N}_application` und WoltLab-Konventionen
+- 🛡️ **Validierung:** Package-Identifier-Regex, SQL-Tabellennamen-Prüfung, geschützte Core-Verzeichnisse (`wcf`, `lib`, `acp`, …), `realpath`-Check innerhalb von `WCF_DIR`
+- 📦 **Uploads:** Archiv-Endung (.tar/.tar.gz/.tgz), Größenlimit (100 MiB), Path-Traversal-Schutz beim Entpacken, automatische Bereinigung von `uploads/`
+- 🗂️ **Dateisystem:** Plugin-Ordner-Löschung nur nach expliziter Checkbox im Deinstallationsformular
+- 🔍 **ACP Repair:** Menü-Suchmuster aus Package-Identifier und `acpMenu.xml`, nicht aus hardcodierten Präfixen
 
 ### v1.2.2 (2026-05-15)
 - 🎨 **UI:** Offizielles WoltLab-Layout (`WCFSetup.css` + Suite-Logo aus der Installation, wie Rescue Mode)
