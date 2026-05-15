@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.4.2
+ * @version 1.4.3
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -19,18 +19,24 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.4.2');
+define('RECOVERY_VERSION', '1.4.3');
 
 // PHP 7.4 polyfills (str_* in PHP 8.0+)
 if (!\function_exists('str_starts_with')) {
-    function str_starts_with(string $haystack, string $needle): bool
+    function str_starts_with($haystack, $needle)
     {
+        $haystack = (string) $haystack;
+        $needle = (string) $needle;
+
         return $needle === '' || \strncmp($haystack, $needle, \strlen($needle)) === 0;
     }
 }
 if (!\function_exists('str_contains')) {
-    function str_contains(string $haystack, string $needle): bool
+    function str_contains($haystack, $needle)
     {
+        $haystack = (string) $haystack;
+        $needle = (string) $needle;
+
         return $needle === '' || \strpos($haystack, $needle) !== false;
     }
 }
@@ -2517,7 +2523,7 @@ function recoveryRenderAcpMenuPreviewScript(array $menuItems): void
         return;
     }
     recoveryRenderGenericModalScript();
-    $payload = \array_map(static function (array $item): array {
+    $payload = \array_map(static function (array $item) {
         return [
             'menuItem' => (string) ($item['menuItem'] ?? ''),
             'menuItemController' => (string) ($item['menuItemController'] ?? ''),
@@ -2619,7 +2625,7 @@ function recoveryGenerateSqlBackup(
 
             foreach ($rows as $row) {
                 $cols = \array_keys($row);
-                $vals = \array_map(static function ($v): string {
+                $vals = \array_map(static function ($v) {
                     if ($v === null) {
                         return 'NULL';
                     }
@@ -2796,16 +2802,10 @@ function recoveryGetSetupAssets(): array
     $imgPath = WCF_DIR . 'acp/images/woltlabSuite.png';
 
     if (\is_readable($cssPath)) {
-        $assets['WCFSetup.css'] = \sprintf(
-            'data:text/css;base64,%s',
-            \base64_encode((string) \file_get_contents($cssPath))
-        );
+        $assets['WCFSetup.css'] = 'acp/style/setup/WCFSetup.css';
     }
     if (\is_readable($imgPath)) {
-        $assets['woltlabSuite.png'] = \sprintf(
-            'data:image/png;base64,%s',
-            \base64_encode((string) \file_get_contents($imgPath))
-        );
+        $assets['woltlabSuite.png'] = 'acp/images/woltlabSuite.png';
     }
 
     return $assets;
@@ -3303,7 +3303,7 @@ if (\is_file($authFilePath) && \is_readable($authFilePath)) {
 if ($action === 'cleanup') {
     $cleanupAcpUrl = recoveryGetSiteBaseUrl() . 'acp/';
     cleanupRecoveryAuxiliaryFiles();
-    \register_shutdown_function(static function (): void {
+    \register_shutdown_function(static function () {
         @\unlink(__DIR__ . '/plugin-recovery-tool.php');
     });
     \header('Location: ' . $cleanupAcpUrl);
@@ -5593,6 +5593,4 @@ elseif ($mode === RECOVERY_MODE_PACKAGE_LIST_REPAIR) {
     }
 }
 
-?>
-<?php
 recoveryRenderPageEnd();
