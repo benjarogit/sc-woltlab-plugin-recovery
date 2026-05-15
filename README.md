@@ -1,86 +1,164 @@
 # WoltLab Plugin Recovery Tool
 
-> Emergency recovery tool for WoltLab Suite 6.0+ — repairs the ACP, uninstalls broken plugins, resets users, and clears caches when the admin panel is completely inaccessible.
+> Notfall-Wiederherstellungstool für WoltLab Suite 6.0+ — repariert das ACP, deinstalliert defekte Plugins, setzt Benutzer zurück und löscht Caches, auch wenn das Admin-Panel vollständig unzugänglich ist.
 
-**Language / Sprache:** [English](README.md) | [Deutsch](README.de.md)
+**Sprache / Language:** [Deutsch](README.md) | [English](README.en.md)
 
 ![WoltLab Suite](https://img.shields.io/badge/WoltLab%20Suite-6.0+-blue.svg)
 ![PHP](https://img.shields.io/badge/PHP-8.0+-purple.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Version](https://img.shields.io/github/v/release/benjarogit/sc-woltlab-plugin-recovery)
 
-![Authentication Screen](https://github.com/user-attachments/assets/d18e0871-2ab2-4f47-9bd7-8820671bffa1)
+![Authentifizierungs-Bildschirm](https://github.com/user-attachments/assets/d18e0871-2ab2-4f47-9bd7-8820671bffa1)
 
-## When do you need this?
+## Wann wird dieses Tool benötigt?
 
-- ACP shows "Call to a member function toHtml() on null"
-- A plugin installation failed and broke your admin panel
-- You need to uninstall a plugin but the ACP is inaccessible
-- A broken plugin created invalid ACP menu entries
-- You need to clear all caches and nothing else works
-- You need to reset an admin password without ACP access
+- Das ACP zeigt „Call to a member function toHtml() on null"
+- Eine Plugin-Installation ist fehlgeschlagen und hat das Admin-Panel beschädigt
+- Ein Plugin muss deinstalliert werden, aber das ACP ist nicht erreichbar
+- Ein defektes Plugin hat ungültige ACP-Menüeinträge hinterlassen
+- Alle Caches müssen gelöscht werden und nichts anderes funktioniert
+- Ein Admin-Passwort muss ohne ACP-Zugang zurückgesetzt werden
 
-## Modes
+## Modi
 
-| Mode | What it does |
+| Modus | Funktion |
 |---|---|
-| **ACP Repair** | Removes broken ACP menu entries by package identifier or uploaded archive |
-| **Plugin Uninstall** | Fully removes a plugin from the database and filesystem, with SQL preview |
-| **User Management** | Search users, reset passwords, manage groups, change email, activate accounts |
-| **Cache Clear** | Deletes compiled templates and all cache directories |
-| **Package List Repair** | Fixes orphaned packages causing null errors in the Package List page |
+| **ACP Repair** | Entfernt defekte ACP-Menüeinträge anhand des Package-Identifiers oder eines hochgeladenen Archivs |
+| **Plugin Uninstall** | Entfernt ein Plugin vollständig aus Datenbank und Dateisystem, inklusive SQL-Vorschau |
+| **User Management** | Benutzer suchen, Passwort zurücksetzen, Gruppen verwalten, E-Mail ändern, Konto aktivieren |
+| **Cache Clear** | Löscht kompilierte Templates und alle Cache-Verzeichnisse |
+| **Package List Repair** | Behebt verwaiste Pakete, die auf der Paketlisten-Seite zu Null-Fehlern führen |
 
-![Mode Selection](https://github.com/user-attachments/assets/c108ffbb-4db9-448c-853c-0b0a9bffc5c4)
+![Modus-Auswahl](https://github.com/user-attachments/assets/c108ffbb-4db9-448c-853c-0b0a9bffc5c4)
 
 ## Installation
 
-1. **Download** `plugin-recovery-tool.php` from [Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases)
-2. **Upload** to your WoltLab Suite root directory (same folder as `global.php`)
-3. **Open** in your browser: `https://your-domain.com/plugin-recovery-tool.php`
+1. **Herunterladen** von `plugin-recovery-tool.php` unter [Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases)
+2. **Hochladen** ins WoltLab-Hauptverzeichnis (denselben Ordner wie `global.php`)
+3. **Aufrufen** im Browser: `https://ihre-domain.de/plugin-recovery-tool.php`
 
 ```
-your-woltlab-root/
+ihr-woltlab-root/
 ├── global.php
 ├── lib/
 ├── acp/
-└── plugin-recovery-tool.php   ← only this file needed
+└── plugin-recovery-tool.php   ← nur diese Datei wird benötigt
 ```
 
-The tool detects your WoltLab installation automatically. It does **not** load `global.php` — this is intentional so it still works when broken plugins crash the bootstrap.
+Das Tool erkennt die WoltLab-Installation automatisch. Es lädt `global.php` **nicht** — das ist beabsichtigt, damit es auch dann funktioniert, wenn defekte Plugins den Bootstrap-Vorgang unterbrechen.
 
-### Authentication
+### Authentifizierung
 
-The tool uses a file-based challenge inspired by WoltLab's own `wsc-recovery.php`:
+Das Tool verwendet ein dateibasiertes Verfahren, das von WoltLabs eigenem `wsc-recovery.php` inspiriert ist:
 
-1. Visit the tool URL — a `plugin-recovery-auth.php` file is generated automatically
-2. Download it and upload it to the same directory
-3. Click "Recovery Tool starten" — you are authenticated for 24 hours
+1. Tool-URL aufrufen — eine `plugin-recovery-auth.php`-Datei wird automatisch erzeugt
+2. Diese Datei über FTP/SFTP herunterladen und in dasselbe Verzeichnis hochladen
+3. „Recovery Tool starten" klicken — die Authentifizierung gilt für **24 Stunden**
 
-### Removal
+Der Token wird beim Upload verifiziert und läuft automatisch ab. Ein erneutes Hochladen ist danach erforderlich.
 
-Use the built-in **"Recovery Tool vollständig entfernen"** button when you are done. Do not leave the file on your server.
+### Entfernen
 
-## Security
+Nach Abschluss der Arbeiten den integrierten Button **„Recovery Tool vollständig entfernen"** verwenden. Das Tool löscht dabei sich selbst sowie die Auth-Datei und leitet zurück ins ACP. Die Datei darf nicht dauerhaft auf dem Server verbleiben.
 
-**Delete the tool immediately after use.** The file has full database access — leaving it on a public server is a serious security risk. The authentication mechanism is a first line of defence only; it does not replace proper server security.
+---
 
-- Plugin Uninstall is **irreversible** — always back up your database beforehand
-- The tool does **not** detect base-plugin dependencies; use the WoltLab ACP for normal uninstalls
+## Funktionen im Detail
 
-## Requirements
+### ACP Repair
+
+Entfernt defekte ACP-Menüeinträge, die das Admin-Panel abstürzen lassen:
+
+- **Eingabe per Identifier:** Package-Identifier manuell eingeben (z. B. `de.example.my-plugin`)
+- **Eingabe per Archiv:** `.tar`, `.tar.gz` oder `.tgz`-Datei hochladen — `package.xml` wird automatisch ausgelesen
+- **Vorschau vor dem Löschen:** Gefundene Menüeinträge werden tabellarisch angezeigt (Menu Item + Controller), erst nach Bestätigung gelöscht
+- Nach dem Löschen wird der Cache automatisch geleert
+
+### Plugin Uninstall
+
+Vollständige Plugin-Deinstallation in einem **3-Schritt-Assistenten**:
+
+**Schritt 1 — Analyse & Auswahl**
+- Package-Identifier eingeben oder Archiv hochladen
+- Das Tool erkennt den Status in der Datenbank (packageID, Name, WCF_N)
+- **PIP-Ressourcen-Matrix:** Zeigt alle erkannten Ressourcen mit Datenbankzählung an:
+  - ACP-Menüeinträge, Event-Listener, Template-Listener, Optionen, Benutzergruppen-Optionen
+  - Cronjobs, Objekttypen, Sprachvariablen, Templates, ACP-Templates, Seiten, Boxen
+  - Benachrichtigungs-Events, BBCodes, Smileys, ACL-Optionen, Menüeinträge und weitere
+  - Dateisystem: eigene Plugin-Tabellen (DROP TABLE), Dateien auf Disk
+- **Checkbox-Auswahl pro Ressource:** Einzelne Ressourcentypen können abgewählt werden
+- **Dry-Run-Modus:** Simuliert die Deinstallation ohne Datenbankänderungen
+
+**Schritt 2 — Backup**
+- Generiert ein `.sql`-Backup aller ausgewählten Datenbankzeilen (pure PHP, kein `mysqldump` erforderlich)
+- Backup kann direkt im Browser heruntergeladen werden
+- Weitermachen ohne Backup ist möglich, aber nicht empfohlen
+
+**Schritt 3 — Ausführen**
+- Löscht alle ausgewählten Ressourcen aus der Datenbank
+- Optionales Löschen von Plugin-Dateien auf dem Dateisystem mit Sicherheitsprüfungen:
+  - Blockliste für geschützte Verzeichnisse (z. B. `lib/`, `acp/`, `templates/`)
+  - Realpath-Prüfung verhindert Path-Traversal-Angriffe
+- Repariert verwaiste `wcf_package`-Einträge nach dem Löschen
+
+### User Management
+
+Benutzerverwaltung ohne ACP-Zugang:
+
+- **Benutzersuche:** Suche nach Name oder E-Mail-Adresse
+- **Passwort zurücksetzen:** Neues Passwort setzen (kompatibel mit WoltLab-Passwort-Hashing)
+- **Gruppen verwalten:** Benutzergruppen anzeigen und einzeln zuweisen/entziehen
+- **E-Mail ändern:** Neue E-Mail-Adresse direkt in der Datenbank setzen
+- **Konto aktivieren:** Gesperrte oder inaktive Konten entsperren
+- **2FA deaktivieren:** Zwei-Faktor-Authentifizierung zurücksetzen, wenn der Zugangscode nicht mehr verfügbar ist
+
+### Cache Clear
+
+Löscht alle Cache- und Kompilat-Verzeichnisse direkt über das Dateisystem (ohne WCF/CacheHandler):
+
+| Verzeichnis | Inhalt |
+|---|---|
+| `tmp/` | Temporäre Dateien |
+| `cache/` | Datei-Cache |
+| `templates/compiled/` | Kompilierte Frontend-Templates |
+| `acp/templates/compiled/` | Kompilierte ACP-Templates |
+
+### Package List Repair
+
+Behebt verwaiste Datenbankeinträge, die die ACP-Paketliste oder den Deinstallations-Prozess blockieren:
+
+- Entfernt verwaiste `wcf_package_installation_queue`-Einträge
+- Entfernt verwaiste `wcf_application`-Einträge ohne zugehöriges Paket
+- Nützlich wenn die Paketliste im ACP einen Null-Fehler wirft oder ein Paket sich nicht deinstallieren lässt
+
+---
+
+## Sicherheit
+
+**Das Tool nach der Verwendung sofort löschen.** Die Datei hat vollen Datenbankzugriff — sie auf einem öffentlichen Server zu belassen, stellt ein erhebliches Sicherheitsrisiko dar. Der Authentifizierungsmechanismus ist nur eine erste Absicherung und ersetzt keine ordentliche Serversicherheit.
+
+- **Blockliste:** Kritische Systemverzeichnisse und -dateien sind gegen Löschung geschützt
+- **Realpath-Prüfung:** Alle Dateipfade werden gegen Path-Traversal-Angriffe geprüft
+- **Prepared Statements:** Alle Datenbankabfragen verwenden vorbereitete Anweisungen
+- **Auth-Ablauf:** Die Authentifizierung läuft nach **24 Stunden** automatisch ab
+- Plugin Uninstall ist **unwiderruflich** — vorher immer ein Datenbank-Backup erstellen
+- Das Tool erkennt **keine** Basis-Plugin-Abhängigkeiten; für normale Deinstallationen das WoltLab ACP verwenden
+
+## Voraussetzungen
 
 - WoltLab Suite 6.0+
 - PHP 8.0+
-- Write permissions in the installation directory
+- Schreibrechte im Installationsverzeichnis
 
 ## Changelog
 
-Release notes for every version are on the [Releases page](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases).
+Release Notes zu jeder Version sind auf der [Releases-Seite](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases) zu finden.
 
-## License
+## Lizenz
 
 MIT License — Copyright (c) 2025 Sunny C.
 
 ---
 
-*Inspired by [WoltLab's wsc-recovery.php](https://manual.woltlab.com/de/recovery-tool/)*
+*Inspiriert von [WoltLab's wsc-recovery.php](https://manual.woltlab.com/de/recovery-tool/)*
