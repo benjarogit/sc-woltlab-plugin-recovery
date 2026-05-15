@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.4.0
+ * @version 1.4.1
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -19,7 +19,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.4.0');
+define('RECOVERY_VERSION', '1.4.1');
 
 // PHP 7.4 polyfills (str_* in PHP 8.0+)
 if (!\function_exists('str_starts_with')) {
@@ -5374,11 +5374,14 @@ elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
                 $gid      = (int)$grp['groupID'];
                 $isSystem = \in_array($gid, [1, 2], true);
                 $isMember = \in_array($gid, $currentGroupIDs, true);
-                $gType    = match((int)$grp['groupType']) {
-                    1 => 'System',
-                    4 => 'Admin',
-                    default => 'Normal',
-                };
+                $groupType = (int) $grp['groupType'];
+                if ($groupType === 1) {
+                    $gType = 'System';
+                } elseif ($groupType === 4) {
+                    $gType = 'Admin';
+                } else {
+                    $gType = 'Normal';
+                }
             ?>
                 <tr>
                     <td style="text-align:center;">
