@@ -9,7 +9,15 @@
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Version](https://img.shields.io/github/v/release/benjarogit/sc-woltlab-plugin-recovery)
 
-![Authentifizierungs-Bildschirm](https://github.com/user-attachments/assets/d18e0871-2ab2-4f47-9bd7-8820671bffa1)
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/387d02cb-4d84-47e9-8d2b-aac2cebccf8a" width="100%">
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/b05703cc-8461-408f-9280-2b405d8be538" width="15%">
+
+  <img src="https://github.com/user-attachments/assets/9b2b31e5-63a4-449d-85b1-ad6ce56dc1e4" width="15%">
+</p>
 
 ## Wann wird dieses Tool benötigt?
 
@@ -30,7 +38,21 @@
 | **Cache Clear** | Löscht kompilierte Templates und alle Cache-Verzeichnisse |
 | **Package List Repair** | Behebt verwaiste Pakete, die auf der Paketlisten-Seite zu Null-Fehlern führen |
 
-![Modus-Auswahl](https://github.com/user-attachments/assets/c108ffbb-4db9-448c-853c-0b0a9bffc5c4)
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/0278a36b-419b-45be-8b60-971c1ff1d3d0" width="100%">
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/8d482e46-2729-492a-b244-4df70849374e" width="15%">
+
+  <img src="https://github.com/user-attachments/assets/7aaf67d0-89b5-4c6d-8c26-1c4677fa5950" width="15%">
+
+  <img src="https://github.com/user-attachments/assets/f8a01a05-1a63-4805-bba2-8d5af716ebb1" width="15%">
+
+  <img src="https://github.com/user-attachments/assets/a0c86fbd-811f-460f-be98-8d117ef56af8" width="15%">
+
+  <img src="https://github.com/user-attachments/assets/1002c23d-52f8-4f17-821f-9efe8e277251" width="15%">
+</p>
 
 ## Installation
 
