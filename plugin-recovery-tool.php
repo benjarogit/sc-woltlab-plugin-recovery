@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.9
+ * @version 1.5.10
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.9');
+define('RECOVERY_VERSION', '1.5.10');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
 if (\PHP_VERSION_ID < 80100) {
@@ -1242,6 +1242,21 @@ function recoveryNamespacesWhoseRootMatchesPrefix(array $namespaces, string $pre
 }
 
 /**
+ * Namespace-Spiegelung nur für Plugin-artige Konstanten (z. B. SHRINKR_* → shrinkr\\…).
+ * {@see WCF_*} liefert Präfix „wcf“ — dann würden tausende {@see define()} ins gesamte Core-Namespace
+ * geschrieben (Kapazität/Konflikte/Parse-Zeit). Dieselben Ausschlüsse wie bei gefährlichen Globals.
+ */
+function recoveryShouldEmitNamespaceMirrorDefines(string $constant): bool
+{
+    if (\str_starts_with($constant, 'WCF_') || \str_starts_with($constant, 'PHP_')
+        || \str_starts_with($constant, 'MYSQL_') || \str_starts_with($constant, 'PDO')) {
+        return false;
+    }
+
+    return true;
+}
+
+/**
  * @return list<string>
  */
 function recoveryCollectCompiledPhpTemplatePaths(string $wcfRoot, int $maxFiles): array
@@ -1457,6 +1472,7 @@ function recoveryStripPluginRecoveryOptionFallbackBlock(): void
  * 2) Konstanten aus kompilierten Templates (Heuristik),
  * 3) zusätzlich **namespaced** {@see define()} für PHP 8 (unqualifizierte Konstanten im Namespace `foo\\bar`
  *    lösen zu `foo\\bar\\CONST`; globales define('CONST') reicht dann nicht — daher Spiegelung nach Präfix-Match).
+ * Keine Spiegelung für {@see WCF_*}/{@see PHP_*}/MySQL/PDO (Core-Globals; Präfix „wcf“ würde massenhaft Core-Namespaces treffen).
  */
 function recoveryEnsureOptionConstantFallbacks(\wcf\system\database\Database $db, int $wcfN, array &$log): void
 {
@@ -1568,17 +1584,25 @@ function recoveryEnsureOptionConstantFallbacks(\wcf\system\database\Database $db
     $fqSeen = [];
     $mirrorCount = 0;
     $maxMirror = 650;
+    $maxMirrorPerConstant = 48;
     foreach ($sortedConstants as $const) {
+        if (!recoveryShouldEmitNamespaceMirrorDefines($const)) {
+            continue;
+        }
         $pfx = recoveryLeadingPrefixSegmentLowerFromConstant($const);
         if ($pfx === null) {
             continue;
         }
         $expr = $globalExpr[$const];
+        $mirroredForConst = 0;
         foreach (recoveryNamespacesWhoseRootMatchesPrefix($libNamespaces, $pfx) as $ns) {
             if ($mirrorCount >= $maxMirror) {
                 $log[] = 'Option-Konstanten-Fallback: Namespace-Spiegelung nach ' . $maxMirror . ' defines gestoppt (Obergrenze)';
 
                 break 2;
+            }
+            if ($mirroredForConst >= $maxMirrorPerConstant) {
+                break;
             }
             $fq = $ns . '\\' . $const;
             if (\strlen($fq) > 240 || isset($fqSeen[$fq])) {
@@ -1588,6 +1612,7 @@ function recoveryEnsureOptionConstantFallbacks(\wcf\system\database\Database $db
             $lit = recoveryPhpSingleQuotedDefineNameLiteral($fq);
             $lines[] = 'if (!\\defined(' . $lit . ')) {' . "\n\t\\define(" . $lit . ', ' . $expr . ');' . "\n}";
             $mirrorCount++;
+            $mirroredForConst++;
         }
     }
 
