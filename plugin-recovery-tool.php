@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.4.3
+ * @version 1.5.0
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -19,24 +19,18 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.4.3');
+define('RECOVERY_VERSION', '1.5.0');
 
 // PHP 7.4 polyfills (str_* in PHP 8.0+)
 if (!\function_exists('str_starts_with')) {
-    function str_starts_with($haystack, $needle)
+    function str_starts_with(string $haystack, string $needle): bool
     {
-        $haystack = (string) $haystack;
-        $needle = (string) $needle;
-
         return $needle === '' || \strncmp($haystack, $needle, \strlen($needle)) === 0;
     }
 }
 if (!\function_exists('str_contains')) {
-    function str_contains($haystack, $needle)
+    function str_contains(string $haystack, string $needle): bool
     {
-        $haystack = (string) $haystack;
-        $needle = (string) $needle;
-
         return $needle === '' || \strpos($haystack, $needle) !== false;
     }
 }
@@ -390,9 +384,7 @@ function recoveryHandlePackageUpload(array $file): array
 
 function recoveryCleanupUploadWorkspace(?string $uploadDir = null): void
 {
-    if ($uploadDir === null) {
-        $uploadDir = __DIR__ . '/uploads';
-    }
+    $uploadDir ??= __DIR__ . '/uploads';
     if (!\is_dir($uploadDir)) {
         return;
     }
@@ -645,9 +637,7 @@ function recoveryEnsureSession(): void
 function recoveryStorePackageContext(string $authHash, string $packageIdentifier, ?string $extractDir): void
 {
     recoveryEnsureSession();
-    if (!isset($_SESSION['recovery_pkg'])) {
-        $_SESSION['recovery_pkg'] = [];
-    }
+    $_SESSION['recovery_pkg'] ??= [];
     $_SESSION['recovery_pkg'][$authHash] = [
         'packageIdentifier' => $packageIdentifier,
         'extractDir' => $extractDir,
@@ -1808,9 +1798,7 @@ function recoveryPerformFullPluginCleanup(
         }
 
         $baseTables = \array_map(
-            function ($name) {
-                return \str_replace('`', '', (string) $name);
-            },
+            static fn(string $name): string => \str_replace('`', '', $name),
             getBasePluginTables($wcfN)
         );
         if (\in_array($safeTable, $baseTables, true)) {
@@ -1943,638 +1931,6 @@ function recoveryGetPipDbCounts(
 }
 
 /**
- * Erweiterte Metadaten pro PIP für Hilfetexte und Vorschau-Spalten.
- *
- * @return array<string, array{description: string, columns: list<string>, example: string}>
- */
-function recoveryGetPipHelpMeta(): array
-{
-    return [
-        'acpMenu' => [
-            'description' => 'Einträge im Admin-Bereich (ACP) unter „Erweiterungen“ und Plugin-Menüs. Defekte Menüpunkte können das ACP blockieren.',
-            'columns' => ['menuItem', 'menuItemController'],
-            'example' => 'z. B. sunnyc.shrinkr.acp',
-        ],
-        'eventListener' => [
-            'description' => 'PHP-Klassen, die auf WoltLab-Ereignisse reagieren (z. B. beim Speichern von Inhalten).',
-            'columns' => ['eventClassName', 'listenerClassName'],
-            'example' => 'z. B. wcf\\system\\event\\listener\\…',
-        ],
-        'templateListener' => [
-            'description' => 'Verknüpft Templates mit zusätzlichem Code (z. B. Konstanten in kompilierten Templates).',
-            'columns' => ['eventName', 'templateName', 'listenerName'],
-            'example' => 'z. B. include_v1_*',
-        ],
-        'option' => [
-            'description' => 'Plugin-Einstellungen im ACP (Optionskategorien). Werden in options.inc.php als Konstanten referenziert.',
-            'columns' => ['optionName', 'optionType'],
-            'example' => 'z. B. shrinkr_enable_*',
-        ],
-        'userGroupOption' => [
-            'description' => 'Berechtigungen für Benutzergruppen (wer darf was im Forum tun).',
-            'columns' => ['optionName', 'categoryName'],
-            'example' => 'z. B. user.group.shrinkr.*',
-        ],
-        'userOption' => [
-            'description' => 'Profil- und Benutzer-Einstellungen des Plugins.',
-            'columns' => ['optionName'],
-            'example' => 'z. B. shrinkrUser*',
-        ],
-        'cronjob' => [
-            'description' => 'Geplante Aufgaben (z. B. Link-Prüfung, Statistik).',
-            'columns' => ['cronjobName', 'className'],
-            'example' => 'z. B. com.example.Cronjob',
-        ],
-        'objectType' => [
-            'description' => 'Registriert Objekttypen für Likes, Kommentare, Moderation usw.',
-            'columns' => ['objectType', 'definitionName'],
-            'example' => 'z. B. com.example.*.post',
-        ],
-        'objectTypeDefinition' => [
-            'description' => 'Technische Definitionen zu Objekttypen.',
-            'columns' => ['definitionName', 'interfaceName'],
-            'example' => 'z. B. com.example.object.*',
-        ],
-        'language' => [
-            'description' => 'Übersetzbare Texte (Sprachvariablen) für Frontend und ACP.',
-            'columns' => ['languageItem', 'languageItemValue'],
-            'example' => 'z. B. wcf.acp.* / shrinkr.*',
-        ],
-        'template' => [
-            'description' => 'Smarty-Templates im Frontend (Darstellung der Plugin-Seiten).',
-            'columns' => ['templateName', 'application'],
-            'example' => 'z. B. shrinkr*',
-        ],
-        'acpTemplate' => [
-            'description' => 'Templates nur für den Admin-Bereich.',
-            'columns' => ['templateName', 'application'],
-            'example' => 'z. B. shrinkr*Acp*',
-        ],
-        'page' => [
-            'description' => 'CMS-Seiten und URL-Zuordnungen des Plugins.',
-            'columns' => ['identifier', 'title'],
-            'example' => 'z. B. de.sunnyc.wsc.shrinkr.*',
-        ],
-        'box' => [
-            'description' => 'Content-Boxen (Sidebar, Dashboard-Widgets).',
-            'columns' => ['identifier', 'name'],
-            'example' => 'z. B. com.example.Box',
-        ],
-        'userMenu' => [
-            'description' => 'Einträge im Benutzer-Menü (Profil, Navigation).',
-            'columns' => ['menuItem', 'menuItemController'],
-            'example' => 'z. B. shrinkr.*',
-        ],
-        'userNotificationEvent' => [
-            'description' => 'Benachrichtigungs-Ereignisse (E-Mail, Push).',
-            'columns' => ['eventName', 'className'],
-            'example' => 'z. B. com.example.notification.*',
-        ],
-        'bbcode' => [
-            'description' => 'BBCodes für formatierte Beiträge.',
-            'columns' => ['bbcodeTag', 'className'],
-            'example' => 'z. B. [tag]',
-        ],
-        'smiley' => [
-            'description' => 'Smileys des Plugins.',
-            'columns' => ['smileyPath', 'title'],
-            'example' => 'z. B. images/smileys/*',
-        ],
-        'aclOption' => [
-            'description' => 'Feingranulare Zugriffsrechte (ACL).',
-            'columns' => ['optionName', 'categoryName'],
-            'example' => 'z. B. com.example.acl.*',
-        ],
-        'coreObject' => [
-            'description' => 'Interne WoltLab-Core-Registrierungen des Plugins.',
-            'columns' => ['objectName'],
-            'example' => 'technische Objekte',
-        ],
-        'clipboardAction' => [
-            'description' => 'Massenaktionen in Listen (z. B. „Auswahl löschen“).',
-            'columns' => ['actionName', 'actionClassName'],
-            'example' => 'z. B. com.example.clipboard.*',
-        ],
-        'acpSearchProvider' => [
-            'description' => 'ACP-Suche: durchsuchbare Bereiche des Plugins.',
-            'columns' => ['providerName', 'className'],
-            'example' => 'z. B. com.example.acp.search.*',
-        ],
-        'mediaProvider' => [
-            'description' => 'Medien-Einbettungen (YouTube, etc.) – oft technische Provider-Namen.',
-            'columns' => ['providerName', 'title'],
-            'example' => 'z. B. com.example.media.*',
-        ],
-        'menu' => [
-            'description' => 'Frontend-Hauptmenüs des Plugins.',
-            'columns' => ['identifier', 'title'],
-            'example' => 'z. B. shrinkr*',
-        ],
-        'menuItem' => [
-            'description' => 'Einzelne Menüpunkte im Frontend.',
-            'columns' => ['identifier', 'title'],
-            'example' => 'z. B. shrinkr.*',
-        ],
-        'pip' => [
-            'description' => 'Registrierte Package-Installation-Plugins (PIP-Definitionen in der Datenbank).',
-            'columns' => ['pluginName', 'className'],
-            'example' => 'z. B. de.sunnyc.wsc.shrinkr',
-        ],
-    ];
-}
-
-/**
- * @return list<array<string, mixed>>
- */
-function recoveryFetchPipPreviewRows(
-    \wcf\system\database\Database $db,
-    int $wcfN,
-    int $packageID,
-    string $table,
-    array $columns,
-    int $limit = 25
-): array {
-    $safeCols = [];
-    foreach ($columns as $col) {
-        $col = \str_replace('`', '', (string) $col);
-        if (\preg_match('/^[a-zA-Z0-9_]+$/', $col)) {
-            $safeCols[] = '`' . $col . '`';
-        }
-    }
-    if ($safeCols === []) {
-        return [];
-    }
-
-    $table = \str_replace('`', '', $table);
-    if (!recoveryValidateSqlTableName($table)) {
-        return [];
-    }
-
-    try {
-        $sql = 'SELECT ' . \implode(', ', $safeCols)
-            . ' FROM `wcf' . $wcfN . '_' . $table . '` WHERE packageID = ? LIMIT ' . (int) $limit;
-        $statement = $db->prepareStatement($sql);
-        $statement->execute([$packageID]);
-        $rows = [];
-        while ($row = $statement->fetchArray()) {
-            $rows[] = $row;
-        }
-
-        return $rows;
-    } catch (\Throwable $ignored) {
-        return [];
-    }
-}
-
-/**
- * Baut Vorschau-Daten für alle PIPs mit Einträgen > 0 (für Modal/JSON).
- *
- * @return array<string, array{label: string, table: string, count: int, description: string, example: string, rows: list<array<string, mixed>>}>
- */
-function recoveryBuildPipPreviewPayload(
-    \wcf\system\database\Database $db,
-    int $wcfN,
-    int $packageID,
-    array $pipCounts
-): array {
-    $pipMap = recoveryGetPipResourceMap();
-    $helpMeta = recoveryGetPipHelpMeta();
-    $payload = [];
-
-    foreach ($pipMap as $pip => $info) {
-        if (!$info['safe'] || $info['col'] !== 'packageID' || $info['table'] === '') {
-            continue;
-        }
-        $count = $pipCounts[$pip] ?? 0;
-        if ($count <= 0) {
-            continue;
-        }
-        $meta = $helpMeta[$pip] ?? [
-            'description' => 'Datenbankeinträge dieses Plugins in der Tabelle wcf' . $wcfN . '_' . $info['table'] . '.',
-            'columns' => [],
-            'example' => '',
-        ];
-        $columns = $meta['columns'];
-        if ($columns === []) {
-            $columns = recoveryGuessTableLabelColumns($db, $wcfN, $info['table']);
-        }
-        $rows = recoveryFetchPipPreviewRows($db, $wcfN, $packageID, $info['table'], $columns, 25);
-
-        $payload[$pip] = [
-            'label' => $info['label'],
-            'table' => 'wcf' . $wcfN . '_' . $info['table'],
-            'count' => $count,
-            'description' => $meta['description'],
-            'example' => $meta['example'],
-            'columns' => $columns,
-            'rows' => $rows,
-        ];
-    }
-
-    return $payload;
-}
-
-/**
- * @return list<string>
- */
-function recoveryGuessTableLabelColumns(\wcf\system\database\Database $db, int $wcfN, string $table): array
-{
-    $table = \str_replace('`', '', $table);
-    if (!recoveryValidateSqlTableName($table)) {
-        return [];
-    }
-
-    $candidates = [
-        'optionName', 'languageItem', 'menuItem', 'templateName', 'identifier', 'eventName',
-        'eventClassName', 'className', 'objectType', 'definitionName', 'bbcodeTag', 'cronjobName',
-        'providerName', 'pluginName', 'title', 'name',
-    ];
-
-    try {
-        $sql = 'SHOW COLUMNS FROM `wcf' . $wcfN . '_' . $table . '`';
-        $statement = $db->prepareStatement($sql);
-        $statement->execute();
-        $existing = [];
-        while ($row = $statement->fetchArray()) {
-            $existing[] = (string) ($row['Field'] ?? '');
-        }
-        $found = [];
-        foreach ($candidates as $c) {
-            if (\in_array($c, $existing, true)) {
-                $found[] = $c;
-                if (\count($found) >= 3) {
-                    break;
-                }
-            }
-        }
-
-        return $found !== [] ? $found : \array_slice($existing, 0, 3);
-    } catch (\Throwable $ignored) {
-        return [];
-    }
-}
-
-function recoveryRenderUninstallLegendBox(): void
-{
-    ?>
-    <div class="recovery-legend">
-        <strong><i class="fa-solid fa-circle-info"></i> So lesen Sie die Auswahl</strong>
-        <ul>
-            <li><span class="recovery-badge recovery-badge-on">Aktiviert</span> – Es wurden Einträge gefunden; diese werden beim Ausführen <strong>gelöscht</strong> (nur Zeilen mit Ihrer packageID).</li>
-            <li><span class="recovery-badge recovery-badge-off">Deaktiviert (0)</span> – Keine Einträge in dieser Kategorie; Sie können es abwählen lassen.</li>
-            <li><span class="recovery-badge recovery-badge-na">–</span> – Tabelle existiert auf diesem System nicht (harmlos).</li>
-            <li>Klicken Sie auf <strong>„Details anzeigen“</strong> oder eine Zeile, um konkrete Namen/Bezeichner aus der Datenbank zu sehen.</li>
-        </ul>
-        <p class="recovery-legend-note">PIP = <em>Package Installation Plugin</em> – WoltLabs Begriff für Installations-Artefakte (Menüs, Templates, Optionen …), die bei der Deinstallation entfernt werden.</p>
-    </div>
-    <?php
-}
-
-function recoveryRenderRecoveryModalShell(): void
-{
-    if (\defined('RECOVERY_MODAL_SHELL_RENDERED')) {
-        return;
-    }
-    \define('RECOVERY_MODAL_SHELL_RENDERED', true);
-    ?>
-    <div id="recovery-modal" class="recovery-modal" hidden aria-hidden="true">
-        <div class="recovery-modal-backdrop" data-recovery-modal-close></div>
-        <div class="recovery-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="recovery-modal-title">
-            <div class="recovery-modal-header">
-                <h3 id="recovery-modal-title">Details</h3>
-                <button type="button" class="recovery-modal-close" data-recovery-modal-close aria-label="Schließen">&times;</button>
-            </div>
-            <div class="recovery-modal-body" id="recovery-modal-body"></div>
-            <div class="recovery-modal-footer">
-                <button type="button" class="button" data-recovery-modal-close>Schließen</button>
-            </div>
-        </div>
-    </div>
-    <?php
-}
-
-function recoveryRenderPipPreviewScript(array $pipPreviewPayload, array $pipCounts): void
-{
-    recoveryRenderGenericModalScript();
-    ?>
-    <script>
-    (function () {
-        var pipData = <?= \json_encode($pipPreviewPayload, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
-        var modal = document.getElementById('recovery-modal');
-        var body = document.getElementById('recovery-modal-body');
-        var title = document.getElementById('recovery-modal-title');
-
-        function escapeHtml(s) {
-            var d = document.createElement('div');
-            d.textContent = s;
-            return d.innerHTML;
-        }
-
-        function openPipModal(pipKey) {
-            var d = pipData[pipKey];
-            if (!d) { return; }
-            var html = '<p class="recovery-modal-desc">' + escapeHtml(d.description) + '</p>';
-            if (d.example) {
-                html += '<p><small><strong>Typische Namen:</strong> ' + escapeHtml(d.example) + '</small></p>';
-            }
-            html += '<p><small><strong>Tabelle:</strong> <code>' + escapeHtml(d.table) + '</code> · Es werden nur Zeilen mit Ihrer packageID gelöscht.</small></p>';
-            if (!d.rows || d.rows.length === 0) {
-                html += '<p class="recovery-modal-empty"><em>Keine Vorschau-Zeilen geladen (Tabelle leer oder Spalten nicht lesbar).</em></p>';
-            } else {
-                html += '<p><strong>Vorschau (max. ' + d.rows.length + ' von ' + d.count + '):</strong></p>';
-                html += '<div class="recovery-modal-table-wrap"><table class="table recovery-preview-table"><thead><tr>';
-                (d.columns || []).forEach(function (c) {
-                    html += '<th>' + escapeHtml(c) + '</th>';
-                });
-                html += '</tr></thead><tbody>';
-                d.rows.forEach(function (row) {
-                    html += '<tr>';
-                    (d.columns || []).forEach(function (c) {
-                        var val = row[c];
-                        if (val === null || val === undefined) { val = '—'; }
-                        else if (typeof val === 'string' && val.length > 120) { val = val.substring(0, 117) + '…'; }
-                        html += '<td><code>' + escapeHtml(String(val)) + '</code></td>';
-                    });
-                    html += '</tr>';
-                });
-                html += '</tbody></table></div>';
-                if (d.count > d.rows.length) {
-                    html += '<p><small>… und ' + (d.count - d.rows.length) + ' weitere Einträge (nicht alle angezeigt).</small></p>';
-                }
-            }
-            if (window.recoveryOpenModal) {
-                window.recoveryOpenModal(d.label + ' (' + d.count + ' Einträge)', html);
-                return;
-            }
-            if (!modal || !body || !title) { return; }
-            title.textContent = d.label + ' (' + d.count + ' Einträge)';
-            body.innerHTML = html;
-            modal.hidden = false;
-            modal.setAttribute('aria-hidden', 'false');
-            document.body.classList.add('recovery-modal-open');
-        }
-
-        document.querySelectorAll('[data-recovery-pip-detail]').forEach(function (btn) {
-            btn.addEventListener('click', function (e) {
-                e.preventDefault();
-                e.stopPropagation();
-                openPipModal(btn.getAttribute('data-recovery-pip-detail'));
-            });
-        });
-
-        document.querySelectorAll('.recovery-pip-row[data-recovery-pip]').forEach(function (tr) {
-            tr.addEventListener('click', function (e) {
-                if (e.target.closest('input, button, a, label')) { return; }
-                openPipModal(tr.getAttribute('data-recovery-pip'));
-            });
-        });
-
-        var chkAll = document.getElementById('chkAllPip');
-        if (chkAll) {
-            chkAll.addEventListener('change', function () {
-                document.querySelectorAll('input[name="pip_select[]"]:not(:disabled)').forEach(function (c) {
-                    c.checked = chkAll.checked;
-                });
-            });
-            var anyChecked = false;
-            document.querySelectorAll('input[name="pip_select[]"]:not(:disabled)').forEach(function (c) {
-                if (c.checked) { anyChecked = true; }
-            });
-            chkAll.checked = anyChecked;
-        }
-    }());
-    </script>
-    <?php
-}
-
-function recoveryRenderPageHeader(string $title, string $subtitle, string $iconClass = 'fa-solid fa-screwdriver-wrench'): void
-{
-    echo '<header class="recovery-page-header">';
-    echo '<h1><i class="' . \htmlspecialchars($iconClass) . '"></i> ' . \htmlspecialchars($title) . '</h1>';
-    echo '<p class="subtitle">' . $subtitle . '</p>';
-    echo '</header>';
-}
-
-/**
- * @param list<string> $paragraphs HTML-safe plain text paragraphs
- */
-function recoveryRenderHelpCard(string $title, array $paragraphs, string $variant = 'info'): void
-{
-    $class = \in_array($variant, ['info', 'warning', 'error', 'success'], true) ? $variant : 'info';
-    echo '<div class="recovery-help-card recovery-help-card--' . $class . '">';
-    echo '<strong><i class="fa-solid fa-circle-info"></i> ' . \htmlspecialchars($title) . '</strong>';
-    foreach ($paragraphs as $p) {
-        echo '<p>' . $p . '</p>';
-    }
-    echo '</div>';
-}
-
-
-function recoveryRenderGenericModalScript(): void
-{
-    static $done = false;
-    if ($done) {
-        return;
-    }
-    $done = true;
-    recoveryRenderRecoveryModalShell();
-    ?>
-    <script>
-    (function () {
-        window.recoveryOpenModal = function (title, html) {
-            var modal = document.getElementById('recovery-modal');
-            var body = document.getElementById('recovery-modal-body');
-            var titleEl = document.getElementById('recovery-modal-title');
-            if (!modal || !body || !titleEl) { return; }
-            titleEl.textContent = title || 'Details';
-            body.innerHTML = html || '';
-            modal.hidden = false;
-            modal.setAttribute('aria-hidden', 'false');
-            document.body.classList.add('recovery-modal-open');
-        };
-        window.recoveryCloseModal = function () {
-            var modal = document.getElementById('recovery-modal');
-            if (!modal) { return; }
-            modal.hidden = true;
-            modal.setAttribute('aria-hidden', 'true');
-            document.body.classList.remove('recovery-modal-open');
-        };
-        if (!document.documentElement.dataset.recoveryModalBound) {
-            document.documentElement.dataset.recoveryModalBound = '1';
-            document.addEventListener('click', function (e) {
-                if (e.target.closest('[data-recovery-modal-close]')) {
-                    e.preventDefault();
-                    window.recoveryCloseModal();
-                }
-            });
-            document.addEventListener('keydown', function (e) {
-                if (e.key !== 'Escape') { return; }
-                var m = document.getElementById('recovery-modal');
-                if (m && !m.hidden) { window.recoveryCloseModal(); }
-            });
-        }
-    }());
-    </script>
-    <?php
-}
-
-function recoveryRenderModeSelectionGrid(string $authHash): void
-{
-    $modes = [
-        [
-            'mode' => RECOVERY_MODE_ACP_REPAIR,
-            'icon' => 'fa-solid fa-wrench',
-            'title' => 'ACP Repair',
-            'desc' => 'Repariert defekte ACP-Menüeinträge eines Plugins',
-            'when' => 'Wenn das ACP nach fehlgeschlagener Installation Fehler oder weiße Seiten zeigt',
-        ],
-        [
-            'mode' => RECOVERY_MODE_PLUGIN_UNINSTALL,
-            'icon' => 'fa-solid fa-trash-can',
-            'title' => 'Plugin Uninstall',
-            'desc' => 'Deinstalliert ein Plugin komplett (Datenbank + Dateien)',
-            'when' => 'Wenn normale Deinstallation im ACP nicht möglich ist',
-        ],
-        [
-            'mode' => RECOVERY_MODE_USER_MANAGEMENT,
-            'icon' => 'fa-solid fa-users-gear',
-            'title' => 'User Management',
-            'desc' => 'Admin-Passwort zurücksetzen und Berechtigungen anpassen',
-            'when' => 'Wenn Sie keinen Zugang mehr zum ACP oder zum Admin-Konto haben',
-        ],
-        [
-            'mode' => RECOVERY_MODE_CACHE_CLEAR,
-            'icon' => 'fa-solid fa-broom',
-            'title' => 'Cache Clear',
-            'desc' => 'Löscht alle Caches und kompilierte Templates',
-            'when' => 'Bei Template-Fehlern oder nach manuellen Dateiänderungen',
-        ],
-        [
-            'mode' => RECOVERY_MODE_PACKAGE_LIST_REPAIR,
-            'icon' => 'fa-solid fa-list-check',
-            'title' => 'Paketliste reparieren',
-            'desc' => 'Entfernt verwaiste Queue- und Application-Einträge',
-            'when' => 'Wenn die ACP-Paketliste oder Deinstallation durch hängende Queue blockiert ist',
-        ],
-    ];
-    echo '<div class="recoveryModeGrid">';
-    foreach ($modes as $m) {
-        $href = '?mode=' . (int) $m['mode'] . '&amp;t=' . \rawurlencode($authHash);
-        echo '<a href="' . $href . '" class="recoveryModeCard">';
-        echo '<i class="' . \htmlspecialchars($m['icon']) . ' recoveryModeCard-icon" aria-hidden="true"></i>';
-        echo '<strong class="recoveryModeCard-title">' . \htmlspecialchars($m['title']) . '</strong>';
-        echo '<p class="recoveryModeCard-desc">' . \htmlspecialchars($m['desc']) . '</p>';
-        echo '<p class="recoveryModeCard-when"><small>' . \htmlspecialchars($m['when']) . '</small></p>';
-        echo '</a>';
-    }
-    echo '</div>';
-}
-
-/**
- * Zwei Eingabevarianten (Identifier / Package-Datei) als Karten-Layout.
- */
-function recoveryRenderPackageInputOptionCards(
-    string $modeUrl,
-    int $mode,
-    string $authHash,
-    string $identifierButton,
-    string $fileButton,
-    string $identifierLoading,
-    string $fileLoading,
-    string $identifierHint = 'Der eindeutige Package-Identifier in Reverse-Domain-Notation.',
-    string $fileHint = 'package.xml wird automatisch ausgelesen – anschließend folgt die Analyse.'
-): void {
-    echo '<div class="recovery-option-cards">';
-    echo '<div class="recovery-option-card recovery-card">';
-    echo '<h2><i class="fa-solid fa-tag"></i> Option 1: Identifier</h2>';
-    echo '<form method="POST" enctype="multipart/form-data" action="' . \htmlspecialchars($modeUrl) . '" data-recovery-loading="' . \htmlspecialchars($identifierLoading) . '">';
-    recoveryRenderFormModeHiddenFields($mode, $authHash);
-    echo '<div class="form-group"><label>Package-Identifier</label>';
-    echo '<input type="text" name="package_identifier" placeholder="z.B. de.example.my-plugin" autocomplete="off">';
-    echo '<small class="recovery-field-hint">' . \htmlspecialchars($identifierHint) . '</small></div>';
-    echo '<button type="submit"><i class="fa-solid fa-magnifying-glass"></i> ' . \htmlspecialchars($identifierButton) . '</button>';
-    echo '</form></div>';
-    echo '<div class="recovery-option-card recovery-card">';
-    echo '<h2><i class="fa-solid fa-file-archive"></i> Option 2: Package-Datei</h2>';
-    echo '<form method="POST" enctype="multipart/form-data" action="' . \htmlspecialchars($modeUrl) . '" data-recovery-loading="' . \htmlspecialchars($fileLoading) . '">';
-    recoveryRenderFormModeHiddenFields($mode, $authHash);
-    echo '<div class="form-group"><label>Package-Datei (.tar, .tar.gz, .tgz – max. 100 MiB)</label>';
-    echo '<input type="file" name="package_file" accept=".tar,.tar.gz,.tgz" required>';
-    echo '<small class="recovery-field-hint">' . \htmlspecialchars($fileHint) . '</small></div>';
-    echo '<button type="submit"><i class="fa-solid fa-upload"></i> ' . \htmlspecialchars($fileButton) . '</button>';
-    echo '</form></div>';
-    echo '</div>';
-}
-
-function recoveryRenderStepCard(string $title, string $iconClass, string $bodyHtml, string $variant = 'info'): void
-{
-    echo '<div class="recovery-step-card recovery-card recovery-step-card--' . \htmlspecialchars($variant) . '">';
-    echo '<h2><i class="' . \htmlspecialchars($iconClass) . '"></i> ' . \htmlspecialchars($title) . '</h2>';
-    echo $bodyHtml;
-    echo '</div>';
-}
-
-/**
- * @param list<array<string, mixed>> $menuItems
- */
-function recoveryRenderAcpMenuPreviewScript(array $menuItems): void
-{
-    if ($menuItems === []) {
-        return;
-    }
-    recoveryRenderGenericModalScript();
-    $payload = \array_map(static function (array $item) {
-        return [
-            'menuItem' => (string) ($item['menuItem'] ?? ''),
-            'menuItemController' => (string) ($item['menuItemController'] ?? ''),
-        ];
-    }, $menuItems);
-    ?>
-    <script>
-    (function () {
-        var rows = <?= \json_encode($payload, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
-        function escapeHtml(s) {
-            var d = document.createElement('div');
-            d.textContent = s;
-            return d.innerHTML;
-        }
-        document.querySelectorAll('[data-recovery-acp-menu-preview]').forEach(function (btn) {
-            btn.addEventListener('click', function (e) {
-                e.preventDefault();
-                var html = '<p class="recovery-modal-desc">ACP-Menüeinträge, die beim Repair gelöscht würden:</p>';
-                html += '<div class="recovery-modal-table-wrap"><table class="table recovery-preview-table"><thead><tr>';
-                html += '<th>Menu Item</th><th>Controller</th></tr></thead><tbody>';
-                rows.forEach(function (row) {
-                    html += '<tr><td><code>' + escapeHtml(row.menuItem || '—') + '</code></td>';
-                    html += '<td><code>' + escapeHtml(row.menuItemController || '—') + '</code></td></tr>';
-                });
-                html += '</tbody></table></div>';
-                if (window.recoveryOpenModal) {
-                    window.recoveryOpenModal('ACP-Menüeinträge (' + rows.length + ')', html);
-                }
-            });
-        });
-    }());
-    </script>
-    <?php
-}
-
-function recoveryRenderAcpLegendBox(): void
-{
-    ?>
-    <div class="recovery-legend">
-        <strong><i class="fa-solid fa-wrench"></i> Wofür ist ACP Repair?</strong>
-        <p>Wenn ein Plugin-Install fehlschlägt, bleiben oft <strong>defekte Menüeinträge</strong> in der Datenbank. Das ACP zeigt dann Fehler oder weiße Seiten. Dieser Modus findet und entfernt nur die Menüpunkte des betroffenen Plugins.</p>
-        <ul>
-            <li><strong>Package-Identifier</strong> – wenn Sie ihn kennen (z.&nbsp;B. <code>de.sunnyc.wsc.shrinkr</code>)</li>
-            <li><strong>Package-Datei</strong> – .tar/.tgz hochladen, falls Sie den Identifier nicht wissen</li>
-            <li>Nach dem Löschen werden <strong>kompilierte Templates geleert</strong> – oft reicht das, um das ACP wieder zu öffnen</li>
-        </ul>
-    </div>
-    <?php
-}
-
-/**
  * Generiert SQL-INSERT-Backup aller betroffenen Zeilen (WHERE packageID = $packageID).
  * Nur für ausgewählte PIP-Kategorien aus recoveryGetPipResourceMap().
  * Pure PHP – kein mysqldump erforderlich.
@@ -2625,7 +1981,7 @@ function recoveryGenerateSqlBackup(
 
             foreach ($rows as $row) {
                 $cols = \array_keys($row);
-                $vals = \array_map(static function ($v) {
+                $vals = \array_map(static function ($v): string {
                     if ($v === null) {
                         return 'NULL';
                     }
@@ -2802,10 +2158,16 @@ function recoveryGetSetupAssets(): array
     $imgPath = WCF_DIR . 'acp/images/woltlabSuite.png';
 
     if (\is_readable($cssPath)) {
-        $assets['WCFSetup.css'] = 'acp/style/setup/WCFSetup.css';
+        $assets['WCFSetup.css'] = \sprintf(
+            'data:text/css;base64,%s',
+            \base64_encode((string) \file_get_contents($cssPath))
+        );
     }
     if (\is_readable($imgPath)) {
-        $assets['woltlabSuite.png'] = 'acp/images/woltlabSuite.png';
+        $assets['woltlabSuite.png'] = \sprintf(
+            'data:image/png;base64,%s',
+            \base64_encode((string) \file_get_contents($imgPath))
+        );
     }
 
     return $assets;
@@ -2821,9 +2183,7 @@ function recoveryRenderStandaloneMessage(string $documentTitle, string $contentT
 
 function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '', ?array $assets = null): void
 {
-    if ($assets === null) {
-        $assets = recoveryGetSetupAssets();
-    }
+    $assets ??= recoveryGetSetupAssets();
     ?>
 <!DOCTYPE html>
 <html lang="de">
@@ -2886,50 +2246,6 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         h1 { color: #fff; margin-bottom: 10px; font-size: 32px; font-weight: 300; }
         h2 { color: #fff; margin: 40px 0 10px 0; font-size: 24px; font-weight: 300; }
         .subtitle { color: #9D9D9D; margin-bottom: 30px; font-size: 14px; }
-        .recovery-page-header { margin-bottom: 28px; }
-        .recovery-page-header h1 { margin-bottom: 8px; }
-        .recovery-page-header .subtitle { margin-bottom: 0; }
-        .recovery-help-card {
-            padding: 16px 20px; margin-bottom: 20px; border-radius: 3px;
-            border: 1px solid #444; font-size: 14px; line-height: 1.55;
-        }
-        .recovery-help-card p { margin: 8px 0 0; }
-        .recovery-help-card p:first-of-type { margin-top: 10px; }
-        .recovery-help-card--info { background: rgba(51, 102, 153, 0.12); border-color: #369; }
-        .recovery-help-card--warning { background: rgba(204, 153, 51, 0.12); border-color: #c93; }
-        .recovery-help-card--error { background: rgba(204, 51, 51, 0.12); border-color: #c33; }
-        .recovery-help-card--success { background: rgba(60, 204, 60, 0.12); border-color: #3c3; }
-        .recovery-card {
-            background: rgba(0, 0, 0, .125); border: 1px solid #444444;
-            border-radius: 3px; padding: 24px; margin-bottom: 24px;
-        }
-        .recovery-card h2 { margin: 0 0 16px; font-size: 20px; font-weight: 600; color: #fff; }
-        .recovery-field-hint { display: block; margin-top: 6px; font-size: 13px; color: #9D9D9D; }
-        .recoveryModeGrid {
-            display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-            gap: 16px; margin-bottom: 28px;
-        }
-        .recoveryModeCard {
-            display: flex; flex-direction: column; align-items: flex-start; text-align: left;
-            padding: 22px 20px; background: rgba(0, 0, 0, .125); border: 1px solid #444444;
-            border-radius: 3px; text-decoration: none; color: #c0c0c0;
-            transition: background 0.2s, border-color 0.2s;
-        }
-        .recoveryModeCard:hover { background: rgba(0, 0, 0, .25); border-color: #666; color: #fff; }
-        .recoveryModeCard-icon { font-size: 28px; margin-bottom: 12px; color: #369; display: block; }
-        .recoveryModeCard-title { display: block; font-size: 18px; margin-bottom: 8px; color: #fff; }
-        .recoveryModeCard-desc { font-size: 14px; line-height: 1.45; margin: 0 0 10px; color: #c0c0c0; }
-        .recoveryModeCard-when { margin: 0; color: #9D9D9D; line-height: 1.4; }
-        .recovery-option-cards {
-            display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 24px;
-        }
-        @media (max-width: 720px) { .recovery-option-cards { grid-template-columns: 1fr; } }
-        .recovery-option-card h2 { margin: 0 0 16px; font-size: 18px; font-weight: 600; color: #fff; }
-        .recovery-step-card h2 { margin: 0 0 12px; font-size: 18px; }
-        .recovery-step-card--warning { border-color: #c93; }
-        .recovery-step-card ul { margin: 10px 0 0 18px; }
-        .recovery-step-card li { margin-bottom: 6px; }
-        .recovery-auth-card { margin-bottom: 24px; }
         code { color: #fff; font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; word-break: break-word; }
         .mode-grid {
             display: grid;
@@ -2990,77 +2306,8 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
             padding: 10px 20px; text-align: left; border-bottom: 1px solid #444444; color: #c0c0c0;
         }
         .table th, table th { border-top: 1px solid #444444; border-bottom-width: 2px; font-weight: 600; color: #fff; }
-        .table tbody tr:nth-child(odd), table tbody tr:nth-child(odd) { background: rgba(0, 0, 0, .08); }
-        .table tbody tr:hover, table tbody tr:hover,
-        .recovery-pip-row:hover { background: rgba(51, 102, 153, 0.18) !important; }
-        .recovery-pip-row { cursor: pointer; transition: background 0.15s ease; }
-        .recovery-pip-row--empty { opacity: 0.55; cursor: default; }
-        .recovery-pip-row--empty:hover { background: rgba(0, 0, 0, .08) !important; }
-        .recovery-pip-label { display: block; font-weight: 600; color: #fff; margin-bottom: 4px; }
-        .recovery-pip-desc { display: block; font-size: 12px; color: #9D9D9D; line-height: 1.45; margin: 0; }
-        .recovery-pip-actions { margin-top: 8px; }
-        .recovery-info-btn {
-            display: inline-flex; align-items: center; gap: 5px;
-            padding: 4px 10px; font-size: 12px; border-radius: 3px;
-            background: rgba(51, 102, 153, 0.35); border: 1px solid #369; color: #fff;
-            cursor: pointer; text-decoration: none;
-        }
-        .recovery-info-btn:hover { background: rgba(51, 102, 153, 0.55); }
-        .recovery-legend {
-            background: rgba(51, 102, 153, 0.12); border: 1px solid #369; border-radius: 3px;
-            padding: 16px 20px; margin: 0 0 24px; font-size: 14px; line-height: 1.55;
-        }
-        .recovery-legend ul { margin: 10px 0 0 18px; padding: 0; }
-        .recovery-legend li { margin-bottom: 6px; }
-        .recovery-legend-note { margin: 12px 0 0; font-size: 12px; color: #9D9D9D; }
-        .recovery-badge {
-            display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px;
-            font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em;
-        }
-        .recovery-badge-on { background: rgba(60, 204, 60, 0.25); border: 1px solid #3c3; color: #9f9; }
-        .recovery-badge-off { background: rgba(128, 128, 128, 0.2); border: 1px solid #666; color: #aaa; }
-        .recovery-badge-na { background: rgba(128, 128, 128, 0.15); border: 1px solid #555; color: #888; }
-        .recovery-count-pill {
-            display: inline-block; min-width: 2em; padding: 2px 8px; border-radius: 12px;
-            font-weight: 700; text-align: center; font-size: 13px;
-        }
-        .recovery-count-pill--has { background: rgba(204, 153, 51, 0.35); color: #fc6; border: 1px solid #c93; }
-        .recovery-count-pill--zero { color: #888; }
-        .recovery-section-intro { margin-bottom: 16px; color: #9D9D9D; font-size: 14px; line-height: 1.55; }
-        .recovery-modal {
-            position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center;
-            padding: 20px;
-        }
-        .recovery-modal[hidden] { display: none !important; }
-        body.recovery-modal-open { overflow: hidden; }
-        .recovery-modal-backdrop {
-            position: absolute; inset: 0; background: rgba(0, 0, 0, 0.65);
-        }
-        .recovery-modal-dialog {
-            position: relative; z-index: 1; width: 100%; max-width: 720px; max-height: 85vh;
-            display: flex; flex-direction: column; background: #3D3D3D; border: 1px solid #555;
-            border-radius: 4px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-        }
-        .recovery-modal-header {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 16px 20px; border-bottom: 1px solid #555;
-        }
-        .recovery-modal-header h3 { margin: 0; font-size: 18px; font-weight: 600; color: #fff; }
-        .recovery-modal-close {
-            background: transparent; border: none; color: #9D9D9D; font-size: 28px;
-            line-height: 1; cursor: pointer; padding: 0 4px;
-        }
-        .recovery-modal-close:hover { color: #fff; }
-        .recovery-modal-body {
-            padding: 16px 20px; overflow-y: auto; flex: 1; font-size: 14px; line-height: 1.55;
-        }
-        .recovery-modal-desc { margin: 0 0 12px; color: #c0c0c0; }
-        .recovery-modal-table-wrap { max-height: 320px; overflow: auto; margin-top: 10px; }
-        .recovery-preview-table { margin: 0 !important; font-size: 12px; }
-        .recovery-preview-table td code { word-break: break-all; }
-        .recovery-modal-footer {
-            padding: 12px 20px; border-top: 1px solid #555; text-align: right;
-        }
+        .table tbody tr:nth-child(odd), table tbody tr:nth-child(odd) { background: rgba(0, 0, 0, .125); }
+        .table tbody tr:hover, table tbody tr:hover { background: rgba(0, 0, 0, .25); }
         hr { border: none; border-top: 1px solid #444444; margin: 30px 0; }
 
         /* ── Wizard Step Indicator ─────────────────────────────────────── */
@@ -3108,16 +2355,6 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
             footer a:hover { color: #369; }
             h1, h2 { color: #333; }
             .subtitle { color: #666; }
-            .recovery-help-card--info { background: rgba(51,102,153,.08); }
-            .recovery-help-card--warning { background: rgba(200,120,40,.08); }
-            .recovery-help-card--error { background: rgba(204,51,51,.08); }
-            .recovery-help-card--success { background: rgba(51,153,51,.08); }
-            .recovery-card, .recoveryModeCard { background: #f9f9f9; border-color: #ddd; color: #333; }
-            .recoveryModeCard:hover { background: #f0f4ff; border-color: #369; }
-            .recoveryModeCard-title, .recovery-card h2, .recovery-option-card h2 { color: #333; }
-            .recoveryModeCard-icon { color: #369; }
-            .recoveryModeCard-desc { color: #555; }
-            .recovery-field-hint, .recoveryModeCard-when { color: #777; }
             code { color: #369; background: #f0f4ff; padding: 1px 5px; border-radius: 2px; }
             .mode-button { background: #f9f9f9; border-color: #ddd; color: #333; }
             .mode-button:hover { background: #f0f4ff; border-color: #369; }
@@ -3136,15 +2373,7 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
             .table th, .table td, table th, table td { border-color: #ddd; color: #333; }
             .table th, table th { color: #555; border-top-color: #ddd; }
             .table tbody tr:nth-child(odd), table tbody tr:nth-child(odd) { background: rgba(0,0,0,.03); }
-            .table tbody tr:hover, table tbody tr:hover,
-            .recovery-pip-row:hover { background: rgba(51, 102, 153, 0.1) !important; }
-            .recovery-pip-label { color: #333; }
-            .recovery-modal-dialog { background: #fff; border-color: #ddd; }
-            .recovery-modal-header { border-color: #ddd; }
-            .recovery-modal-header h3 { color: #333; }
-            .recovery-modal-footer { border-color: #ddd; }
-            .recovery-modal-desc { color: #555; }
-            .recovery-info-btn { color: #369; background: rgba(51,102,153,.1); }
+            .table tbody tr:hover, table tbody tr:hover { background: rgba(0,0,0,.06); }
             hr { border-top-color: #ddd; }
             small { color: #777; }
             .recovery-global-nav { border-bottom-color: #ddd; }
@@ -3189,9 +2418,7 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
 
 function recoveryRenderPageEnd(?array $assets = null): void
 {
-    if ($assets === null) {
-        $assets = recoveryGetSetupAssets();
-    }
+    $assets ??= recoveryGetSetupAssets();
     $baseUrl = '';
     try {
         $baseUrl = recoveryGetSiteBaseUrl();
@@ -3234,13 +2461,7 @@ function recoveryRenderGlobalNav(int $mode, string $authHash, string $baseUrl): 
 
 // Hash generieren bei erstem Aufruf
 if (empty($_REQUEST['t']) || !preg_match('~^[a-f0-9]{40}$~', $_REQUEST['t'])) {
-    if (\function_exists('random_bytes')) {
-        $authHash = \bin2hex(\random_bytes(20));
-    } elseif (\function_exists('openssl_random_pseudo_bytes')) {
-        $authHash = \bin2hex(\openssl_random_pseudo_bytes(20));
-    } else {
-        $authHash = \bin2hex(\hash('sha256', \uniqid((string) \mt_rand(), true), true));
-    }
+    $authHash = bin2hex(random_bytes(20));
     header("Location: plugin-recovery-tool.php?t={$authHash}");
     exit;
 } else {
@@ -3303,7 +2524,7 @@ if (\is_file($authFilePath) && \is_readable($authFilePath)) {
 if ($action === 'cleanup') {
     $cleanupAcpUrl = recoveryGetSiteBaseUrl() . 'acp/';
     cleanupRecoveryAuxiliaryFiles();
-    \register_shutdown_function(static function () {
+    \register_shutdown_function(static function (): void {
         @\unlink(__DIR__ . '/plugin-recovery-tool.php');
     });
     \header('Location: ' . $cleanupAcpUrl);
@@ -4297,13 +3518,10 @@ recoveryRenderPageStart('Plugin Recovery Tool', 'Plugin Recovery Tool');
 
 // Auth-Screen anzeigen wenn nicht authentifiziert
 if (!$isAuthenticated) {
-    recoveryRenderPageHeader(
-        'Plugin Recovery Tool',
-        'Authentifizierung erforderlich – drei kurze Schritte',
-        'fa-solid fa-key'
-    );
 ?>
-    <div class="recovery-card recovery-auth-card">
+    <h1>Plugin Recovery Tool</h1>
+    <p class="subtitle">Authentifizierung erforderlich</p>
+
     <div class="wizardSteps" id="authWizardSteps">
         <div class="wizardStep active">
             <div class="wizardStepNumber">1</div>
@@ -4353,14 +3571,11 @@ if (!$isAuthenticated) {
         </a>
     </div>
 
+    <div class="alert alert-error" style="margin-top: 30px;">
+        <i class="fa-solid fa-shield-halved"></i> <strong>Sicherheitshinweis:</strong><br>
+        Löschen Sie beide Dateien (<code>plugin-recovery-tool.php</code> und <code><?= htmlspecialchars($authFilename) ?></code>)
+        nach der Verwendung. Diese Dateien können ein Sicherheitsrisiko darstellen!
     </div>
-
-    <?php
-    recoveryRenderHelpCard('Sicherheitshinweis', [
-        'Löschen Sie <code>plugin-recovery-tool.php</code> und <code>' . \htmlspecialchars($authFilename) . '</code> nach der Verwendung.',
-        'Diese Dateien können ein Sicherheitsrisiko darstellen, wenn sie öffentlich erreichbar bleiben.',
-    ], 'error');
-    ?>
 
     <script>
     (function () {
@@ -4438,32 +3653,58 @@ if ($mode === RECOVERY_MODE_SELECTION) {
     <div class="alert alert-success"><i class="fa-solid fa-circle-check"></i> <strong>Authentifizierung erfolgreich.</strong> Sie können jetzt einen Recovery-Modus wählen.</div>
     <?php endif; ?>
 
-    <?php
-    recoveryRenderPageHeader(
-        'WoltLab Suite Recovery Tool',
-        'Wählen Sie den passenden Recovery-Modus für Ihr Problem',
-        'fa-solid fa-screwdriver-wrench'
-    );
-    recoveryRenderModeSelectionGrid($authHash);
-    recoveryRenderHelpCard('Hinweis', [
-        'Dieses Tool arbeitet direkt auf Datenbank-Ebene und sollte nur im Notfall verwendet werden.',
-        'Erstellen Sie vor riskanten Aktionen ein vollständiges Datenbank-Backup.',
-    ], 'info');
-    recoveryRenderHelpCard('Fertig mit Recovery?', [
-        'Wenn Sie alle Reparaturen abgeschlossen haben, entfernen Sie das Recovery Tool vollständig.',
-        '<a href="?action=cleanup&amp;t=' . \htmlspecialchars($authHash) . '" class="button btn-danger" onclick="return confirm(\'ACHTUNG: Das Recovery Tool wird entfernt (Auth-Datei, Uploads, diese PHP-Datei) und Sie werden ins ACP weitergeleitet. Fortfahren?\')"><i class="fa-solid fa-xmark"></i> Recovery Tool vollständig entfernen</a>',
-    ], 'warning');
-    ?>
+    <h1>WoltLab Suite Recovery Tool</h1>
+    <p class="subtitle">Wählen Sie den gewünschten Recovery-Modus</p>
+
+    <div class="mode-grid">
+        <a href="?mode=<?= RECOVERY_MODE_ACP_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
+            <i class="fa-solid fa-wrench"></i>
+            <strong>ACP Repair</strong>
+            <span>Repariert defekte ACP-Menüeinträge eines Plugins</span>
+        </a>
+        <a href="?mode=<?= RECOVERY_MODE_PLUGIN_UNINSTALL ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
+            <i class="fa-solid fa-trash-can"></i>
+            <strong>Plugin Uninstall</strong>
+            <span>Deinstalliert Plugin komplett (DB + Dateien)</span>
+        </a>
+        <a href="?mode=<?= RECOVERY_MODE_USER_MANAGEMENT ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
+            <i class="fa-solid fa-users-gear"></i>
+            <strong>User Management</strong>
+            <span>Admin-Passwort zurücksetzen &amp; Berechtigungen</span>
+        </a>
+        <a href="?mode=<?= RECOVERY_MODE_CACHE_CLEAR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
+            <i class="fa-solid fa-broom"></i>
+            <strong>Cache Clear</strong>
+            <span>Löscht alle Caches &amp; kompilierte Templates</span>
+        </a>
+        <a href="?mode=<?= RECOVERY_MODE_PACKAGE_LIST_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
+            <i class="fa-solid fa-list-check"></i>
+            <strong>Paketliste reparieren</strong>
+            <span>Entfernt verwaiste Queue-/Application-Einträge (ACP-Paketliste)</span>
+        </a>
+    </div>
+
+    <div class="alert alert-info">
+        <i class="fa-solid fa-circle-info"></i> <strong>Hinweis:</strong> Dieses Tool arbeitet direkt auf Datenbank-Ebene und sollte nur im Notfall verwendet werden.
+    </div>
+
+    <div class="alert alert-warning" style="margin-top: 30px;">
+        <i class="fa-solid fa-triangle-exclamation"></i> <strong>Fertig mit Recovery?</strong><br>
+        Wenn Sie alle Reparaturen abgeschlossen haben, sollten Sie das Recovery Tool und alle zugehörigen Dateien löschen.<br><br>
+        <a href="?action=cleanup&amp;t=<?= htmlspecialchars($authHash) ?>" class="button btn-danger" onclick="return confirm('ACHTUNG: Das Recovery Tool wird entfernt (Auth-Datei, Uploads, diese PHP-Datei) und Sie werden ins ACP weitergeleitet. Fortfahren?')">
+            <i class="fa-solid fa-xmark"></i> Recovery Tool vollständig entfernen
+        </a>
+    </div>
 
 <?php
 }
 
 elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
-    recoveryRenderPageHeader(
-        'ACP Repair',
-        'Repariert defekte ACP-Menüeinträge eines Plugins',
-        'fa-solid fa-wrench'
-    );
+?>
+    <h1>ACP Repair</h1>
+    <p class="subtitle">Repariert defekte ACP-Menüeinträge eines Plugins</p>
+
+<?php
     recoveryFormLoadingScript();
     if (recoveryWasPostTruncated()) {
         recoveryRenderPostTruncatedWarning();
@@ -4472,18 +3713,30 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
     $acpModeUrl = recoveryBuildModeUrl(RECOVERY_MODE_ACP_REPAIR, $authHash);
 
     if (recoveryAcpShouldShowInputForm()) {
-        recoveryRenderAcpLegendBox();
-        recoveryRenderPackageInputOptionCards(
-            $acpModeUrl,
-            RECOVERY_MODE_ACP_REPAIR,
-            $authHash,
-            'Mit Identifier reparieren',
-            'Mit Datei reparieren',
-            'Paket wird analysiert …',
-            'Paket wird hochgeladen und analysiert …',
-            'Der eindeutige Bezeichner des Plugins, dessen ACP-Menüeinträge repariert werden sollen.',
-            'Laden Sie die .tar/.tgz hoch, wenn Sie den Identifier nicht kennen.'
-        );
+?>
+    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($acpModeUrl) ?>" data-recovery-loading="Paket wird analysiert …">
+        <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_ACP_REPAIR, $authHash); ?>
+        <div class="form-group">
+            <label>Option 1: Package-Identifier manuell eingeben</label>
+            <input type="text" name="package_identifier" placeholder="z.B. de.example.my-plugin" autocomplete="off">
+            <small style="display: block; margin-top: 5px;">
+                Der eindeutige Bezeichner des Plugins, dessen ACP-Menüeinträge repariert werden sollen.
+            </small>
+        </div>
+        <button type="submit"><i class="fa-solid fa-wrench"></i> Mit Identifier reparieren</button>
+    </form>
+
+    <hr>
+
+    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($acpModeUrl) ?>" data-recovery-loading="Paket wird hochgeladen und analysiert …">
+        <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_ACP_REPAIR, $authHash); ?>
+        <div class="form-group">
+            <label>Option 2: Package-Datei hochladen (.tar, .tar.gz, .tgz – max. 100 MiB)</label>
+            <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz" required>
+        </div>
+        <button type="submit"><i class="fa-solid fa-wrench"></i> Mit Datei reparieren</button>
+    </form>
+<?php
     } else {
         echo '<div id="recovery-loading-overlay" class="recovery-loading" style="display:block">Paket wird analysiert …</div>';
         try {
@@ -4528,14 +3781,12 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                     if ($foundPatterns !== []) {
                         echo '<small>Suchmuster: ' . \htmlspecialchars(\implode(', ', $foundPatterns)) . '</small><br><br>';
                     }
-                    echo '<button type="button" class="recovery-info-btn" data-recovery-acp-menu-preview style="margin-bottom:12px"><i class="fa-solid fa-magnifying-glass"></i> Menüeinträge in Vorschau</button>';
-                    echo '<table class="table"><thead><tr><th>Menu Item</th><th>Controller</th></tr></thead><tbody>';
+                    echo '<table><thead><tr><th>Menu Item</th><th>Controller</th></tr></thead><tbody>';
                     foreach ($menuItems as $item) {
                         echo '<tr><td>' . \htmlspecialchars($item['menuItem']) . '</td>';
                         echo '<td>' . \htmlspecialchars($item['menuItemController'] ?: '-') . '</td></tr>';
                     }
                     echo '</tbody></table><br>';
-                    recoveryRenderAcpMenuPreviewScript($menuItems);
                     echo '<form method="POST" enctype="multipart/form-data" action="' . \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_ACP_REPAIR, $authHash)) . '">';
                     echo '<input type="hidden" name="mode" value="' . RECOVERY_MODE_ACP_REPAIR . '">';
                     echo '<input type="hidden" name="t" value="' . \htmlspecialchars($authHash, ENT_QUOTES, 'UTF-8') . '">';
@@ -4562,14 +3813,12 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                 } elseif (!isset($_POST['confirm_delete'])) {
                     echo '<div class="alert alert-info">';
                     echo '<strong>Gefundene ACP-Menüeinträge (' . \count($menuItems) . '):</strong>';
-                    echo '<button type="button" class="recovery-info-btn" data-recovery-acp-menu-preview style="margin-bottom:12px"><i class="fa-solid fa-magnifying-glass"></i> Menüeinträge in Vorschau</button>';
-                    echo '<table class="table"><thead><tr><th>Menu Item</th><th>Controller</th></tr></thead><tbody>';
+                    echo '<table><thead><tr><th>Menu Item</th><th>Controller</th></tr></thead><tbody>';
                     foreach ($menuItems as $item) {
                         echo '<tr><td>' . \htmlspecialchars($item['menuItem']) . '</td>';
                         echo '<td>' . \htmlspecialchars($item['menuItemController'] ?: '-') . '</td></tr>';
                     }
                     echo '</tbody></table>';
-                    recoveryRenderAcpMenuPreviewScript($menuItems);
                     echo '<form method="POST" enctype="multipart/form-data" action="' . \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_ACP_REPAIR, $authHash)) . '">';
                     echo '<input type="hidden" name="mode" value="' . RECOVERY_MODE_ACP_REPAIR . '">';
                     echo '<input type="hidden" name="t" value="' . \htmlspecialchars($authHash, ENT_QUOTES, 'UTF-8') . '">';
@@ -4637,11 +3886,11 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 // ============================================================================
 
 elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
-    recoveryRenderPageHeader(
-        'Plugin Uninstall',
-        'Deinstalliert ein Plugin komplett – per-Ressource-Auswahl, SQL-Backup &amp; Dry-Run',
-        'fa-solid fa-trash-can'
-    );
+?>
+    <h1>Plugin Uninstall</h1>
+    <p class="subtitle">Deinstalliert Plugin komplett – per-Ressource-Auswahl, SQL-Backup &amp; Dry-Run</p>
+
+<?php
     recoveryFormLoadingScript();
     if (recoveryWasPostTruncated()) {
         recoveryRenderPostTruncatedWarning();
@@ -4667,16 +3916,29 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
             <div class="wizardStepLabel">Ausführen</div>
         </div>
     </div>
+
+    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($uninstallModeUrl) ?>" data-recovery-loading="Paket wird analysiert …">
+        <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash); ?>
+        <div class="form-group">
+            <label>Option 1: Package-Identifier manuell eingeben</label>
+            <input type="text" name="package_identifier" placeholder="z.B. de.example.my-plugin" autocomplete="off">
+            <small style="display:block;margin-top:5px">Der eindeutige Package-Identifier (Reverse-Domain-Notation).</small>
+        </div>
+        <button type="submit"><i class="fa-solid fa-magnifying-glass"></i> Analysieren</button>
+    </form>
+
+    <hr>
+
+    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($uninstallModeUrl) ?>" data-recovery-loading="Paket wird hochgeladen und analysiert …">
+        <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash); ?>
+        <div class="form-group">
+            <label>Option 2: Package-Datei hochladen (.tar, .tar.gz, .tgz – max. 100 MiB)</label>
+            <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz" required>
+            <small style="display:block;margin-top:5px">package.xml wird automatisch ausgelesen – DB-Analyse folgt.</small>
+        </div>
+        <button type="submit"><i class="fa-solid fa-magnifying-glass"></i> Analysieren</button>
+    </form>
 <?php
-        recoveryRenderPackageInputOptionCards(
-            $uninstallModeUrl,
-            RECOVERY_MODE_PLUGIN_UNINSTALL,
-            $authHash,
-            'Analysieren',
-            'Analysieren',
-            'Paket wird analysiert …',
-            'Paket wird hochgeladen und analysiert …'
-        );
     } else {
         if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && $uninstallStep === '') {
             echo '<div id="recovery-loading-overlay" class="recovery-loading" style="display:block">Paket wird analysiert …</div>';
@@ -4728,16 +3990,14 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 <?php
                     // Paket-Info-Box
                     echo '<div class="alert alert-info">';
-                    echo '<strong><i class="fa-solid fa-box"></i> Analyse abgeschlossen</strong><br><br>';
-                    echo '<strong>Paket-Identifier:</strong> <code>' . \htmlspecialchars($packageIdentifier) . '</code><br>';
+                    echo '<strong>Paket:</strong> <code>' . \htmlspecialchars($packageIdentifier) . '</code><br>';
                     if ($packageData) {
-                        echo '<strong>Status:</strong> In der WoltLab-Datenbank registriert<br>';
-                        echo '<strong>Package-ID:</strong> ' . (int) $packageID . ' (für sichere Löschungen)<br>';
-                        echo '<strong>Anzeigename:</strong> ' . \htmlspecialchars($packageData['packageName']) . '<br>';
-                        echo '<strong>Datenbank-Präfix:</strong> wcf' . $wcfN . '_*';
+                        echo '<strong>Status:</strong> In Datenbank gefunden (ID: <strong>' . $packageID . '</strong>)<br>';
+                        echo '<strong>Name:</strong> ' . \htmlspecialchars($packageData['packageName']) . '<br>';
+                        echo '<strong>WCF_N:</strong> ' . $wcfN;
                     } else {
-                        echo '<strong>Status:</strong> <em>Nicht in der Paketliste</em> – typisch nach fehlgeschlagener Installation.<br>';
-                        echo '<small>Tabellen/Dateien aus package.xml sind trotzdem bereinigbar; Löschung per packageID entfällt.</small>';
+                        echo '<strong>Status:</strong> <em>Nicht in Datenbank gefunden</em> – Installation fehlgeschlagen?<br>';
+                        echo '<small>Ohne packageID sind nur Tabellen-Drops und Datei-Löschungen möglich.</small>';
                     }
                     echo '</div>';
 
@@ -4773,23 +4033,19 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     echo '<strong>Dry-Run-Modus:</strong> Zeigt was gelöscht WÜRDE, ohne tatsächliche Änderungen vorzunehmen</label>';
                     echo '</div>';
 
-                    recoveryRenderUninstallLegendBox();
-
                     // ── DB-Einträge nach packageID ────────────────────────────
                     if ($packageID) {
-                        $pipHelpMeta = recoveryGetPipHelpMeta();
-                        $pipPreviewPayload = recoveryBuildPipPreviewPayload($db, $wcfN, $packageID, $pipCounts);
+                        $hasSafeRows = false;
+                        foreach ($pipCounts as $cnt) {
+                            if ($cnt > 0) { $hasSafeRows = true; break; }
+                        }
 
-                        echo '<h2 style="margin-bottom:8px"><i class="fa-solid fa-database"></i> Datenbank-Einträge des Plugins</h2>';
-                        echo '<p class="recovery-section-intro">WoltLab speichert Plugin-Teile in vielen Tabellen. <strong>Nur Zeilen mit <code>packageID = '
-                            . (int) $packageID . '</code></strong> werden gelöscht – niemals Einträge anderer Plugins. '
-                            . 'Vorausgewählte Kategorien haben mindestens einen Eintrag; Sie können die Auswahl anpassen.</p>';
-                        echo '<table class="table recovery-pip-table">';
+                        echo '<h2 style="margin-bottom:10px">DB-Einträge nach packageID</h2>';
+                        echo '<p style="margin-bottom:12px"><small>Nur Einträge mit <code>packageID = ' . $packageID . '</code> werden gelöscht – keine Massenlöschungen.</small></p>';
+                        echo '<table class="table">';
                         echo '<thead><tr>';
-                        echo '<th class="recovery-th-check"><input type="checkbox" id="chkAllPip" title="Alle Kategorien mit Einträgen aus-/abwählen" aria-label="Alle auswählen"></th>';
-                        echo '<th>Kategorie &amp; Erklärung</th>';
-                        echo '<th>Datenbank-Tabelle</th>';
-                        echo '<th style="text-align:right;width:100px">Anzahl</th>';
+                        echo '<th style="width:36px"><input type="checkbox" id="chkAllPip" title="Alle aus/abwählen"></th>';
+                        echo '<th>Kategorie (PIP)</th><th>Tabelle</th><th style="text-align:right">Einträge</th>';
                         echo '</tr></thead><tbody>';
 
                         foreach ($pipMap as $pip => $info) {
@@ -4797,54 +4053,45 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                                 continue;
                             }
                             $count = $pipCounts[$pip] ?? 0;
-                            $help = $pipHelpMeta[$pip] ?? [
-                                'description' => 'Einträge in wcf' . $wcfN . '_' . $info['table'] . ', die zu diesem Plugin gehören.',
-                                'example' => '',
-                            ];
-                            $tableFull = 'wcf' . $wcfN . '_' . $info['table'];
-
                             if ($count < 0) {
-                                echo '<tr class="recovery-pip-row recovery-pip-row--empty">';
-                                echo '<td><input type="checkbox" name="pip_select[]" value="' . \htmlspecialchars($pip) . '" disabled title="Tabelle nicht vorhanden"></td>';
-                                echo '<td><span class="recovery-pip-label">' . \htmlspecialchars($info['label']) . '</span>';
-                                echo '<p class="recovery-pip-desc">' . \htmlspecialchars($help['description']) . '</p></td>';
-                                echo '<td><code>' . \htmlspecialchars($tableFull) . '</code><br><small>Nicht installiert</small></td>';
-                                echo '<td style="text-align:right"><span class="recovery-badge recovery-badge-na">–</span></td>';
+                                // Tabelle existiert nicht
+                                echo '<tr style="opacity:.4">';
+                                echo '<td><input type="checkbox" name="pip_select[]" value="' . \htmlspecialchars($pip) . '" disabled></td>';
+                                echo '<td>' . \htmlspecialchars($info['label']) . '</td>';
+                                echo '<td><code>wcf' . $wcfN . '_' . \htmlspecialchars($info['table']) . '</code></td>';
+                                echo '<td style="text-align:right"><small>–</small></td>';
                                 echo '</tr>';
                             } else {
-                                $rowClass = 'recovery-pip-row' . ($count === 0 ? ' recovery-pip-row--empty' : '');
                                 $checked = $count > 0 ? ' checked' : '';
-                                $countHtml = $count > 0
-                                    ? '<span class="recovery-count-pill recovery-count-pill--has">' . $count . '</span>'
-                                    : '<span class="recovery-count-pill recovery-count-pill--zero">0</span>';
-                                echo '<tr class="' . $rowClass . '" data-recovery-pip="' . \htmlspecialchars($pip) . '"'
-                                    . ($count > 0 ? ' title="Klicken für Details"' : '') . '>';
-                                echo '<td><input type="checkbox" name="pip_select[]" value="' . \htmlspecialchars($pip) . '"' . $checked
-                                    . ' aria-label="' . \htmlspecialchars($info['label']) . ' auswählen"></td>';
-                                echo '<td><span class="recovery-pip-label">' . \htmlspecialchars($info['label']) . '</span>';
-                                echo '<p class="recovery-pip-desc">' . \htmlspecialchars($help['description']) . '</p>';
-                                if ($count > 0) {
-                                    echo '<div class="recovery-pip-actions">';
-                                    echo '<button type="button" class="recovery-info-btn" data-recovery-pip-detail="' . \htmlspecialchars($pip) . '">';
-                                    echo '<i class="fa-solid fa-magnifying-glass"></i> Details anzeigen (' . $count . ')</button>';
-                                    echo '</div>';
-                                }
-                                echo '</td>';
-                                echo '<td><code>' . \htmlspecialchars($tableFull) . '</code></td>';
-                                echo '<td style="text-align:right">' . $countHtml . '</td>';
+                                $dim     = $count === 0 ? ' style="opacity:.55"' : '';
+                                echo '<tr' . $dim . '>';
+                                echo '<td><input type="checkbox" name="pip_select[]" value="' . \htmlspecialchars($pip) . '"' . $checked . '></td>';
+                                echo '<td>' . \htmlspecialchars($info['label']) . '</td>';
+                                echo '<td><code>wcf' . $wcfN . '_' . \htmlspecialchars($info['table']) . '</code></td>';
+                                echo '<td style="text-align:right">' . ($count > 0 ? '<strong>' . $count . '</strong>' : '0') . '</td>';
                                 echo '</tr>';
                             }
                         }
                         echo '</tbody></table>';
-                        recoveryRenderPipPreviewScript($pipPreviewPayload, $pipCounts);
+                        echo '<script>
+                            var counts = ' . \json_encode($pipCounts) . ';
+                            var allChecked = Object.values(counts).some(function(v){ return v > 0; });
+                            var chkAllPip = document.getElementById("chkAllPip");
+                            if (chkAllPip) {
+                                chkAllPip.checked = allChecked;
+                                chkAllPip.addEventListener("change", function () {
+                                    document.querySelectorAll("input[name=\\"pip_select[]\\"]:not(:disabled)").forEach(function (c) {
+                                        c.checked = chkAllPip.checked;
+                                    });
+                                });
+                            }
+                        </script>';
                     } else {
-                        echo '<div class="alert alert-warning"><strong>Keine packageID in der Datenbank</strong><br>';
-                        echo 'Das Plugin ist nicht (vollständig) installiert. Es können nur plugin-eigene Tabellen und Dateien bereinigt werden.</div>';
+                        echo '<div class="alert alert-warning">Keine packageID – DB-Einträge per packageID nicht analysierbar.</div>';
                     }
 
                     // ── Plugin-eigene Tabellen (DROP TABLE) ───────────────────
-                    echo '<h2 style="margin:24px 0 8px"><i class="fa-solid fa-table"></i> Plugin-eigene Tabellen (komplett löschen)</h2>';
-                    echo '<p class="recovery-section-intro">Diese Tabellen wurden vom Plugin angelegt und werden mit <strong>DROP TABLE</strong> vollständig entfernt.</p>';
+                    echo '<h2 style="margin:24px 0 10px">Plugin-eigene Tabellen (DROP TABLE)</h2>';
                     if (!empty($customTables)) {
                         echo '<table class="table">';
                         echo '<thead><tr><th style="width:36px">&#x2713;</th><th>Tabellenname</th><th style="text-align:right">Einträge</th></tr></thead>';
@@ -4897,9 +4144,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 
                     // Eingaben validieren
                     $pipMap    = recoveryGetPipResourceMap();
-                    $validPips = \array_values(\array_filter($selectedPips, function ($p) use ($pipMap) {
-                        return isset($pipMap[$p]) && $pipMap[$p]['safe'] && $pipMap[$p]['table'] !== '';
-                    }));
+                    $validPips = \array_values(\array_filter($selectedPips, fn($p) => isset($pipMap[$p]) && $pipMap[$p]['safe'] && $pipMap[$p]['table'] !== ''));
                     $validDropTables = [];
                     foreach ($dropTables as $t) {
                         $s = \str_replace('`', '', (string)$t);
@@ -5036,9 +4281,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     $deleteFiles   = !empty($_POST['delete_files']) && $_POST['delete_files'] === '1';
 
                     $pipMap    = recoveryGetPipResourceMap();
-                    $validPips = \array_values(\array_filter($selectedPips, function ($p) use ($pipMap) {
-                        return isset($pipMap[$p]) && $pipMap[$p]['safe'] && $pipMap[$p]['table'] !== '';
-                    }));
+                    $validPips = \array_values(\array_filter($selectedPips, fn($p) => isset($pipMap[$p]) && $pipMap[$p]['safe'] && $pipMap[$p]['table'] !== ''));
                     $validDropTables = [];
                     foreach ($dropTables as $t) {
                         $s = \str_replace('`', '', (string)$t);
@@ -5260,17 +4503,10 @@ elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
             recoveryRenderExceptionDetails($e);
         }
     }
-<?php
-    recoveryRenderPageHeader(
-        'User Management',
-        'Benutzersuche, Passwort-Reset, Gruppen, E-Mail &amp; Kontoverwaltung',
-        'fa-solid fa-users-gear'
-    );
-    recoveryRenderHelpCard('Hinweis', [
-        'Änderungen wirken sofort in der Datenbank – notieren Sie generierte Passwörter sofort.',
-        'Die Administrator-Gruppe hat in WoltLab standardmäßig die ID&nbsp;4.',
-    ], 'info');
 ?>
+    <h1>User Management</h1>
+    <p class="subtitle">Benutzersuche, Passwort-Reset, Gruppen, E-Mail &amp; Kontoverwaltung</p>
+
 <?php if ($umUid > 0):
     $umUser = recoveryUserGetByID($db, $umUid);
     if ($umUser === null): ?>
@@ -5283,7 +4519,7 @@ elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
 
     <h2>Benutzer: <code><?= \htmlspecialchars($umUser['username']) ?></code> <small style="font-size:16px; color:#9D9D9D;">(ID&nbsp;<?= (int)$umUser['userID'] ?>)</small></h2>
 
-    <table class="table" style="margin-bottom: 24px;">
+    <table style="margin-bottom: 24px;">
         <tbody>
             <tr><th style="width:160px">Benutzername</th><td><?= \htmlspecialchars($umUser['username']) ?></td></tr>
             <tr><th>E-Mail</th><td><?= \htmlspecialchars($umUser['email']) ?></td></tr>
@@ -5380,7 +4616,7 @@ elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
     <?php $allGroups = recoveryUserGetAllGroups($db); ?>
     <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>">
         <input type="hidden" name="um_action" value="set_groups">
-        <table class="table">
+        <table>
             <thead>
                 <tr>
                     <th style="width:1px"></th>
@@ -5427,7 +4663,6 @@ elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
 
 else: // $umUid === 0 → Suchmaske ?>
 
-    <div class="recovery-card">
     <?php foreach ($umErrors as $err): ?>
     <div class="alert alert-error"><?= $err ?></div>
     <?php endforeach; ?>
@@ -5462,7 +4697,7 @@ else: // $umUid === 0 → Suchmaske ?>
         Keine Benutzer für <code><?= \htmlspecialchars($umSearchQuery) ?></code> gefunden.
     </div>
     <?php else: ?>
-    <table class="table" style="margin-top:20px;">
+    <table style="margin-top:20px;">
         <thead>
             <tr>
                 <th style="width:55px">ID</th>
@@ -5498,7 +4733,6 @@ else: // $umUid === 0 → Suchmaske ?>
     </table>
     <?php endif; ?>
     <?php endif; // $umSearchQuery !== '' ?>
-    </div>
 
 <?php endif; // $umUid > 0 ?>
 <?php
@@ -5509,21 +4743,22 @@ else: // $umUid === 0 → Suchmaske ?>
 // ============================================================================
 
 elseif ($mode === RECOVERY_MODE_CACHE_CLEAR) {
-    recoveryRenderPageHeader(
-        'Cache Clear',
-        'Löscht alle Caches und kompilierte Templates',
-        'fa-solid fa-broom'
-    );
-    if (!isset($_POST['confirm_clear'])) {
-        recoveryRenderStepCard(
-            'Was wird geleert?',
-            'fa-solid fa-folder-open',
-            '<ul><li><code>tmp/</code></li><li><code>cache/</code></li><li><code>templates/compiled/</code></li><li><code>acp/templates/compiled/</code></li></ul>'
-            . '<p class="recovery-section-intro">Sinnvoll bei Template-Fehlern oder wenn das ACP nach Reparaturen noch alte Inhalte zeigt.</p>',
-            'warning'
-        );
 ?>
-    <form method="POST" class="recovery-card">
+    <h1>Cache Clear</h1>
+    <p class="subtitle">Löscht alle Caches und kompilierte Templates</p>
+
+<?php
+    if (!isset($_POST['confirm_clear'])) {
+?>
+    <div class="alert alert-warning">
+        <strong>Folgende Verzeichnisse werden geleert:</strong><br>
+        tmp/<br>
+        cache/<br>
+        templates/compiled/<br>
+        acp/templates/compiled/
+    </div>
+
+    <form method="POST">
         <input type="hidden" name="confirm_clear" value="1">
         <button type="submit" class="btn-danger"><i class="fa-solid fa-broom"></i> Cache jetzt löschen</button>
     </form>
@@ -5543,32 +4778,30 @@ elseif ($mode === RECOVERY_MODE_CACHE_CLEAR) {
 // ============================================================================
 
 elseif ($mode === RECOVERY_MODE_PACKAGE_LIST_REPAIR) {
-    recoveryRenderPageHeader(
-        'Paketliste reparieren',
-        'Entfernt verwaiste Datenbankeinträge, die die ACP-Paketliste oder Deinstallation blockieren',
-        'fa-solid fa-list-check'
-    );
+?>
+    <h1>Paketliste reparieren</h1>
+    <p class="subtitle">Entfernt verwaiste Datenbankeinträge, die die ACP-Paketliste oder Deinstallation blockieren</p>
+
+<?php
     $orphanSql = recoveryGenerateOrphanRepairSql(WCF_N);
 
     if (!isset($_POST['confirm_repair'])) {
-        recoveryRenderStepCard(
-            'Symptome &amp; Bereinigung',
-            'fa-solid fa-triangle-exclamation',
-            '<p><strong>Typische Symptome:</strong></p><ul>'
-            . '<li>ACP-Paketliste: <code>Attempt to read property &quot;packageID&quot; on null</code></li>'
-            . '<li>Deinstallation: <code>assert($package !== null)</code> bei hängender Queue</li></ul>'
-            . '<p><strong>Bereinigt (generisch):</strong> verwaiste <code>application</code>-Zeilen, '
-            . '<code>package_installation_queue</code>, <code>node</code>, <code>form</code>, '
-            . '<code>package_requirements</code>, <code>package_exclusion</code>, File-Logs.</p>',
-            'warning'
-        );
 ?>
-    <details class="recovery-card" style="margin: 1rem 0;">
+    <div class="alert alert-warning">
+        <strong>Typische Symptome:</strong><br>
+        • ACP-Paketliste: <code>Attempt to read property "packageID" on null</code><br>
+        • Deinstallation: <code>assert($package !== null)</code> bei hängender Queue<br><br>
+        <strong>Bereinigt (generisch, alle Plugins):</strong> verwaiste <code>application</code>-Zeilen,
+        <code>package_installation_queue</code> / <code>node</code> / <code>form</code>,
+        <code>package_requirements</code>, <code>package_exclusion</code>, File-Logs.
+    </div>
+
+    <details style="margin: 1rem 0;">
         <summary>SQL für phpMyAdmin / manuelle Ausführung (WCF_N=<?= (int) WCF_N ?>)</summary>
         <pre class="recoveryLog"><?= \htmlspecialchars($orphanSql) ?></pre>
     </details>
 
-    <form method="POST" class="recovery-card">
+    <form method="POST">
         <input type="hidden" name="confirm_repair" value="1">
         <button type="submit" class="btn-danger"><i class="fa-solid fa-list-check"></i> Verwaiste Einträge jetzt bereinigen</button>
     </form>
@@ -5593,4 +4826,6 @@ elseif ($mode === RECOVERY_MODE_PACKAGE_LIST_REPAIR) {
     }
 }
 
+?>
+<?php
 recoveryRenderPageEnd();
