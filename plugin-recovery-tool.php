@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.12
+ * @version 1.5.13
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.12');
+define('RECOVERY_VERSION', '1.5.13');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
 if (\PHP_VERSION_ID < 80100) {
@@ -65,9 +65,20 @@ function recoveryAgentDebugLogPath(): string
     return $resolved = $tmp;
 }
 
+function recoveryAgentExposeDebugHeaders(): void
+{
+    static $sent = false;
+    if ($sent || \headers_sent()) {
+        return;
+    }
+    $sent = true;
+    \header('X-WFL-Recovery-Agent-Log-B64: ' . \base64_encode(recoveryAgentDebugLogPath()));
+}
+
 /** @internal NDJSON-Zeilen für gezieltes Debugging (Hypothesen / Fatals). */
 function recoveryAgentDebugLog(string $hypothesisId, string $location, string $message, array $data = []): void
 {
+    recoveryAgentExposeDebugHeaders();
     $path = recoveryAgentDebugLogPath();
     $payload = [
         'sessionId' => '54d5f7',
@@ -79,8 +90,14 @@ function recoveryAgentDebugLog(string $hypothesisId, string $location, string $m
         'runId' => $_SERVER['RECOVERY_DEBUG_RUN'] ?? 'pre-fix',
     ];
     $line = \json_encode($payload, \JSON_UNESCAPED_UNICODE | \JSON_INVALID_UTF8_SUBSTITUTE);
-    if ($line !== false) {
-        @\file_put_contents($path, $line . "\n", \FILE_APPEND | \LOCK_EX);
+    if ($line === false) {
+        @\error_log('[wfl-recovery-agent] ndjson_encode_failed');
+
+        return;
+    }
+    $wrote = @\file_put_contents($path, $line . "\n", \FILE_APPEND | \LOCK_EX);
+    if ($wrote === false) {
+        @\error_log('[wfl-recovery-agent] ndjson_write_failed path=' . $path);
     }
 }
 
@@ -94,6 +111,7 @@ function recoveryAgentDebugLog(string $hypothesisId, string $location, string $m
     if (!\in_array((int) $e['type'], $fatalTypes, true)) {
         return;
     }
+    @\error_log('[wfl-recovery-agent] fatal type=' . $e['type'] . ' msg=' . $e['message'] . ' @ ' . $e['file'] . ':' . $e['line']);
     $line = \json_encode([
         'sessionId' => '54d5f7',
         'hypothesisId' => 'H-FATAL',
@@ -117,6 +135,15 @@ recoveryAgentDebugLog('H1', 'tool:boot', 'php_version_gate_passed', [
     'sapi' => \PHP_SAPI,
     'debugLogPath' => recoveryAgentDebugLogPath(),
 ]);
+@\error_log('[wfl-recovery-agent] ndjson_path=' . recoveryAgentDebugLogPath());
+\set_exception_handler(static function (\Throwable $e): void {
+    @\error_log('[wfl-recovery-agent] uncaught ' . \get_class($e) . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+    if (!\headers_sent()) {
+        \http_response_code(500);
+        \header('Content-Type: text/plain; charset=utf-8');
+        echo "plugin-recovery-tool: uncaught exception (Host-error_log nach „wfl-recovery-agent“ durchsuchen).\n";
+    }
+});
 // #endregion
 
 define('RECOVERY_MODE_SELECTION', 0);
@@ -1805,12 +1832,10 @@ function recoveryGuessTableLabelColumns(array $row): array
 }
 
 /**
- * @return array{columns: list<string>, rows: list<array<string, mixed>>, total: int, table: string}
- */
-/**
  * @param mixed $value
+ * @return mixed
  */
-function recoverySanitizeJsonValue($value): mixed
+function recoverySanitizeJsonValue($value)
 {
     if ($value === null || \is_bool($value) || \is_int($value) || \is_float($value)) {
         return $value;
@@ -1887,6 +1912,11 @@ function recoveryFormatUserGroupLabel(int $groupID, string $groupName): string
     return $groupName;
 }
 
+/**
+ * Pip-Vorschau: erste Zeilen einer Tabelle mit packageID (AJAX).
+ *
+ * @return array{columns: list<string>, rows: list<array<string, mixed>>, total: int, table: string, error?: string}
+ */
 function recoveryFetchPackageIdTablePreview(
     \wcf\system\database\Database $db,
     int $wcfN,
