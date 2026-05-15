@@ -3170,7 +3170,7 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 
     <form method="POST" enctype="multipart/form-data">
         <div class="form-group">
-            <label>Option 2: Package-Datei hochladen (.tar oder .tar.gz)</label>
+            <label>Option 2: Package-Datei hochladen (.tar, .tar.gz, .tgz – max. 100 MiB)</label>
             <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz">
         </div>
         <button type="submit">Mit Datei deinstallieren</button>
@@ -3247,15 +3247,18 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                 echo '✓ ACP-Menüeinträge<br>';
                 echo '✓ Template-Listener (häufige ACP-Ursache)<br>';
                 echo '✓ Event-Listener, Optionen, Menüs, Sprachen, Seiten<br>';
-                echo '✓ Package-Installationsqueue<br>';
+                echo '✓ Package-Installationsqueue inkl. Knoten/Formulare<br>';
+                echo '✓ Application, Requirements, Exclusions, package_update<br>';
                 echo '✓ options.inc.php wird neu erzeugt<br>';
 
                 if (!empty($tables)) {
                     echo '<br><strong>Datenbank-Tabellen (' . count($tables) . '):</strong><br>';
                     foreach ($tables as $table) {
-                        // Zähle Zeilen
+                        if (!recoveryValidateSqlTableName((string) $table)) {
+                            continue;
+                        }
                         try {
-                            $sql = "SELECT COUNT(*) as count FROM `" . $table . "`";
+                            $sql = 'SELECT COUNT(*) AS count FROM `' . \str_replace('`', '', (string) $table) . '`';
                             $statement = $db->prepareStatement($sql);
                             $statement->execute();
                             $count = $statement->fetchArray()['count'];
