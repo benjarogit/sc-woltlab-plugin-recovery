@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.2.5
+ * @version 1.2.7
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -19,7 +19,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.2.5');
+define('RECOVERY_VERSION', '1.2.7');
 define('RECOVERY_MODE_SELECTION', 0);
 define('RECOVERY_MODE_ACP_REPAIR', 1);
 define('RECOVERY_MODE_PLUGIN_UNINSTALL', 2);
@@ -171,7 +171,8 @@ function recoveryValidateSqlTableName(string $table): bool
 
 function recoveryValidateAppDirectoryName(string $dir): bool
 {
-    return $dir !== '' && (bool) \preg_match('/^[a-zA-Z0-9._-]+$/', $dir);
+    // Dots are not valid in WoltLab app directory names (e.g. 'wbb', 'gallery', not 'com.woltlab.wbb')
+    return $dir !== '' && (bool) \preg_match('/^[a-zA-Z0-9_-]+$/', $dir);
 }
 
 /**
@@ -180,6 +181,7 @@ function recoveryValidateAppDirectoryName(string $dir): bool
 function recoveryGetProtectedDirectoryNames(): array
 {
     return [
+        // WoltLab core directories
         'wcf',
         'lib',
         'acp',
@@ -196,6 +198,35 @@ function recoveryGetProtectedDirectoryNames(): array
         'media',
         'log',
         'language',
+        // Additional protected directories (v1.2.7)
+        'admin',
+        'install',
+        'wcfsetup',
+        'setup',
+        'upload',
+        'uploads',
+        'files',
+        'core',
+        'vendor',
+    ];
+}
+
+/**
+ * Files that must never be deleted during plugin cleanup.
+ *
+ * @return list<string>
+ */
+function recoveryGetProtectedFileNames(): array
+{
+    return [
+        'global.php',
+        'index.php',
+        'config.inc.php',
+        'options.inc.php',
+        'constants.inc.php',
+        'composer.json',
+        'composer.lock',
+        '.htaccess',
     ];
 }
 
@@ -1524,6 +1555,177 @@ function recoveryPerformFullPluginCleanup(
     );
 }
 
+// ============================================================================
+// PIP RESOURCE MAP + DB-COUNTS + SQL-BACKUP (v1.2.7)
+// ============================================================================
+
+/**
+ * WoltLab PIP → DB-Ressourcen-Matrix.
+ * Inspiriert vom offiziellen PackageUninstallationDispatcher und den PIP-Klassen:
+ * AbstractXMLPackageInstallationPlugin::uninstall() → DELETE WHERE packageID = ?
+ *
+ * Quellen:
+ *   EventListenerPIP::tableName          = 'event_listener'
+ *   TemplateListenerPIP::tableName       = 'template_listener'
+ *   OptionPIP::tableName                 = 'option'
+ *   UserGroupOptionPIP::tableName        = 'user_group_option'
+ *   UserOptionPIP::tableName             = 'user_option'
+ *   CronjobPIP::tableName                = 'cronjob'
+ *   ObjectTypePIP::tableName             = 'object_type'
+ *   BBCodePIP::tableName                 = 'bbcode'
+ *   SmileyPIP::tableName                 = 'smiley'
+ *   UserMenuPIP::tableName               = 'user_menu_item'
+ *   UserNotificationEventPIP::tableName  = 'user_notification_event'
+ *   ACLOptionPIP::tableName              = 'acl_option'
+ *   BoxPIP::uninstall() → DELETE FROM wcf1_box WHERE … packageID = ?
+ *   PagePIP → 'page' (packageID)
+ *   MenuPIP, MenuItemPIP → 'menu', 'menu_item' (packageID)
+ *
+ * @return array<string, array{table: string, col: string, safe: bool, label: string}>
+ */
+function recoveryGetPipResourceMap(): array
+{
+    return [
+        // ── Core PIPs – tableName explizit in Quellcode ──────────────────────
+        'acpMenu'               => ['table' => 'acp_menu_item',              'col' => 'packageID', 'safe' => true,  'label' => 'ACP-Menüeinträge'],
+        'eventListener'         => ['table' => 'event_listener',             'col' => 'packageID', 'safe' => true,  'label' => 'Event-Listener'],
+        'templateListener'      => ['table' => 'template_listener',          'col' => 'packageID', 'safe' => true,  'label' => 'Template-Listener'],
+        'option'                => ['table' => 'option',                     'col' => 'packageID', 'safe' => true,  'label' => 'Optionen (ACP)'],
+        'userGroupOption'       => ['table' => 'user_group_option',          'col' => 'packageID', 'safe' => true,  'label' => 'Benutzergruppen-Optionen'],
+        'userOption'            => ['table' => 'user_option',                'col' => 'packageID', 'safe' => true,  'label' => 'Benutzer-Optionen'],
+        'cronjob'               => ['table' => 'cronjob',                    'col' => 'packageID', 'safe' => true,  'label' => 'Cronjobs'],
+        'objectType'            => ['table' => 'object_type',                'col' => 'packageID', 'safe' => true,  'label' => 'Objekttypen'],
+        'objectTypeDefinition'  => ['table' => 'object_type_definition',     'col' => 'packageID', 'safe' => true,  'label' => 'Objekttyp-Definitionen'],
+        'language'              => ['table' => 'language_item',              'col' => 'packageID', 'safe' => true,  'label' => 'Sprachvariablen'],
+        'template'              => ['table' => 'template',                   'col' => 'packageID', 'safe' => true,  'label' => 'Templates (Frontend)'],
+        'acpTemplate'           => ['table' => 'acp_template',               'col' => 'packageID', 'safe' => true,  'label' => 'ACP-Templates'],
+        'page'                  => ['table' => 'page',                       'col' => 'packageID', 'safe' => true,  'label' => 'Seiten (CMS)'],
+        'box'                   => ['table' => 'box',                        'col' => 'packageID', 'safe' => true,  'label' => 'Boxen'],
+        'userMenu'              => ['table' => 'user_menu_item',             'col' => 'packageID', 'safe' => true,  'label' => 'Benutzer-Menüeinträge'],
+        'userNotificationEvent' => ['table' => 'user_notification_event',    'col' => 'packageID', 'safe' => true,  'label' => 'Benachrichtigungs-Events'],
+        'bbcode'                => ['table' => 'bbcode',                     'col' => 'packageID', 'safe' => true,  'label' => 'BBCodes'],
+        'smiley'                => ['table' => 'smiley',                     'col' => 'packageID', 'safe' => true,  'label' => 'Smileys'],
+        'aclOption'             => ['table' => 'acl_option',                 'col' => 'packageID', 'safe' => true,  'label' => 'ACL-Optionen'],
+        'coreObject'            => ['table' => 'core_object',                'col' => 'packageID', 'safe' => true,  'label' => 'Core-Objekte'],
+        'clipboardAction'       => ['table' => 'clipboard_action',           'col' => 'packageID', 'safe' => true,  'label' => 'Zwischenablage-Aktionen'],
+        'acpSearchProvider'     => ['table' => 'acp_search_provider',        'col' => 'packageID', 'safe' => true,  'label' => 'ACP-Suchanbieter'],
+        'mediaProvider'         => ['table' => 'media_provider',             'col' => 'packageID', 'safe' => true,  'label' => 'Media-Anbieter'],
+        'menu'                  => ['table' => 'menu',                       'col' => 'packageID', 'safe' => true,  'label' => 'Frontend-Menüs'],
+        'menuItem'              => ['table' => 'menu_item',                  'col' => 'packageID', 'safe' => true,  'label' => 'Frontend-Menüeinträge'],
+        'pip'                   => ['table' => 'package_installation_plugin','col' => 'packageID', 'safe' => true,  'label' => 'PIPs (package_installation_plugin)'],
+        // ── Spezial-PIPs – kein direkter DB-Tabellen-Eintrag ─────────────────
+        'file'                  => ['table' => '',                           'col' => '',          'safe' => false, 'label' => 'Dateien (Dateisystem)'],
+        'database'              => ['table' => '',                           'col' => '',          'safe' => false, 'label' => 'Datenbank-Tabellen (DROP TABLE)'],
+        'script'                => ['table' => '',                           'col' => '',          'safe' => false, 'label' => 'Install-Script'],
+        'sql'                   => ['table' => '',                           'col' => '',          'safe' => false, 'label' => 'Rohe SQL-Anweisungen'],
+    ];
+}
+
+/**
+ * Zählt Datenbankzeilen pro PIP (WHERE packageID = $packageID).
+ * Gibt -1 zurück wenn die Tabelle nicht existiert.
+ *
+ * @return array<string, int>
+ */
+function recoveryGetPipDbCounts(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    int $packageID
+): array {
+    $map = recoveryGetPipResourceMap();
+    $counts = [];
+
+    foreach ($map as $pipName => $info) {
+        if (!$info['safe'] || $info['col'] !== 'packageID' || $info['table'] === '') {
+            continue;
+        }
+
+        try {
+            $sql = "SELECT COUNT(*) AS cnt FROM wcf{$wcfN}_{$info['table']} WHERE packageID = ?";
+            $statement = $db->prepareStatement($sql);
+            $statement->execute([$packageID]);
+            $row = $statement->fetchArray();
+            $counts[$pipName] = (int)($row['cnt'] ?? 0);
+        } catch (\Throwable) {
+            $counts[$pipName] = -1;
+        }
+    }
+
+    return $counts;
+}
+
+/**
+ * Generiert SQL-INSERT-Backup aller betroffenen Zeilen (WHERE packageID = $packageID).
+ * Nur für ausgewählte PIP-Kategorien aus recoveryGetPipResourceMap().
+ * Pure PHP – kein mysqldump erforderlich.
+ *
+ * @param list<string> $selectedPips
+ */
+function recoveryGenerateSqlBackup(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    int $packageID,
+    array $selectedPips
+): string {
+    $map = recoveryGetPipResourceMap();
+    $out  = "-- ============================================================\n";
+    $out .= "-- WoltLab Recovery Tool v" . RECOVERY_VERSION . " – SQL-Backup\n";
+    $out .= "-- Package-ID: {$packageID} | WCF_N: {$wcfN}\n";
+    $out .= "-- Erstellt: " . \date('Y-m-d H:i:s') . "\n";
+    $out .= "-- Nur Zeilen mit packageID = {$packageID} – kein Komplett-Dump!\n";
+    $out .= "-- Zum Wiederherstellen: SQL in phpMyAdmin oder CLI ausführen.\n";
+    $out .= "-- ============================================================\n\n";
+
+    foreach ($selectedPips as $pipName) {
+        if (!isset($map[$pipName])) {
+            continue;
+        }
+
+        $info = $map[$pipName];
+        if (!$info['safe'] || $info['col'] !== 'packageID' || $info['table'] === '') {
+            continue;
+        }
+
+        $tableFull = "wcf{$wcfN}_{$info['table']}";
+
+        try {
+            $statement = $db->prepareStatement("SELECT * FROM {$tableFull} WHERE packageID = ?");
+            $statement->execute([$packageID]);
+
+            $rows = [];
+            while ($row = $statement->fetchArray()) {
+                $rows[] = $row;
+            }
+
+            if (empty($rows)) {
+                continue;
+            }
+
+            $out .= "-- ── {$tableFull} ({$info['label']}) – " . \count($rows) . " Zeile(n) ──\n";
+
+            foreach ($rows as $row) {
+                $cols = \array_keys($row);
+                $vals = \array_map(static function ($v): string {
+                    if ($v === null) {
+                        return 'NULL';
+                    }
+                    return "'" . \addslashes((string)$v) . "'";
+                }, \array_values($row));
+
+                $out .= 'INSERT INTO `' . $tableFull . '` (`'
+                    . \implode('`, `', $cols) . '`) VALUES ('
+                    . \implode(', ', $vals) . ");\n";
+            }
+
+            $out .= "\n";
+        } catch (\Throwable $e) {
+            $out .= "-- Backup für {$tableFull} fehlgeschlagen: " . $e->getMessage() . "\n\n";
+        }
+    }
+
+    return $out;
+}
+
 
 // ============================================================================
 // UI (WoltLab WCFSetup.css – wie Rescue Mode / offizielles Recovery Tool)
@@ -1824,6 +2026,23 @@ if ($action === 'download-auth-file') {
     header('Connection: close');
 
     echo $content;
+    exit;
+}
+
+// SQL-Backup-Download (base64-kodierter Inhalt aus POST)
+if ($action === 'download-sql') {
+    $raw = $_POST['sql_b64'] ?? '';
+    $sqlContent = \base64_decode(\str_replace(["\n", "\r", ' '], '', (string)$raw), true);
+    if ($sqlContent === false || $sqlContent === '') {
+        http_response_code(400);
+        echo 'Ungültiger Inhalt.';
+        exit;
+    }
+    $filename = 'recovery-backup-' . \date('Y-m-d-His') . '.sql';
+    \header('Content-Type: text/plain; charset=utf-8');
+    \header('Content-Disposition: attachment; filename="' . \addslashes($filename) . '"');
+    \header('Content-Length: ' . \strlen($sqlContent));
+    echo $sqlContent;
     exit;
 }
 
@@ -3141,29 +3360,48 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
 }
 
 // ============================================================================
-// MODUS 2: PLUGIN UNINSTALL
+// MODUS 2: PLUGIN UNINSTALL (v1.2.7 – 3-Schritt-Flow mit Backup & Dry-Run)
 // ============================================================================
 
 elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 ?>
     <h1>Plugin Uninstall</h1>
-    <p class="subtitle">Deinstalliert Plugin komplett aus Datenbank und Dateisystem</p>
+    <p class="subtitle">Deinstalliert Plugin komplett – per-Ressource-Auswahl, SQL-Backup &amp; Dry-Run</p>
+    <style>
+        .step-indicator { display: flex; gap: 0; margin-bottom: 28px; }
+        .step-indicator .si-step { flex: 1; text-align: center; padding: 10px 8px; font-size: 13px;
+            background: rgba(0,0,0,.15); border: 1px solid #444; color: #999; }
+        .step-indicator .si-step:not(:last-child) { border-right: none; }
+        .step-indicator .si-step.active { background: rgba(51,102,153,.25); border-color: #369; color: #fff; font-weight: 600; }
+        .step-indicator .si-step.done { background: rgba(60,153,60,.15); border-color: #3a3; color: #9d9; }
+        @media (prefers-color-scheme: light) {
+            .step-indicator .si-step { background: #f5f5f5; border-color: #ccc; color: #888; }
+            .step-indicator .si-step.active { background: #e8f0ff; border-color: #369; color: #369; }
+            .step-indicator .si-step.done { background: #e8ffe8; border-color: #3a3; color: #3a3; }
+        }
+    </style>
 
 <?php
-    // Schritt 1: Package-Identifier eingeben oder hochladen
-    // Prüfe auch GET-Parameter für "SQL anzeigen" Funktionalität
-    $hasPackageIdentifier = (isset($_POST['package_identifier']) && !empty($_POST['package_identifier'])) ||
-                            (isset($_GET['package_identifier']) && !empty($_GET['package_identifier'])) ||
-                            (isset($_FILES['package_file']) && $_FILES['package_file']['error'] === UPLOAD_ERR_OK);
-    
-    if (!$hasPackageIdentifier) {
+    $uninstallStep = isset($_POST['uninstall_step']) ? (string)\trim($_POST['uninstall_step']) : '';
+    $hasIdentifierInput = (!empty($_POST['package_identifier']))
+        || (isset($_FILES['package_file']) && ($_FILES['package_file']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK);
+
+    // ── EINGABE-SCREEN ────────────────────────────────────────────────────────
+    if (!$hasIdentifierInput && $uninstallStep === '') {
 ?>
+    <div class="step-indicator">
+        <div class="si-step active">1 · Analyse &amp; Auswahl</div>
+        <div class="si-step">2 · Backup</div>
+        <div class="si-step">3 · Ausführen</div>
+    </div>
+
     <form method="POST">
         <div class="form-group">
             <label>Option 1: Package-Identifier manuell eingeben</label>
             <input type="text" name="package_identifier" placeholder="z.B. de.example.my-plugin" autocomplete="off">
+            <small style="display:block;margin-top:5px">Der eindeutige Package-Identifier (Reverse-Domain-Notation).</small>
         </div>
-        <button type="submit">Mit Identifier deinstallieren</button>
+        <button type="submit">Analysieren &#8594;</button>
     </form>
 
     <hr>
@@ -3172,172 +3410,445 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
         <div class="form-group">
             <label>Option 2: Package-Datei hochladen (.tar, .tar.gz, .tgz – max. 100 MiB)</label>
             <input type="file" name="package_file" accept=".tar,.tar.gz,.tgz">
+            <small style="display:block;margin-top:5px">package.xml wird automatisch ausgelesen – DB-Analyse folgt.</small>
         </div>
-        <button type="submit">Mit Datei deinstallieren</button>
+        <button type="submit">Analysieren &#8594;</button>
     </form>
 <?php
     } else {
+        // ── Paket laden ───────────────────────────────────────────────────────
         $packageInput = recoveryResolvePackageInputFromRequest();
         if (isset($packageInput['error'])) {
             echo '<div class="alert alert-error"><strong>Fehler:</strong> '
                 . \htmlspecialchars($packageInput['error']) . '</div>';
-        }
+        } else {
+            $packageIdentifier = $packageInput['packageIdentifier'] ?? null;
+            $extractDir        = $packageInput['extractDir'] ?? recoveryResolveTrustedExtractDir();
 
-        $packageIdentifier = $packageInput['packageIdentifier'] ?? null;
-        $extractDir = $packageInput['extractDir'] ?? recoveryResolveTrustedExtractDir();
-
-        if ($packageIdentifier) {
-            // Package in DB suchen
-            $sql = "SELECT packageID, package, packageName, packageDir, isApplication
-                    FROM wcf" . WCF_N . "_package
-                    WHERE package = ?";
-            $statement = $db->prepareStatement($sql);
-            $statement->execute([$packageIdentifier]);
-            $packageData = $statement->fetchArray();
-
-            echo '<div class="alert alert-info">';
-            echo '<strong>Package:</strong> ' . htmlspecialchars($packageIdentifier) . '<br>';
-            if ($packageData) {
-                echo '<strong>Status:</strong> In Datenbank gefunden (ID: ' . $packageData['packageID'] . ')<br>';
-                echo '<strong>Name:</strong> ' . htmlspecialchars($packageData['packageName']) . '<br>';
+            if (!$packageIdentifier) {
+                echo '<div class="alert alert-error"><strong>Fehler:</strong> Kein Package-Identifier ermittelt. Bitte erneut versuchen.</div>';
             } else {
-                echo '<strong>Status:</strong> Nicht in Datenbank (Installation fehlgeschlagen?)<br>';
-            }
-            echo '</div>';
+                // Package in DB suchen
+                $sql = "SELECT packageID, package, packageName, packageDir, isApplication
+                        FROM wcf" . WCF_N . "_package WHERE package = ?";
+                $statement = $db->prepareStatement($sql);
+                $statement->execute([$packageIdentifier]);
+                $packageData = $statement->fetchArray() ?: null;
+                $packageID   = $packageData ? (int)$packageData['packageID'] : null;
 
-            $resources = null;
-            if ($extractDir && \is_dir($extractDir)) {
-                $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
-            }
-
-            if ($packageData) {
-                recoveryDisplayDbCleanupPreview($db, WCF_N, $packageData, $packageIdentifier, $extractDir);
-            }
-
-            if ($resources) {
-                    displayResourcePreview($resources, $resources['wcfN'], $packageIdentifier);
-                    
-                    // SQL anzeigen Button
-                    if (isset($_GET['show_sql'])) {
-                        echo '<div class="alert alert-info"><strong>SQL Cleanup Script:</strong><br>';
-                        echo '<pre class="recoveryLog">' . htmlspecialchars(generateCleanupSql($resources, $resources['wcfN'])) . '</pre>';
-                        echo '</div>';
-                    } else {
-                        $extractDirParam = $extractDir ? '&extract_dir=' . urlencode($extractDir) : '';
-                        echo '<a href="?mode=' . RECOVERY_MODE_PLUGIN_UNINSTALL . '&t=' . $authHash . '&show_sql=1&package_identifier=' . urlencode($packageIdentifier) . $extractDirParam . '" class="button">SQL anzeigen</a>';
-                    }
-                }
-            }
-
-            // Tabellen finden (Fallback auf alte Methode wenn keine Analyse vorhanden)
-            if ($resources && !empty($resources['tables'])) {
-                $tables = $resources['tables'];
-            } else {
-                $wcfN = $resources ? $resources['wcfN'] : detectWcfN($db, $packageIdentifier);
-                $tables = findPackageTables($db, $packageIdentifier, $wcfN);
-            }
-
-            if (!isset($_POST['confirm_uninstall'])) {
-                echo '<div class="alert alert-info">';
-                echo '<strong>Zu löschende Daten:</strong><br><br>';
-
-                if ($packageData) {
-                    echo '✓ Package-Eintrag in wcf' . WCF_N . '_package<br>';
-                }
-                echo '✓ ACP-Menüeinträge<br>';
-                echo '✓ Template-Listener (häufige ACP-Ursache)<br>';
-                echo '✓ Event-Listener, Optionen, Menüs, Sprachen, Seiten<br>';
-                echo '✓ Package-Installationsqueue inkl. Knoten/Formulare<br>';
-                echo '✓ Application, Requirements, Exclusions, package_update<br>';
-                echo '✓ options.inc.php wird neu erzeugt<br>';
-
-                if (!empty($tables)) {
-                    echo '<br><strong>Datenbank-Tabellen (' . count($tables) . '):</strong><br>';
-                    foreach ($tables as $table) {
-                        if (!recoveryValidateSqlTableName((string) $table)) {
-                            continue;
-                        }
-                        try {
-                            $sql = 'SELECT COUNT(*) AS count FROM `' . \str_replace('`', '', (string) $table) . '`';
-                            $statement = $db->prepareStatement($sql);
-                            $statement->execute();
-                            $count = $statement->fetchArray()['count'];
-                            echo '- ' . $table . ' (' . $count . ' Einträge)<br>';
-                        } catch (Exception $e) {
-                            echo '- ' . $table . '<br>';
-                        }
-                    }
-                } else {
-                    echo '<br>Keine spezifischen Tabellen gefunden.<br>';
-                }
-
-                $fsEval = recoveryEvaluatePluginDirectoryDeletion(
-                    $packageData ?: null,
-                    $packageIdentifier,
-                    $db,
-                    $resources ? (int) $resources['wcfN'] : WCF_N,
-                    $extractDir
-                );
-                echo '<br><strong>Dateisystem:</strong> ' . \htmlspecialchars($fsEval['reason']) . '<br>';
-
-                echo '<br><form method="POST">';
-                echo '<input type="hidden" name="package_identifier" value="' . \htmlspecialchars($packageIdentifier) . '">';
-                if ($extractDir) {
-                    echo '<input type="hidden" name="extract_dir" value="' . \htmlspecialchars($extractDir) . '">';
-                }
-                echo '<input type="hidden" name="confirm_uninstall" value="1">';
-                if ($fsEval['deletable']) {
-                    echo '<label style="display:block;margin:12px 0;">';
-                    echo '<input type="checkbox" name="confirm_delete_files" value="1"> ';
-                    echo 'Plugin-Verzeichnis <code>' . \htmlspecialchars((string) $fsEval['relativePath']) . '/</code> auf dem Server löschen';
-                    echo '</label>';
-                }
-                echo '<button type="submit" class="btn-danger">Datenbank bereinigen</button>';
-                echo '</form>';
-                echo '</div>';
-
-            } else {
-                $extractDir = recoveryResolveTrustedExtractDir();
-                if ($extractDir && \is_dir($extractDir) && !$resources) {
+                // Ressourcen aus Archiv (falls vorhanden)
+                $resources = null;
+                if ($extractDir && \is_dir($extractDir)) {
                     $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
                 }
+                $wcfN = $resources ? (int)$resources['wcfN'] : WCF_N;
 
-                $deleteFilesOnDisk = isset($_POST['confirm_delete_files']) && $_POST['confirm_delete_files'] === '1';
+                // ── SCHRITT 1: ANALYSE + AUSWAHL ──────────────────────────────
+                if ($uninstallStep === '') {
+?>
+    <div class="step-indicator">
+        <div class="si-step active">1 · Analyse &amp; Auswahl</div>
+        <div class="si-step">2 · Backup</div>
+        <div class="si-step">3 · Ausführen</div>
+    </div>
+<?php
+                    // Paket-Info-Box
+                    echo '<div class="alert alert-info">';
+                    echo '<strong>Paket:</strong> <code>' . \htmlspecialchars($packageIdentifier) . '</code><br>';
+                    if ($packageData) {
+                        echo '<strong>Status:</strong> In Datenbank gefunden (ID: <strong>' . $packageID . '</strong>)<br>';
+                        echo '<strong>Name:</strong> ' . \htmlspecialchars($packageData['packageName']) . '<br>';
+                        echo '<strong>WCF_N:</strong> ' . $wcfN;
+                    } else {
+                        echo '<strong>Status:</strong> <em>Nicht in Datenbank gefunden</em> – Installation fehlgeschlagen?<br>';
+                        echo '<small>Ohne packageID sind nur Tabellen-Drops und Datei-Löschungen möglich.</small>';
+                    }
+                    echo '</div>';
 
-                try {
-                    $log = [];
-                    $wcfN = $resources ? (int) $resources['wcfN'] : WCF_N;
+                    // PIP-Counts aus DB
+                    $pipMap    = recoveryGetPipResourceMap();
+                    $pipCounts = $packageID ? recoveryGetPipDbCounts($db, $wcfN, $packageID) : [];
 
-                    recoveryPerformFullPluginCleanup(
-                        $db,
-                        $wcfN,
-                        $packageIdentifier,
-                        $packageData ?: null,
-                        $resources,
-                        $log,
-                        $deleteFilesOnDisk,
-                        $extractDir
+                    // Plugin-eigene Tabellen ermitteln
+                    $customTables = [];
+                    if ($resources && !empty($resources['tables'])) {
+                        $customTables = $resources['tables'];
+                    } else {
+                        $customTables = findPackageTables($db, $packageIdentifier, $wcfN);
+                    }
+
+                    // Dateisystem prüfen
+                    $fsEval = recoveryEvaluatePluginDirectoryDeletion(
+                        $packageData, $packageIdentifier, $db, $wcfN, $extractDir
                     );
 
-                    $deletedFiles = clearCompiledTemplates();
-                    $log[] = 'Cache gelöscht: ' . $deletedFiles . ' Dateien';
-                    recoveryCleanupUploadWorkspace();
-
-                    echo '<div class="alert alert-success">';
-                    echo '<strong>✓ Plugin-Bereinigung abgeschlossen!</strong><br><br>';
-                    echo '<strong>Durchgeführte Aktionen:</strong><br>';
-                    foreach ($log as $entry) {
-                        echo '• ' . \htmlspecialchars($entry) . '<br>';
+                    echo '<form method="POST">';
+                    echo '<input type="hidden" name="package_identifier" value="' . \htmlspecialchars($packageIdentifier) . '">';
+                    if ($extractDir) {
+                        echo '<input type="hidden" name="extract_dir" value="' . \htmlspecialchars($extractDir) . '">';
                     }
-                    recoveryRenderAcpSuccessLink($recoveryBaseUrl);
+                    echo '<input type="hidden" name="uninstall_step" value="1">';
+
+                    // Dry-Run Toggle
+                    echo '<div class="alert alert-warning" style="margin-bottom:20px">';
+                    echo '<label style="cursor:pointer"><input type="checkbox" name="dry_run" value="1" style="margin-right:6px">';
+                    echo '<strong>Dry-Run-Modus:</strong> Zeigt was gelöscht WÜRDE, ohne tatsächliche Änderungen vorzunehmen</label>';
                     echo '</div>';
 
-                } catch (\Throwable $e) {
-                    echo '<div class="alert alert-error">';
-                    echo '<strong>Fehler bei Deinstallation:</strong><br>';
-                    echo \nl2br(\htmlspecialchars(recoveryFormatUserError($e)));
-                    recoveryRenderExceptionDetails($e);
+                    // ── DB-Einträge nach packageID ────────────────────────────
+                    if ($packageID) {
+                        $hasSafeRows = false;
+                        foreach ($pipCounts as $cnt) {
+                            if ($cnt > 0) { $hasSafeRows = true; break; }
+                        }
+
+                        echo '<h2 style="margin-bottom:10px">DB-Einträge nach packageID</h2>';
+                        echo '<p style="margin-bottom:12px"><small>Nur Einträge mit <code>packageID = ' . $packageID . '</code> werden gelöscht – keine Massenlöschungen.</small></p>';
+                        echo '<table class="table">';
+                        echo '<thead><tr>';
+                        echo '<th style="width:36px"><input type="checkbox" id="chkAllPip" title="Alle aus/abwählen" onchange="document.querySelectorAll(\'input[name=\\\"pip_select[]\\\"\]:not([disabled])\').forEach(c=>c.checked=this.checked)"></th>';
+                        echo '<th>Kategorie (PIP)</th><th>Tabelle</th><th style="text-align:right">Einträge</th>';
+                        echo '</tr></thead><tbody>';
+
+                        foreach ($pipMap as $pip => $info) {
+                            if (!$info['safe'] || $info['col'] !== 'packageID' || $info['table'] === '') {
+                                continue;
+                            }
+                            $count = $pipCounts[$pip] ?? 0;
+                            if ($count < 0) {
+                                // Tabelle existiert nicht
+                                echo '<tr style="opacity:.4">';
+                                echo '<td><input type="checkbox" name="pip_select[]" value="' . \htmlspecialchars($pip) . '" disabled></td>';
+                                echo '<td>' . \htmlspecialchars($info['label']) . '</td>';
+                                echo '<td><code>wcf' . $wcfN . '_' . \htmlspecialchars($info['table']) . '</code></td>';
+                                echo '<td style="text-align:right"><small>–</small></td>';
+                                echo '</tr>';
+                            } else {
+                                $checked = $count > 0 ? ' checked' : '';
+                                $dim     = $count === 0 ? ' style="opacity:.55"' : '';
+                                echo '<tr' . $dim . '>';
+                                echo '<td><input type="checkbox" name="pip_select[]" value="' . \htmlspecialchars($pip) . '"' . $checked . '></td>';
+                                echo '<td>' . \htmlspecialchars($info['label']) . '</td>';
+                                echo '<td><code>wcf' . $wcfN . '_' . \htmlspecialchars($info['table']) . '</code></td>';
+                                echo '<td style="text-align:right">' . ($count > 0 ? '<strong>' . $count . '</strong>' : '0') . '</td>';
+                                echo '</tr>';
+                            }
+                        }
+                        echo '</tbody></table>';
+                        echo '<script>
+                            var counts = ' . \json_encode($pipCounts) . ';
+                            var allChecked = Object.values(counts).some(function(v){ return v > 0; });
+                            document.getElementById("chkAllPip").checked = allChecked;
+                        </script>';
+                    } else {
+                        echo '<div class="alert alert-warning">Keine packageID – DB-Einträge per packageID nicht analysierbar.</div>';
+                    }
+
+                    // ── Plugin-eigene Tabellen (DROP TABLE) ───────────────────
+                    echo '<h2 style="margin:24px 0 10px">Plugin-eigene Tabellen (DROP TABLE)</h2>';
+                    if (!empty($customTables)) {
+                        echo '<table class="table">';
+                        echo '<thead><tr><th style="width:36px">&#x2713;</th><th>Tabellenname</th><th style="text-align:right">Einträge</th></tr></thead>';
+                        echo '<tbody>';
+                        foreach ($customTables as $table) {
+                            $safeTable = \str_replace('`', '', (string)$table);
+                            if (!recoveryValidateSqlTableName($safeTable)) {
+                                continue;
+                            }
+                            $cnt = '?';
+                            try {
+                                $st = $db->prepareStatement('SELECT COUNT(*) AS c FROM `' . $safeTable . '`');
+                                $st->execute();
+                                $cnt = (int)($st->fetchArray()['c'] ?? 0);
+                            } catch (\Throwable) {}
+                            echo '<tr>';
+                            echo '<td><input type="checkbox" name="drop_tables[]" value="' . \htmlspecialchars($safeTable) . '" checked></td>';
+                            echo '<td><code>' . \htmlspecialchars($safeTable) . '</code></td>';
+                            echo '<td style="text-align:right">' . $cnt . '</td>';
+                            echo '</tr>';
+                        }
+                        echo '</tbody></table>';
+                    } else {
+                        echo '<p style="color:#999"><em>Keine plugin-eigenen Tabellen gefunden.</em></p>';
+                    }
+
+                    // ── Dateisystem ───────────────────────────────────────────
+                    echo '<h2 style="margin:24px 0 10px">Dateisystem</h2>';
+                    if ($fsEval['deletable']) {
+                        echo '<div class="alert alert-warning">';
+                        echo '<label style="cursor:pointer"><input type="checkbox" name="delete_files" value="1"> ';
+                        echo 'Plugin-Verzeichnis <code>' . \htmlspecialchars((string)$fsEval['relativePath']) . '/</code> auf dem Server löschen</label>';
+                        echo '<br><small style="margin-top:6px;display:block">Sicherheitsprüfung: nur wenn Pfad innerhalb WCF_DIR und kein geschütztes Verzeichnis.</small>';
+                        echo '</div>';
+                    } else {
+                        echo '<div class="alert alert-info"><strong>Dateisystem:</strong> ' . \htmlspecialchars($fsEval['reason']) . '</div>';
+                    }
+
+                    echo '<div style="margin-top:28px">';
+                    echo '<button type="submit" class="btn-danger">Weiter: Backup &amp; Ausführen &#8594;</button>';
                     echo '</div>';
+                    echo '</form>';
+
+                // ── SCHRITT 2: BACKUP ─────────────────────────────────────────
+                } elseif ($uninstallStep === '1') {
+                    $isDryRun      = isset($_POST['dry_run']) && $_POST['dry_run'] === '1';
+                    $selectedPips  = \is_array($_POST['pip_select'] ?? null)  ? (array)$_POST['pip_select']  : [];
+                    $dropTables    = \is_array($_POST['drop_tables'] ?? null)  ? (array)$_POST['drop_tables']  : [];
+                    $deleteFiles   = !empty($_POST['delete_files']) && $_POST['delete_files'] === '1';
+
+                    // Eingaben validieren
+                    $pipMap    = recoveryGetPipResourceMap();
+                    $validPips = \array_values(\array_filter($selectedPips, fn($p) => isset($pipMap[$p]) && $pipMap[$p]['safe'] && $pipMap[$p]['table'] !== ''));
+                    $validDropTables = [];
+                    foreach ($dropTables as $t) {
+                        $s = \str_replace('`', '', (string)$t);
+                        if (recoveryValidateSqlTableName($s)) {
+                            $validDropTables[] = $s;
+                        }
+                    }
+?>
+    <div class="step-indicator">
+        <div class="si-step done">1 · Analyse &amp; Auswahl &#10003;</div>
+        <div class="si-step active">2 · Backup</div>
+        <div class="si-step">3 · <?= $isDryRun ? 'Dry-Run' : 'Ausführen' ?></div>
+    </div>
+<?php
+                    // SQL-Backup generieren
+                    $backupSql = '';
+                    if ($packageID && !empty($validPips)) {
+                        $backupSql = recoveryGenerateSqlBackup($db, $wcfN, $packageID, $validPips);
+                    }
+
+                    if ($backupSql !== '') {
+                        $backupB64 = \base64_encode($backupSql);
+                        echo '<h2>SQL-Backup der betroffenen Zeilen</h2>';
+                        echo '<div class="alert alert-info">';
+                        echo '<strong>Backup für packageID = ' . $packageID . '</strong><br>';
+                        echo '<small>Enthält alle Zeilen aus den ausgewählten Tabellen – bitte vor dem Ausführen herunterladen oder kopieren.</small>';
+                        echo '<br><br>';
+                        // Server-seitiger Download via POST
+                        echo '<form method="POST" action="?action=download-sql&amp;t=' . \htmlspecialchars($authHash) . '" style="display:inline;margin-right:10px">';
+                        echo '<input type="hidden" name="sql_b64" value="' . \htmlspecialchars($backupB64) . '">';
+                        echo '<button type="submit" class="button">&#8595; SQL-Backup herunterladen (.sql)</button>';
+                        echo '</form>';
+                        // Client-seitiger JS-Download (Fallback)
+                        echo '<button type="button" class="button" onclick="(function(){';
+                        echo 'var s=atob(' . \json_encode($backupB64) . ');';
+                        echo 'var b=new Blob([s],{type:\'text/plain\'});';
+                        echo 'var a=document.createElement(\'a\');a.href=URL.createObjectURL(b);';
+                        echo 'a.download=\'recovery-backup-' . \date('Y-m-d-His') . '.sql\';a.click();';
+                        echo '})()">&#8595; JS-Download</button>';
+                        echo '<br><br>';
+                        echo '<details><summary style="cursor:pointer">SQL-Inhalt anzeigen (' . \number_format(\strlen($backupSql)) . ' Bytes)</summary>';
+                        echo '<textarea style="width:100%;height:220px;margin-top:10px;font-size:12px;font-family:monospace;background:#2D2D2D;color:#c0c0c0;border:1px solid #444;padding:10px;border-radius:3px;box-sizing:border-box" readonly>';
+                        echo \htmlspecialchars(\substr($backupSql, 0, 50000)) . (\strlen($backupSql) > 50000 ? "\n-- [gekürzt …]" : '');
+                        echo '</textarea>';
+                        echo '</details>';
+                        echo '</div>';
+                    } else {
+                        echo '<div class="alert alert-info">';
+                        echo '<strong>Kein SQL-Backup erforderlich</strong><br>';
+                        if (!$packageID) {
+                            echo '<small>Ohne packageID können keine Zeilen gesichert werden.</small>';
+                        } else {
+                            echo '<small>Keine Zeilen in den ausgewählten Tabellen gefunden.</small>';
+                        }
+                        echo '</div>';
+                    }
+
+                    // Zusammenfassung der geplanten Aktionen
+                    echo '<h2 style="margin-top:24px">Geplante Aktionen ' . ($isDryRun ? '<span style="color:#c93">(Dry-Run)</span>' : '') . '</h2>';
+                    echo '<div class="alert ' . ($isDryRun ? 'alert-warning' : 'alert-error') . '">';
+                    if ($isDryRun) {
+                        echo '<strong>&#128065; Dry-Run – keine Änderungen werden vorgenommen</strong><br><br>';
+                    }
+
+                    if (!empty($validPips) && $packageID) {
+                        echo '<strong>DB-Löschungen (WHERE packageID = ' . $packageID . '):</strong><br>';
+                        foreach ($validPips as $pip) {
+                            echo '&bull; <code>wcf' . $wcfN . '_' . \htmlspecialchars($pipMap[$pip]['table']) . '</code> – ' . \htmlspecialchars($pipMap[$pip]['label']) . '<br>';
+                        }
+                        echo '&bull; <code>wcf' . $wcfN . '_package</code> – Package-Eintrag (ID ' . $packageID . ')<br>';
+                        echo '&bull; Package-Queue, Requirements, SQL-Log, File-Log<br><br>';
+                    } elseif (empty($validPips)) {
+                        echo '<em>Keine DB-Kategorien ausgewählt.</em><br><br>';
+                    }
+
+                    if (!empty($validDropTables)) {
+                        echo '<strong>DROP TABLE:</strong><br>';
+                        foreach ($validDropTables as $t) {
+                            echo '&bull; <code>' . \htmlspecialchars($t) . '</code><br>';
+                        }
+                        echo '<br>';
+                    }
+
+                    if ($deleteFiles) {
+                        $fsEval2 = recoveryEvaluatePluginDirectoryDeletion($packageData, $packageIdentifier, $db, $wcfN, $extractDir);
+                        if ($fsEval2['deletable']) {
+                            echo '<strong>Dateisystem:</strong> Verzeichnis <code>' . \htmlspecialchars((string)$fsEval2['relativePath']) . '/</code> wird gelöscht<br>';
+                        } else {
+                            echo '<strong>Dateisystem:</strong> ' . \htmlspecialchars($fsEval2['reason']) . ' (kein Löschen)<br>';
+                        }
+                    }
+                    echo '</div>';
+
+                    // Formular mit allen Selektionen als Hidden-Inputs → Step 3 (Execute)
+                    echo '<form method="POST">';
+                    echo '<input type="hidden" name="package_identifier" value="' . \htmlspecialchars($packageIdentifier) . '">';
+                    if ($extractDir) {
+                        echo '<input type="hidden" name="extract_dir" value="' . \htmlspecialchars($extractDir) . '">';
+                    }
+                    echo '<input type="hidden" name="uninstall_step" value="2">';
+                    if ($isDryRun) {
+                        echo '<input type="hidden" name="dry_run" value="1">';
+                    }
+                    if ($deleteFiles) {
+                        echo '<input type="hidden" name="delete_files" value="1">';
+                    }
+                    foreach ($validPips as $pip) {
+                        echo '<input type="hidden" name="pip_select[]" value="' . \htmlspecialchars($pip) . '">';
+                    }
+                    foreach ($validDropTables as $t) {
+                        echo '<input type="hidden" name="drop_tables[]" value="' . \htmlspecialchars($t) . '">';
+                    }
+                    $btnLabel = $isDryRun ? '&#128065; Dry-Run starten' : '&#9888; Jetzt ausführen (nicht rückgängig!)';
+                    $btnClass = $isDryRun ? 'button' : 'button btn-danger';
+                    echo '<button type="submit" class="' . $btnClass . '">' . $btnLabel . '</button>';
+                    echo '</form>';
+
+                // ── SCHRITT 3: AUSFÜHREN ──────────────────────────────────────
+                } elseif ($uninstallStep === '2') {
+                    $isDryRun      = !empty($_POST['dry_run']) && $_POST['dry_run'] === '1';
+                    $selectedPips  = \is_array($_POST['pip_select'] ?? null)  ? (array)$_POST['pip_select']  : [];
+                    $dropTables    = \is_array($_POST['drop_tables'] ?? null)  ? (array)$_POST['drop_tables']  : [];
+                    $deleteFiles   = !empty($_POST['delete_files']) && $_POST['delete_files'] === '1';
+
+                    $pipMap    = recoveryGetPipResourceMap();
+                    $validPips = \array_values(\array_filter($selectedPips, fn($p) => isset($pipMap[$p]) && $pipMap[$p]['safe'] && $pipMap[$p]['table'] !== ''));
+                    $validDropTables = [];
+                    foreach ($dropTables as $t) {
+                        $s = \str_replace('`', '', (string)$t);
+                        if (recoveryValidateSqlTableName($s)) {
+                            $validDropTables[] = $s;
+                        }
+                    }
+?>
+    <div class="step-indicator">
+        <div class="si-step done">1 · Analyse &amp; Auswahl &#10003;</div>
+        <div class="si-step done">2 · Backup &#10003;</div>
+        <div class="si-step active">3 · <?= $isDryRun ? 'Dry-Run' : 'Ausführen' ?></div>
+    </div>
+<?php
+                    $log = [];
+
+                    try {
+                        // ── DB-Bereinigung nach packageID ─────────────────────
+                        if ($packageID && !empty($validPips)) {
+                            foreach ($validPips as $pip) {
+                                $info = $pipMap[$pip];
+                                if ($isDryRun) {
+                                    try {
+                                        $st = $db->prepareStatement("SELECT COUNT(*) AS cnt FROM wcf{$wcfN}_{$info['table']} WHERE packageID = ?");
+                                        $st->execute([$packageID]);
+                                        $r = $st->fetchArray();
+                                        $log[] = '[DRY-RUN] WÜRDE LÖSCHEN: wcf' . $wcfN . '_' . $info['table'] . ' – ' . (int)($r['cnt'] ?? 0) . ' Einträge';
+                                    } catch (\Throwable $e) {
+                                        $log[] = '[DRY-RUN] ' . $info['label'] . ': Tabelle nicht vorhanden';
+                                    }
+                                } else {
+                                    recoveryTryDeleteByPackageId($db, $wcfN, $info['table'], $packageID, $info['label'], $log);
+                                }
+                            }
+                        }
+
+                        // ── Package-Infrastruktur ─────────────────────────────
+                        if ($packageID) {
+                            if ($isDryRun) {
+                                $log[] = '[DRY-RUN] WÜRDE LÖSCHEN: Package-Queue, Nodes, Forms, Requirements, SQL-Log, Package-Eintrag';
+                            } else {
+                                recoveryCleanupPackageInstallationArtifacts($db, $wcfN, $packageID, $packageIdentifier, $log);
+                                recoveryCleanupPackageUpdateEntries($db, $wcfN, $packageIdentifier, $log);
+                                recoveryExecuteDelete(
+                                    $db,
+                                    "DELETE FROM wcf{$wcfN}_package_requirements WHERE packageID = ? OR requirement = ?",
+                                    [$packageID, $packageID],
+                                    'Package-Requirements',
+                                    $log
+                                );
+                                recoveryExecuteDelete(
+                                    $db,
+                                    "DELETE FROM wcf{$wcfN}_package_installation_sql_log WHERE packageID = ?",
+                                    [$packageID],
+                                    'Package SQL-Log',
+                                    $log
+                                );
+                                recoveryExecuteDelete(
+                                    $db,
+                                    "DELETE FROM wcf{$wcfN}_package WHERE packageID = ?",
+                                    [$packageID],
+                                    'Package-Eintrag',
+                                    $log
+                                );
+                            }
+                        }
+
+                        // ── Plugin-eigene Tabellen droppen ────────────────────
+                        foreach ($validDropTables as $table) {
+                            if ($isDryRun) {
+                                $log[] = '[DRY-RUN] WÜRDE DROP TABLE: ' . $table;
+                            } else {
+                                try {
+                                    $stmt = $db->prepareStatement('DROP TABLE IF EXISTS `' . $table . '`');
+                                    $stmt->execute();
+                                    $log[] = 'Tabelle gelöscht: ' . $table;
+                                } catch (\Throwable $e) {
+                                    $log[] = 'DROP TABLE fehlgeschlagen (' . $table . '): ' . $e->getMessage();
+                                }
+                            }
+                        }
+
+                        // ── Dateisystem ───────────────────────────────────────
+                        if ($deleteFiles) {
+                            recoveryDeletePluginFilesOnDisk(
+                                $packageData, $packageIdentifier, $log, !$isDryRun, $db, $wcfN, $extractDir
+                            );
+                        }
+
+                        // ── options.inc.php + Cache ───────────────────────────
+                        if (!$isDryRun) {
+                            $optionConstants = recoveryCollectOptionConstantNames($db, $wcfN, $packageID);
+                            if (recoveryRebuildOptionsIncPhp()) {
+                                $log[] = 'options.inc.php neu erzeugt';
+                            } elseif (!empty($optionConstants)) {
+                                recoveryStripConstantsFromOptionsIncPhp($optionConstants);
+                                $log[] = 'options.inc.php bereinigt (' . \count($optionConstants) . ' Konstanten entfernt)';
+                            }
+                            $deletedCacheFiles = clearCompiledTemplates();
+                            $log[] = 'Cache gelöscht: ' . $deletedCacheFiles . ' Dateien';
+                            recoveryCleanupUploadWorkspace();
+                        }
+
+                        // ── Ergebnis anzeigen ─────────────────────────────────
+                        $resultClass = $isDryRun ? 'alert-warning' : 'alert-success';
+                        echo '<div class="alert ' . $resultClass . '">';
+                        echo '<strong>' . ($isDryRun ? '&#128065; Dry-Run abgeschlossen – keine Änderungen vorgenommen' : '&#10003; Plugin-Bereinigung abgeschlossen!') . '</strong><br><br>';
+                        echo '<strong>Protokoll:</strong><br>';
+                        foreach ($log as $entry) {
+                            echo '&bull; ' . \htmlspecialchars($entry) . '<br>';
+                        }
+
+                        if (!$isDryRun) {
+                            recoveryRenderAcpSuccessLink($recoveryBaseUrl);
+                        }
+                        echo '</div>';
+
+                    } catch (\Throwable $e) {
+                        echo '<div class="alert alert-error">';
+                        echo '<strong>Fehler bei Deinstallation:</strong><br>';
+                        echo \nl2br(\htmlspecialchars(recoveryFormatUserError($e)));
+                        recoveryRenderExceptionDetails($e);
+                        echo '</div>';
+                    }
                 }
             }
         }
