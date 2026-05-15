@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.3.2
+ * @version 1.3.3
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -19,7 +19,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.3.2');
+define('RECOVERY_VERSION', '1.3.3');
 define('RECOVERY_MODE_SELECTION', 0);
 define('RECOVERY_MODE_ACP_REPAIR', 1);
 define('RECOVERY_MODE_PLUGIN_UNINSTALL', 2);
@@ -71,6 +71,7 @@ function recoveryBootstrapDatabase()
 
     require_once WCF_DIR . 'lib/system/WCF.class.php';
     recoveryDefineMinimalWcfConstants();
+    recoveryDefineMinimalWcfFunctions();
 
     // Nur WoltLab-Autoloader – kein global.php / kein WCF-Vollbootstrap.
     if (!\defined('RECOVERY_WCF_AUTOLOAD')) {
@@ -977,10 +978,46 @@ function recoveryDefineMinimalWcfConstants(): void
     }
 }
 
+/**
+ * Stubs für wcf\*-Hilfsfunktionen aus core.functions.php (ohne global.php).
+ * Database::prepareStatement() ruft bei ENABLE_PRODUCTION_DEBUG_MODE \wcf\getRequestId() auf.
+ */
+function recoveryDefineMinimalWcfFunctions(): void
+{
+    if (\function_exists('wcf\getRequestId')) {
+        return;
+    }
+}
+
+namespace wcf {
+    if (!\function_exists(__NAMESPACE__ . '\\getRequestId')) {
+        function getRequestId(): string
+        {
+            if (!\defined('WCF_REQUEST_ID_HEADER') || !WCF_REQUEST_ID_HEADER) {
+                return '';
+            }
+
+            return $_SERVER[WCF_REQUEST_ID_HEADER] ?? '';
+        }
+    }
+
+    if (!\function_exists(__NAMESPACE__ . '\\getMinorVersion')) {
+        function getMinorVersion(): string
+        {
+            if (!\defined('WCF_VERSION')) {
+                return '0.0';
+            }
+
+            return \preg_replace('/^(\d+\.\d+)\..*$/', '\\1', WCF_VERSION);
+        }
+    }
+}
+
 function recoveryRebuildOptionsIncPhp(): bool
 {
     try {
         recoveryDefineMinimalWcfConstants();
+        recoveryDefineMinimalWcfFunctions();
         require_once WCF_DIR . 'lib/data/option/OptionEditor.class.php';
         \wcf\data\option\OptionEditor::rebuild();
 
