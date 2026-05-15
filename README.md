@@ -79,16 +79,20 @@
 
 ## 📦 Installation
 
+**Single-file deployment (v1.2.0):** upload only `plugin-recovery-tool.php` to your WoltLab root. No `recovery-bootstrap.php`, `recovery-cleanup.php`, or other helper files. The auth file (`plugin-recovery-auth.php`) is generated when you open the tool and must be downloaded from the tool UI.
+
 1. **Download** `plugin-recovery-tool.php` from [Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases)
-2. **Upload** to your WoltLab Suite root directory (same level as `global.php`)
+2. **Upload** to your WoltLab Suite root directory (same level as `global.php` — used only to detect the installation path)
 3. **Access** via browser: `https://your-domain.com/plugin-recovery-tool.php`
+
+Optional: `deploy-recovery.sh` copies only `plugin-recovery-tool.php` to a configured WoltLab path.
 
 ```
 your-woltlab-root/
 ├── global.php
 ├── lib/
 ├── acp/
-└── plugin-recovery-tool.php  ← Upload here
+└── plugin-recovery-tool.php  ← only this file from the repo
 ```
 ## 🗑️ Deinstallation
 ![Deinstallation](https://github.com/user-attachments/assets/19e278bc-31ec-4496-97d9-fa71d9ec2dec)
@@ -275,10 +279,13 @@ Problem: If the extension incorrectly placed files in
 - WoltLab Suite 6.0+
 - Write permissions in installation directory
 
-**Database Access:**
-- Uses WoltLab's `WCF::getDB()`
-- All queries use prepared statements
-- Transactions for safe rollback on errors
+**Bootstrap & database:**
+- **Does not load `global.php`** — minimal bootstrap so the tool still runs when broken plugins crash the ACP
+- Loads `config.inc.php` and required WoltLab classes only as needed
+- Database access via WoltLab's DB layer after minimal bootstrap (not a full front-end/bootstrap)
+- All queries use prepared statements; transactions for safe rollback on errors
+- **Generic uninstall** by `packageID` for any installed plugin
+- Rebuilds `options.inc.php` via `OptionEditor::rebuild()` after option cleanup
 
 **Supported Archives:**
 - `.tar`
@@ -287,11 +294,11 @@ Problem: If the extension incorrectly placed files in
 
 ## 🐛 Troubleshooting
 
-### "WoltLab Suite global.php nicht gefunden!"
+### "WoltLab nicht gefunden..."
 
-**Cause:** Tool not in WoltLab root directory
+**Cause:** `plugin-recovery-tool.php` is not in the WoltLab root (directory must contain `global.php` and `config.inc.php` for detection only — the tool does not load `global.php`)
 
-**Solution:** Upload to root (where `global.php` is located)
+**Solution:** Upload only `plugin-recovery-tool.php` to the root next to `global.php`
 
 ### "Plugin nicht in Datenbank gefunden"
 
@@ -321,6 +328,13 @@ Problem: If the extension incorrectly placed files in
 3. Check WoltLab error logs: `log/YYYY-MM-DD.txt`
 
 ## 📝 Changelog
+
+### v1.2.0 (2026-05-15)
+- 📦 **Single file for users:** `plugin-recovery-tool.php` only; auth file downloaded from the tool
+- 🚫 **No `global.php` bootstrap** — works when the ACP is broken by faulty plugins
+- 🗑️ **Generic uninstall** via `packageID` for all plugins
+- ⚙️ **`options.inc.php` rebuilt** with `OptionEditor::rebuild()`
+- 🧹 Removed separate `recovery-bootstrap.php` / `recovery-cleanup.php` from the repository
 
 ### v1.1.0 (2025-01-XX)
 - 🆕 **Automatic resource detection from package files**

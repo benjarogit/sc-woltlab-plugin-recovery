@@ -78,16 +78,20 @@
 
 ## 📦 Installation
 
+**Einzeldatei (v1.2.0):** Nur `plugin-recovery-tool.php` ins WoltLab-Hauptverzeichnis legen. Keine `recovery-bootstrap.php`, `recovery-cleanup.php` oder andere Hilfsdateien. Die Auth-Datei (`plugin-recovery-auth.php`) wird beim Aufruf erzeugt und im Tool heruntergeladen.
+
 1. **Download** `plugin-recovery-tool.php` von [Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases)
-2. **Upload** in Ihr WoltLab Suite Root-Verzeichnis (gleiche Ebene wie `global.php`)
+2. **Upload** ins WoltLab-Root (gleiche Ebene wie `global.php` — nur zur Erkennung des Installationspfads)
 3. **Aufruf** über Browser: `https://ihre-domain.de/plugin-recovery-tool.php`
+
+Optional: `deploy-recovery.sh` kopiert nur `plugin-recovery-tool.php` in einen konfigurierten WoltLab-Pfad.
 
 ```
 ihr-woltlab-root/
 ├── global.php
 ├── lib/
 ├── acp/
-└── plugin-recovery-tool.php  ← Hier hochladen
+└── plugin-recovery-tool.php  ← nur diese Datei aus dem Repo
 ```
 
 ## 🔐 Authentifizierung
@@ -289,10 +293,13 @@ Problem: Wenn die Erweiterung Dateien fälschlicherweise im
 - WoltLab Suite 6.0+
 - Schreibrechte im Installationsverzeichnis
 
-**Datenbankzugriff:**
-- Verwendet WoltLab's `WCF::getDB()`
-- Alle Queries verwenden Prepared Statements
-- Transaktionen für sichere Rollbacks bei Fehlern
+**Bootstrap & Datenbank:**
+- **Lädt kein `global.php`** — minimaler Bootstrap, damit das Tool läuft, wenn kaputte Plugins das ACP zerstören
+- Lädt `config.inc.php` und nur benötigte WoltLab-Klassen
+- Datenbankzugriff über WoltLabs DB-Schicht nach minimalem Bootstrap (kein vollständiger Frontend-Bootstrap)
+- Prepared Statements; Transaktionen für sichere Rollbacks
+- **Generische Deinstallation** per `packageID` für jedes installierte Plugin
+- Baut `options.inc.php` nach Optionen-Bereinigung per `OptionEditor::rebuild()` neu
 
 **Unterstützte Archive:**
 - `.tar`
@@ -308,11 +315,11 @@ Problem: Wenn die Erweiterung Dateien fälschlicherweise im
 
 ## 🐛 Fehlerbehebung
 
-### "WoltLab Suite global.php nicht gefunden!"
+### "WoltLab nicht gefunden..."
 
-**Ursache:** Tool nicht im WoltLab Root-Verzeichnis
+**Ursache:** `plugin-recovery-tool.php` liegt nicht im WoltLab-Root (Verzeichnis muss `global.php` und `config.inc.php` enthalten — nur zur Erkennung; `global.php` wird nicht geladen)
 
-**Lösung:** In Root-Verzeichnis hochladen (wo sich `global.php` befindet)
+**Lösung:** Nur `plugin-recovery-tool.php` ins Root neben `global.php` legen
 
 ### "Plugin nicht in Datenbank gefunden"
 
@@ -352,6 +359,13 @@ Problem: Wenn die Erweiterung Dateien fälschlicherweise im
 3. Verwenden Sie manuellen Package-Identifier als Fallback
 
 ## 📝 Changelog
+
+### v1.2.0 (2026-05-15)
+- 📦 **Eine Datei für Nutzer:** nur `plugin-recovery-tool.php`; Auth-Datei wird im Tool heruntergeladen
+- 🚫 **Kein `global.php`-Bootstrap** — funktioniert, wenn das ACP durch fehlerhafte Plugins kaputt ist
+- 🗑️ **Generische Deinstallation** per `packageID` für alle Plugins
+- ⚙️ **`options.inc.php` wird neu aufgebaut** mit `OptionEditor::rebuild()`
+- 🧹 Separate `recovery-bootstrap.php` / `recovery-cleanup.php` aus dem Repository entfernt
 
 ### v1.1.0 (2025-01-XX)
 - 🆕 **Automatische Ressourcen-Erkennung aus Package-Dateien**

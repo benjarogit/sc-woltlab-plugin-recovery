@@ -9,7 +9,10 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.0.0
+ * @version 1.2.0
+ *
+ * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
+ * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
  */
 
 // ============================================================================
@@ -24,6 +27,406 @@ define('RECOVERY_MODE_CACHE_CLEAR', 4);
 
 $authHash = '';
 $authFilename = 'plugin-recovery-auth.php';
+
+// ============================================================================
+// RECOVERY CORE (Minimal-Bootstrap + generische Plugin-Bereinigung)
+// ============================================================================
+
+function recoveryResolveWcfDir(): string
+{
+    foreach ([__DIR__, \dirname(__DIR__), \dirname(__DIR__, 2)] as $dir) {
+        if (\is_file($dir . '/global.php') && \is_file($dir . '/config.inc.php')) {
+            return \rtrim($dir, '/') . '/';
+        }
+    }
+
+    throw new \RuntimeException(
+        'WoltLab nicht gefunden. Legen Sie nur plugin-recovery-tool.php ins Hauptverzeichnis (neben global.php).'
+    );
+}
+
+/**
+ * @return \wcf\system\database\Database
+ */
+function recoveryBootstrapDatabase()
+{
+    if (!\defined('WCF_DIR')) {
+        \define('WCF_DIR', recoveryResolveWcfDir());
+    }
+
+    require_once WCF_DIR . 'lib/system/api/autoload.php';
+    require_once WCF_DIR . 'lib/core.functions.php';
+
+    $dbHost = $dbUser = $dbPassword = $dbName = '';
+    $dbPort = 0;
+    $defaultDriverOptions = [];
+    require WCF_DIR . 'config.inc.php';
+
+    $db = new \wcf\system\database\MySQLDatabase(
+        $dbHost,
+        $dbUser,
+        $dbPassword,
+        $dbName,
+        $dbPort,
+        false,
+        false,
+        $defaultDriverOptions
+    );
+
+    if (!\defined('WCF_N')) {
+        \define('WCF_N', recoveryDetectWcfN($db));
+    }
+
+    if (!\defined('PACKAGE_ID')) {
+        \define('PACKAGE_ID', 1);
+    }
+
+    recoveryInjectDatabaseIntoWcf($db);
+
+    return $db;
+}
+
+function recoveryDetectWcfN(\wcf\system\database\Database $db): int
+{
+    for ($n = 1; $n <= 10; $n++) {
+        try {
+            $sql = "SELECT packageID FROM wcf{$n}_package WHERE package = ?";
+            $statement = $db->prepareStatement($sql);
+            $statement->execute(['com.woltlab.wcf']);
+            if ($statement->fetchArray()) {
+                return $n;
+            }
+        } catch (\Throwable) {
+        }
+    }
+
+    return 1;
+}
+
+function recoveryInjectDatabaseIntoWcf(\wcf\system\database\Database $db): void
+{
+    require_once WCF_DIR . 'lib/system/WCF.class.php';
+
+    $reflection = new \ReflectionClass(\wcf\system\WCF::class);
+    $property = $reflection->getProperty('dbObj');
+    $property->setAccessible(true);
+    $property->setValue(null, $db);
+}
+
+function recoveryGetSiteBaseUrl(): string
+{
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $script = $_SERVER['SCRIPT_NAME'] ?? '/plugin-recovery-tool.php';
+    $base = \rtrim(\str_replace('\\', '/', \dirname($script)), '/');
+
+    return $scheme . '://' . $host . ($base === '' || $base === '.' ? '' : $base) . '/';
+}
+
+/**
+ * @return list<string>
+ */
+function recoveryCollectOptionConstantNames(\wcf\system\database\Database $db, int $wcfN, ?int $packageID): array
+{
+    if (!$packageID) {
+        return [];
+    }
+
+    $constants = [];
+    $sql = "SELECT optionName FROM wcf{$wcfN}_option WHERE packageID = ?";
+    $statement = $db->prepareStatement($sql);
+    $statement->execute([$packageID]);
+    while ($row = $statement->fetchArray()) {
+        $constants[] = \strtoupper((string) $row['optionName']);
+    }
+
+    return $constants;
+}
+
+function recoveryRebuildOptionsIncPhp(): bool
+{
+    try {
+        require_once WCF_DIR . 'lib/data/option/OptionEditor.class.php';
+        \wcf\data\option\OptionEditor::rebuild();
+
+        return true;
+    } catch (\Throwable) {
+        return false;
+    }
+}
+
+/**
+ * @param list<string> $constantNames
+ */
+function recoveryStripConstantsFromOptionsIncPhp(array $constantNames): void
+{
+    if (empty($constantNames)) {
+        return;
+    }
+
+    $file = WCF_DIR . 'options.inc.php';
+    if (!\is_file($file) || !\is_writable($file)) {
+        return;
+    }
+
+    $lines = \file($file, FILE_IGNORE_NEW_LINES);
+    if ($lines === false) {
+        return;
+    }
+
+    $filtered = [];
+    foreach ($lines as $line) {
+        $remove = false;
+        foreach ($constantNames as $constant) {
+            if ($constant !== '' && \str_contains($line, $constant)) {
+                $remove = true;
+                break;
+            }
+        }
+        if (!$remove) {
+            $filtered[] = $line;
+        }
+    }
+
+    \file_put_contents($file, \implode("\n", $filtered) . "\n");
+}
+
+function recoveryExecuteDelete(
+    \wcf\system\database\Database $db,
+    string $sql,
+    array $parameters,
+    string $logLabel,
+    array &$log
+): void {
+    $statement = $db->prepareStatement($sql);
+    $statement->execute($parameters);
+    $log[] = $logLabel . ': ' . $statement->getAffectedRows();
+}
+
+function recoveryTryDeleteByPackageId(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    string $tableName,
+    int $packageID,
+    string $logLabel,
+    array &$log
+): void {
+    try {
+        recoveryExecuteDelete(
+            $db,
+            "DELETE FROM wcf{$wcfN}_{$tableName} WHERE packageID = ?",
+            [$packageID],
+            $logLabel,
+            $log
+        );
+    } catch (\Throwable $e) {
+        $log[] = $logLabel . ' übersprungen: ' . $e->getMessage();
+    }
+}
+
+/**
+ * Generische Vollbereinigung für jedes Plugin (ohne WoltLab-Paket-Deinstaller).
+ *
+ * @param array<string, mixed>|null $resources
+ * @param array<string, mixed> $log
+ */
+function recoveryPerformFullPluginCleanup(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    string $packageIdentifier,
+    ?array $packageData,
+    ?array $resources,
+    array &$log
+): void {
+    $packageID = $packageData ? (int) $packageData['packageID'] : null;
+
+    $optionConstants = recoveryCollectOptionConstantNames($db, $wcfN, $packageID);
+    if ($resources && !empty($resources['options']['items'])) {
+        foreach ($resources['options']['items'] as $name) {
+            $optionConstants[] = \strtoupper((string) $name);
+        }
+    }
+    $optionConstants = \array_values(\array_unique($optionConstants));
+
+    if ($packageID) {
+        $packageIdTables = [
+            'template_listener' => 'Template-Listener',
+            'event_listener' => 'Event-Listener',
+            'option' => 'Optionen',
+            'acp_menu_item' => 'ACP-Menü',
+            'user_group_option' => 'Berechtigungen',
+            'cronjob' => 'Cronjobs',
+            'object_type' => 'Objekttypen',
+            'page' => 'Seiten',
+            'language_item' => 'Sprachvariablen',
+            'box' => 'Boxen',
+            'template' => 'Templates',
+            'core_object' => 'Core-Objekte',
+            'user_notification_event' => 'Benachrichtigungen',
+            'bbcode' => 'BBCodes',
+            'smiley' => 'Smileys',
+        ];
+
+        foreach ($packageIdTables as $table => $label) {
+            recoveryTryDeleteByPackageId($db, $wcfN, $table, $packageID, $label, $log);
+        }
+
+        recoveryExecuteDelete(
+            $db,
+            "DELETE FROM wcf{$wcfN}_package_installation_sql_log WHERE packageID = ?",
+            [$packageID],
+            'Package SQL-Log',
+            $log
+        );
+
+        recoveryExecuteDelete(
+            $db,
+            "DELETE FROM wcf{$wcfN}_package WHERE packageID = ?",
+            [$packageID],
+            'Package-Eintrag',
+            $log
+        );
+    } else {
+        if ($resources && !empty($resources['acpMenu']['prefix'])) {
+            recoveryExecuteDelete(
+                $db,
+                "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE menuItem LIKE ?",
+                [$resources['acpMenu']['prefix'] . '%'],
+                'ACP-Menü (Analyse)',
+                $log
+            );
+        }
+
+        if ($resources && !empty($resources['options']['prefix'])) {
+            recoveryExecuteDelete(
+                $db,
+                "DELETE FROM wcf{$wcfN}_option WHERE optionName LIKE ?",
+                [$resources['options']['prefix'] . '%'],
+                'Optionen (Analyse)',
+                $log
+            );
+        }
+
+        if ($resources && !empty($resources['permissions']['prefix'])) {
+            recoveryExecuteDelete(
+                $db,
+                "DELETE FROM wcf{$wcfN}_user_group_option WHERE optionName LIKE ?",
+                [$resources['permissions']['prefix'] . '%'],
+                'Berechtigungen (Analyse)',
+                $log
+            );
+        }
+
+        if ($resources && !empty($resources['language']['prefix'])) {
+            recoveryExecuteDelete(
+                $db,
+                "DELETE FROM wcf{$wcfN}_language_item WHERE languageItem LIKE ?",
+                [$resources['language']['prefix'] . '%'],
+                'Sprachvariablen (Analyse)',
+                $log
+            );
+        }
+
+        if ($resources && !empty($resources['cronjobs']['namespace'])) {
+            recoveryExecuteDelete(
+                $db,
+                "DELETE FROM wcf{$wcfN}_cronjob WHERE className LIKE ?",
+                [$resources['cronjobs']['namespace'] . '%'],
+                'Cronjobs (Analyse)',
+                $log
+            );
+        }
+
+        if ($resources && !empty($resources['objectTypes']['prefix'])) {
+            recoveryExecuteDelete(
+                $db,
+                "DELETE FROM wcf{$wcfN}_object_type WHERE objectType LIKE ?",
+                [$resources['objectTypes']['prefix'] . '%'],
+                'Objekttypen (Analyse)',
+                $log
+            );
+        }
+
+        $parts = \explode('.', $packageIdentifier);
+        $appGuess = \count($parts) >= 2 ? $parts[\count($parts) - 2] : \end($parts);
+        if ($appGuess) {
+            recoveryExecuteDelete(
+                $db,
+                "DELETE FROM wcf{$wcfN}_template_listener WHERE listenerName LIKE ?",
+                [$appGuess . '%'],
+                'Template-Listener (Vermutung)',
+                $log
+            );
+            recoveryExecuteDelete(
+                $db,
+                "DELETE FROM wcf{$wcfN}_page WHERE identifier LIKE ?",
+                [$packageIdentifier . '%'],
+                'Seiten (Package-Identifier)',
+                $log
+            );
+        }
+    }
+
+    if ($resources && !empty($resources['pageLocations']['items'])) {
+        foreach ($resources['pageLocations']['items'] as $identifier) {
+            recoveryExecuteDelete(
+                $db,
+                "DELETE FROM wcf{$wcfN}_page_location WHERE identifier = ?",
+                [$identifier],
+                'Page Location',
+                $log
+            );
+        }
+    }
+
+    if ($resources && !empty($resources['urlRules']['items'])) {
+        foreach ($resources['urlRules']['items'] as $pattern) {
+            recoveryExecuteDelete(
+                $db,
+                "DELETE FROM wcf{$wcfN}_url_rule WHERE pattern = ?",
+                [$pattern],
+                'URL-Regel',
+                $log
+            );
+        }
+    }
+
+    recoveryExecuteDelete(
+        $db,
+        "DELETE FROM wcf{$wcfN}_package_installation_queue WHERE package = ?",
+        [$packageIdentifier],
+        'Installationsqueue',
+        $log
+    );
+
+    $tables = [];
+    if ($resources && !empty($resources['tables'])) {
+        $tables = $resources['tables'];
+    } elseif ($packageData && !empty($packageData['applicationDirectory'])) {
+        $tables = \function_exists('findPackageTables')
+            ? findPackageTables($db, $packageIdentifier, $wcfN)
+            : [];
+    } else {
+        $tables = \function_exists('findPackageTables')
+            ? findPackageTables($db, $packageIdentifier, $wcfN)
+            : [];
+    }
+
+    foreach ($tables as $table) {
+        $safeTable = \str_replace('`', '', (string) $table);
+        $sql = 'DROP TABLE IF EXISTS `' . $safeTable . '`';
+        $statement = $db->prepareStatement($sql);
+        $statement->execute();
+        $log[] = 'Tabelle gelöscht: ' . $safeTable;
+    }
+
+    if (recoveryRebuildOptionsIncPhp()) {
+        $log[] = 'options.inc.php neu erzeugt';
+    } elseif (!empty($optionConstants)) {
+        recoveryStripConstantsFromOptionsIncPhp($optionConstants);
+        $log[] = 'options.inc.php bereinigt (Plugin-Konstanten entfernt)';
+    }
+}
 
 // ============================================================================
 // AUTHENTIFIZIERUNG (wie WoltLab wsc-recovery.php)
@@ -1284,17 +1687,22 @@ if (!$isAuthenticated) {
 // Ab hier ist der User authentifiziert
 
 // ============================================================================
-// WOLTLAB BOOTSTRAP
+// WOLTLAB BOOTSTRAP (minimal – kein global.php, kaputte Apps crashen nicht)
 // ============================================================================
 
-$wcfDir = __DIR__;
-if (!file_exists($wcfDir . '/global.php')) {
-    die('WoltLab Suite global.php nicht gefunden!');
+try {
+    $recoveryDb = recoveryBootstrapDatabase();
+} catch (\Throwable $e) {
+    echo '<div class="alert alert-error"><strong>Bootstrap-Fehler:</strong> '
+        . htmlspecialchars($e->getMessage()) . '</div>';
+    echo '</div></body></html>';
+    exit;
 }
 
-require_once($wcfDir . '/global.php');
-
 use wcf\system\WCF;
+
+$recoveryBaseUrl = recoveryGetSiteBaseUrl();
+$db = WCF::getDB();
 
 // ============================================================================
 // MODUS AUSWAHL
@@ -1362,8 +1770,6 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
     <p class="subtitle">Repariert defekte ACP-Menüeinträge eines Plugins</p>
 
 <?php
-    $db = WCF::getDB();
-
     // Schritt 1: Package-Identifier eingeben oder hochladen
     if (!isset($_POST['package_identifier']) && !isset($_FILES['package_file'])) {
 ?>
@@ -1681,7 +2087,7 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                     echo '<strong>✓ ACP-Repair erfolgreich!</strong><br>';
                     echo 'Gelöschte Menüeinträge: ' . $deletedCount . '<br>';
                     echo 'Cache wurde geleert.<br><br>';
-                    echo '<a href="' . WCF::getPath() . 'acp/" class="btn-success">→ Zum ACP</a>';
+                    echo '<a href="' . htmlspecialchars($recoveryBaseUrl) . 'acp/" class="btn-success">→ Zum ACP</a>';
                     echo '</div>';
 
                 } catch (Exception $e) {
@@ -1711,8 +2117,6 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
     <p class="subtitle">Deinstalliert Plugin komplett aus Datenbank und Dateisystem</p>
 
 <?php
-    $db = WCF::getDB();
-
     // Schritt 1: Package-Identifier eingeben oder hochladen
     // Prüfe auch GET-Parameter für "SQL anzeigen" Funktionalität
     $hasPackageIdentifier = (isset($_POST['package_identifier']) && !empty($_POST['package_identifier'])) ||
@@ -1842,10 +2246,12 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 
                 if ($packageData) {
                     echo '✓ Package-Eintrag in wcf' . WCF_N . '_package<br>';
-                    echo '✓ ACP-Menüeinträge<br>';
-                    echo '✓ Package-Installationsqueue<br>';
-                    echo '✓ Package Installation SQL Log<br>';
                 }
+                echo '✓ ACP-Menüeinträge<br>';
+                echo '✓ Template-Listener (häufige ACP-Ursache)<br>';
+                echo '✓ Event-Listener, Optionen, Menüs, Sprachen, Seiten<br>';
+                echo '✓ Package-Installationsqueue<br>';
+                echo '✓ options.inc.php wird neu erzeugt<br>';
 
                 if (!empty($tables)) {
                     echo '<br><strong>Datenbank-Tabellen (' . count($tables) . '):</strong><br>';
@@ -1883,143 +2289,22 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     $resources = analyzePackageResources($extractDir, $packageIdentifier, $db);
                 }
 
-                // Deinstallation durchführen
+                // Deinstallation durchführen (vollständig, ohne global.php)
                 $db->beginTransaction();
 
                 try {
                     $log = [];
-                    $wcfN = $resources ? $resources['wcfN'] : WCF_N;
+                    $wcfN = $resources ? (int) $resources['wcfN'] : WCF_N;
 
-                    if ($packageData) {
-                        $packageID = $packageData['packageID'];
+                    recoveryPerformFullPluginCleanup(
+                        $db,
+                        $wcfN,
+                        $packageIdentifier,
+                        $packageData ?: null,
+                        $resources,
+                        $log
+                    );
 
-                        // ACP-Menüeinträge löschen (aus Analyse oder über packageID)
-                        if ($resources && !empty($resources['acpMenu']['prefix'])) {
-                            $prefix = addslashes($resources['acpMenu']['prefix']);
-                            $sql = "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE menuItem LIKE '{$prefix}%'";
-                            $statement = $db->prepareStatement($sql);
-                            $statement->execute();
-                            $log[] = 'ACP-Menüeinträge gelöscht: ' . $statement->getAffectedRows();
-                        } else {
-                            $sql = "DELETE FROM wcf{$wcfN}_acp_menu_item WHERE packageID = ?";
-                            $statement = $db->prepareStatement($sql);
-                            $statement->execute([$packageID]);
-                            $log[] = 'ACP-Menüeinträge gelöscht: ' . $statement->getAffectedRows();
-                        }
-
-                        // Package-Eintrag löschen
-                        $sql = "DELETE FROM wcf{$wcfN}_package WHERE packageID = ?";
-                        $statement = $db->prepareStatement($sql);
-                        $statement->execute([$packageID]);
-                        $log[] = 'Package-Eintrag gelöscht';
-
-                        // Installationsqueue bereinigen
-                        $sql = "DELETE FROM wcf{$wcfN}_package_installation_queue WHERE package = ?";
-                        $statement = $db->prepareStatement($sql);
-                        $statement->execute([$packageIdentifier]);
-                        $log[] = 'Installationsqueue bereinigt: ' . $statement->getAffectedRows();
-                        
-                        // Package Installation SQL Log bereinigen
-                        $sql = "DELETE FROM wcf{$wcfN}_package_installation_sql_log WHERE packageID = ?";
-                        $statement = $db->prepareStatement($sql);
-                        $statement->execute([$packageID]);
-                        $log[] = 'Package Installation SQL Log bereinigt: ' . $statement->getAffectedRows();
-                    } else {
-                        // Auch ohne Package-Eintrag: SQL Log nach Tabellennamen bereinigen
-                        if (!empty($tables)) {
-                            foreach ($tables as $table) {
-                                $sql = "DELETE FROM wcf{$wcfN}_package_installation_sql_log WHERE sqlTable = ?";
-                                $statement = $db->prepareStatement($sql);
-                                $statement->execute([$table]);
-                            }
-                            $log[] = 'Package Installation SQL Log bereinigt (nach Tabellennamen)';
-                        }
-                    }
-
-                    // Tabellen löschen
-                    foreach ($tables as $table) {
-                        try {
-                            $sql = "DROP TABLE IF EXISTS `" . addslashes($table) . "`";
-                            $statement = $db->prepareStatement($sql);
-                            $statement->execute();
-                            $log[] = 'Tabelle gelöscht: ' . $table;
-                        } catch (Exception $e) {
-                            $log[] = 'Fehler beim Löschen der Tabelle ' . $table . ': ' . $e->getMessage();
-                            throw $e; // Wirf Exception weiter, damit Transaction rollback wird
-                        }
-                    }
-
-                    // Weitere Ressourcen löschen wenn Analyse vorhanden
-                    if ($resources) {
-                        // Optionen
-                        if (!empty($resources['options']['prefix'])) {
-                            $prefix = addslashes($resources['options']['prefix']);
-                            $sql = "DELETE FROM wcf{$wcfN}_option WHERE optionName LIKE '{$prefix}%'";
-                            $statement = $db->prepareStatement($sql);
-                            $statement->execute();
-                            $log[] = 'Optionen gelöscht: ' . $statement->getAffectedRows();
-                        }
-
-                        // Permissions
-                        if (!empty($resources['permissions']['prefix'])) {
-                            $prefix = addslashes($resources['permissions']['prefix']);
-                            $sql = "DELETE FROM wcf{$wcfN}_user_group_option WHERE optionName LIKE '{$prefix}%'";
-                            $statement = $db->prepareStatement($sql);
-                            $statement->execute();
-                            $log[] = 'Permissions gelöscht: ' . $statement->getAffectedRows();
-                        }
-
-                        // Cronjobs
-                        if (!empty($resources['cronjobs']['namespace'])) {
-                            $namespace = addslashes($resources['cronjobs']['namespace']);
-                            $sql = "DELETE FROM wcf{$wcfN}_cronjob WHERE className LIKE '{$namespace}%'";
-                            $statement = $db->prepareStatement($sql);
-                            $statement->execute();
-                            $log[] = 'Cronjobs gelöscht: ' . $statement->getAffectedRows();
-                        }
-
-                        // Sprachvariablen
-                        if (!empty($resources['language']['prefix'])) {
-                            $prefix = addslashes($resources['language']['prefix']);
-                            $sql = "DELETE FROM wcf{$wcfN}_language_item WHERE languageItem LIKE '{$prefix}%'";
-                            $statement = $db->prepareStatement($sql);
-                            $statement->execute();
-                            $log[] = 'Sprachvariablen gelöscht: ' . $statement->getAffectedRows();
-                        }
-
-                        // Objekttypen
-                        if (!empty($resources['objectTypes']['prefix'])) {
-                            $prefix = addslashes($resources['objectTypes']['prefix']);
-                            $sql = "DELETE FROM wcf{$wcfN}_object_type WHERE objectType LIKE '{$prefix}%'";
-                            $statement = $db->prepareStatement($sql);
-                            $statement->execute();
-                            $log[] = 'Objekttypen gelöscht: ' . $statement->getAffectedRows();
-                        }
-
-                        // Page Locations
-                        if (!empty($resources['pageLocations']['items'])) {
-                            foreach ($resources['pageLocations']['items'] as $identifier) {
-                                $id = addslashes($identifier);
-                                $sql = "DELETE FROM wcf{$wcfN}_page_location WHERE identifier = '{$id}'";
-                                $statement = $db->prepareStatement($sql);
-                                $statement->execute();
-                            }
-                            $log[] = 'Page Locations gelöscht: ' . count($resources['pageLocations']['items']);
-                        }
-
-                        // URL Rules
-                        if (!empty($resources['urlRules']['items'])) {
-                            foreach ($resources['urlRules']['items'] as $pattern) {
-                                $pat = addslashes($pattern);
-                                $sql = "DELETE FROM wcf{$wcfN}_url_rule WHERE pattern = '{$pat}'";
-                                $statement = $db->prepareStatement($sql);
-                                $statement->execute();
-                            }
-                            $log[] = 'URL Rules gelöscht: ' . count($resources['urlRules']['items']);
-                        }
-                    }
-
-                    // Cache löschen
                     $deletedFiles = clearCompiledTemplates();
                     $log[] = 'Cache gelöscht: ' . $deletedFiles . ' Dateien';
 
@@ -2112,7 +2397,7 @@ elseif ($mode === RECOVERY_MODE_CACHE_CLEAR) {
         echo '<div class="alert alert-success">';
         echo '<strong>✓ Cache erfolgreich geleert!</strong><br>';
         echo 'Gelöschte Dateien: ' . $deletedFiles . '<br><br>';
-        echo '<a href="' . WCF::getPath() . '" class="btn-success">→ Zur Hauptseite</a>';
+        echo '<a href="' . htmlspecialchars($recoveryBaseUrl) . '" class="btn-success">→ Zur Hauptseite</a>';
         echo '</div>';
     }
 }
