@@ -494,145 +494,93 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle, ?a
     <link rel="stylesheet" href="<?= \htmlspecialchars($assets['WCFSetup.css']) ?>">
     <?php endif; ?>
     <style>
-        :root {
-            --rc-bg:        #16161e;
-            --rc-surface:   #1e1e2e;
-            --rc-surface2:  #2a2a3c;
-            --rc-border:    #3b3b52;
-            --rc-text:      #cdd6f4;
-            --rc-muted:     #a6adc8;
-            --rc-accent:    #89b4fa;
-            --rc-success:   #a6e3a1;
-            --rc-error:     #f38ba8;
-            --rc-warning:   #fab387;
-            --rc-info:      #89dceb;
-            --rc-header:    #0f0f17;
-            --rc-mono:      "Cascadia Code", "Fira Code", SFMono-Regular, Menlo, Consolas, monospace;
-        }
-
-        /* ── Base ─────────────────────────────────────────────── */
-        *, *::before, *::after { box-sizing: border-box; min-width: 0; }
-        html, body {
-            margin: 0; padding: 0;
-            background: var(--rc-bg);
-            color: var(--rc-text);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            font-size: 14px;
-            line-height: 1.6;
-        }
-
-        /* ── Header ───────────────────────────────────────────── */
-        .pageHeaderContainer { background: var(--rc-header) !important; border-bottom: 1px solid var(--rc-border); }
-        .pageHeaderFacade     { background: transparent !important; padding: 0; }
-        .pageHeaderLogo       { padding: 18px 0; }
-
-        /* ── Layout ───────────────────────────────────────────── */
-        .layoutBoundary       { max-width: 1020px; margin: 0 auto; padding: 0 20px; }
-        .acpPageContentContainer { padding: 36px 0 60px; }
-        .content              { max-width: 980px; }
-
-        /* ── Content header ───────────────────────────────────── */
-        .contentHeader  { margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid var(--rc-border); }
-        .contentTitle   { font-size: 26px; font-weight: 300; color: #fff; margin: 0; letter-spacing: -.3px; }
-
-        /* ── Section ──────────────────────────────────────────── */
-        .section {
-            background: var(--rc-surface);
-            border: 1px solid var(--rc-border);
-            border-radius: 8px;
-            padding: 24px;
-            margin-bottom: 18px;
-        }
-        .sectionHeader  { margin-bottom: 18px; }
-        .sectionTitle   { font-size: 16px; font-weight: 600; color: #fff; margin: 0 0 4px; }
-        .sectionDescription { color: var(--rc-muted); font-size: 13px; margin: 0; }
-
-        /* ── Notice bars ──────────────────────────────────────── */
-        p.info, p.success, p.error, p.warning {
-            padding: 12px 16px;
-            border-radius: 6px;
-            margin: 0 0 16px;
-            border-left: 3px solid;
-        }
-        p.info    { background: rgba(137,220,235,.08); border-color: var(--rc-info);    color: var(--rc-text); }
-        p.success { background: rgba(166,227,161,.10); border-color: var(--rc-success); color: var(--rc-text); }
-        p.error   { background: rgba(243,139,168,.10); border-color: var(--rc-error);   color: var(--rc-text); }
-        p.warning { background: rgba(250,179,135,.10); border-color: var(--rc-warning); color: var(--rc-text); }
-
-        /* ── Forms ────────────────────────────────────────────── */
-        dl { margin: 0 0 16px; }
-        dl dt label { display: block; font-weight: 600; color: var(--rc-text); margin-bottom: 6px; }
-        dl dd { margin: 0; }
-        input[type="text"], input[type="password"], input[type="file"], textarea, select {
-            width: 100%;
-            padding: 9px 12px;
-            background: var(--rc-bg);
-            border: 1px solid var(--rc-border);
-            border-radius: 5px;
-            color: var(--rc-text);
-            font-size: 14px;
-            transition: border-color .15s;
-        }
-        input[type="text"]:focus, input[type="password"]:focus { border-color: var(--rc-accent); outline: none; box-shadow: 0 0 0 3px rgba(137,180,250,.15); }
-        input.long { width: 100%; }
-        small { display: block; color: var(--rc-muted); font-size: 12px; margin-top: 4px; }
-        hr { border: none; border-top: 1px solid var(--rc-border); margin: 24px 0; }
-
-        /* ── Buttons ──────────────────────────────────────────── */
-        .formSubmit { margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; }
-        .formSubmit input[type="submit"],
-        .formSubmit a,
-        button {
-            display: inline-flex; align-items: center;
-            padding: 9px 22px;
-            background: var(--rc-accent); color: #1e1e2e;
-            border: none; border-radius: 5px;
-            font-size: 14px; font-weight: 600;
-            cursor: pointer; text-decoration: none;
-            transition: opacity .15s;
-            white-space: nowrap;
-        }
-        .formSubmit input[type="submit"]:hover,
-        .formSubmit a:hover,
-        button:hover { opacity: .82; }
-
-        /* ── Mode grid ────────────────────────────────────────── */
+        /* ── Recovery-spezifische Ergänzungen zu WCFSetup.css ── */
         .recoveryModeGrid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 14px; margin: 20px 0 28px;
+            gap: 14px;
+            margin: 20px 0 28px;
         }
         .recoveryModeCard {
-            display: block; padding: 22px;
-            background: var(--rc-surface); border: 1px solid var(--rc-border);
-            border-radius: 8px; text-decoration: none; color: var(--rc-text);
-            transition: border-color .15s, background .15s;
+            display: block;
+            padding: 22px;
+            border: 1px solid #d0d0d0;
+            border-radius: 6px;
+            text-decoration: none;
+            color: inherit;
+            transition: border-color .15s, box-shadow .15s;
         }
-        .recoveryModeCard:hover { border-color: var(--rc-accent); background: var(--rc-surface2); }
-        .recoveryModeCard strong { display: block; font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 6px; }
-        .recoveryModeCard span   { font-size: 13px; color: var(--rc-muted); }
+        .recoveryModeCard:hover { border-color: #369; box-shadow: 0 2px 8px rgba(51,102,153,.12); }
+        .recoveryModeCard strong { display: block; font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+        .recoveryModeCard span   { font-size: 13px; opacity: .75; }
+        .recoveryBackLink { display: inline-flex; align-items: center; gap: 5px; text-decoration: none; font-size: 13px; opacity: .7; margin-bottom: 20px; }
+        .recoveryBackLink:hover { opacity: 1; }
+        pre.recoveryLog { overflow-x: auto; max-height: 340px; }
 
-        /* ── Tables ───────────────────────────────────────────── */
-        table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13px; }
-        table th, table td { padding: 9px 14px; text-align: left; border-bottom: 1px solid var(--rc-border); }
-        table th { color: var(--rc-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; border-top: 1px solid var(--rc-border); }
-        table tbody tr:hover { background: rgba(255,255,255,.03); }
+        /* ── Dark Mode (automatisch per prefers-color-scheme) ─── */
+        @media (prefers-color-scheme: dark) {
+            html, body { background: #1a1a2e; color: #cdd6f4; }
 
-        /* ── Code ─────────────────────────────────────────────── */
-        code { font-family: var(--rc-mono); font-size: .875em; background: rgba(255,255,255,.07); padding: 2px 6px; border-radius: 3px; color: var(--rc-accent); word-break: break-all; }
-        pre.recoveryLog { background: var(--rc-bg); border: 1px solid var(--rc-border); border-radius: 6px; padding: 16px; font-family: var(--rc-mono); font-size: 12px; color: var(--rc-text); overflow-x: auto; max-height: 340px; }
+            .pageHeaderContainer,
+            .pageHeaderFacade { background: #0f0f1a !important; border-bottom-color: #2e2e45 !important; }
 
-        /* ── Footer ───────────────────────────────────────────── */
-        .pageFooter { border-top: 1px solid var(--rc-border); background: var(--rc-header); }
-        .pageFooterCopyright { padding: 14px 0; }
-        .copyright { color: var(--rc-muted); font-size: 13px; }
-        .copyright a { color: var(--rc-muted); text-decoration: none; }
-        .copyright a:hover { color: var(--rc-accent); }
+            .pageFooter,
+            #pageFooter { background: #0f0f1a; border-top-color: #2e2e45; }
+            .copyright, .copyright a { color: #6c7086; }
+            .copyright a:hover { color: #89b4fa; }
 
-        /* ── Back link ────────────────────────────────────────── */
-        .recoveryBackLink { display: inline-flex; align-items: center; gap: 6px; color: var(--rc-muted); text-decoration: none; font-size: 13px; margin-bottom: 20px; }
-        .recoveryBackLink:hover { color: var(--rc-accent); }
-        p > .recoveryBackLink { margin: 0; }
+            #acpPageContentContainer,
+            .acpPageContentContainer { background: #1a1a2e; }
+
+            .contentHeader { border-bottom-color: #2e2e45; }
+            .contentTitle { color: #e6edf3; }
+
+            .section { background: #1e1e2e; border-color: #2e2e45; }
+            .sectionTitle { color: #cdd6f4; }
+            .sectionDescription { color: #6c7086; }
+
+            p.info    { background: rgba(137,220,235,.08); border-left: 3px solid #89dceb; color: #cdd6f4; }
+            p.success { background: rgba(166,227,161,.10); border-left: 3px solid #a6e3a1; color: #cdd6f4; }
+            p.error   { background: rgba(243,139,168,.10); border-left: 3px solid #f38ba8; color: #cdd6f4; }
+            p.warning { background: rgba(250,179,135,.10); border-left: 3px solid #fab387; color: #cdd6f4; }
+
+            input[type="text"], input[type="password"], input[type="file"],
+            input[type="url"], input[type="date"], textarea, select {
+                background: #13131f;
+                border-color: #2e2e45;
+                color: #cdd6f4;
+            }
+            input[type="text"]:focus, input[type="password"]:focus {
+                border-color: #89b4fa;
+                box-shadow: 0 0 0 3px rgba(137,180,250,.15);
+                outline: none;
+            }
+            label { color: #cdd6f4; }
+            small { color: #6c7086; }
+
+            .formSubmit input[type="submit"],
+            .formSubmit a,
+            button[type="submit"], button {
+                background: #89b4fa;
+                color: #1e1e2e;
+                border-color: transparent;
+            }
+            .formSubmit input[type="submit"]:hover,
+            .formSubmit a:hover,
+            button:hover { opacity: .85; }
+
+            table th, table td { border-bottom-color: #2e2e45; color: #cdd6f4; }
+            table th { color: #6c7086; border-top-color: #2e2e45; }
+            table tbody tr:hover { background: rgba(255,255,255,.03); }
+
+            code { background: rgba(255,255,255,.07); color: #89b4fa; }
+            pre, pre.recoveryLog { background: #13131f; border-color: #2e2e45; color: #cdd6f4; }
+            hr { border-top-color: #2e2e45; }
+
+            .recoveryModeCard { border-color: #2e2e45; color: #cdd6f4; background: #1e1e2e; }
+            .recoveryModeCard:hover { border-color: #89b4fa; box-shadow: 0 2px 10px rgba(137,180,250,.1); }
+            .recoveryModeCard strong { color: #e6edf3; }
+        }
     </style>
 </head>
 <body id="tplPluginRecovery" data-template="pluginRecovery" data-application="wcf" class="wcfAcp">
