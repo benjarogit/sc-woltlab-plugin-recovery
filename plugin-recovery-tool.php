@@ -494,6 +494,121 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle, ?a
     <link rel="stylesheet" href="<?= \htmlspecialchars($assets['WCFSetup.css']) ?>">
     <?php endif; ?>
     <style>
+        /* ── Dark Theme (Standard) ───────────────────────────── */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #2D2D2D;
+            color: #c0c0c0;
+            padding: 50px 20px;
+            line-height: 1.5;
+        }
+        .container {
+            max-width: 980px;
+            margin: 0 auto;
+            background: #3D3D3D;
+            padding: 40px;
+            border-radius: 3px;
+        }
+        footer {
+            max-width: 980px;
+            margin: 20px auto 0;
+            padding: 10px 0;
+            text-align: right;
+            color: #9D9D9D;
+            font-size: 13px;
+        }
+        footer a { color: inherit; text-decoration: none; }
+        footer a:hover { color: #fff; }
+        h1 { color: #fff; margin-bottom: 10px; font-size: 32px; font-weight: 300; }
+        h2 { color: #fff; margin: 40px 0 10px; font-size: 24px; font-weight: 300; }
+        .subtitle { color: #9D9D9D; margin-bottom: 30px; font-size: 14px; }
+        code { color: #fff; font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; word-break: break-word; }
+        .mode-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }
+        .mode-button { display: block; padding: 20px; background: rgba(0,0,0,.125); border: 1px solid #444; border-radius: 3px; text-decoration: none; color: #c0c0c0; text-align: center; transition: all .2s; cursor: pointer; }
+        .mode-button:hover { background: rgba(0,0,0,.25); border-color: #666; }
+        .mode-button strong { display: block; font-size: 18px; margin-bottom: 8px; color: #fff; }
+        .mode-button span { font-size: 13px; color: #9D9D9D; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: #fff; }
+        input[type="text"], input[type="password"], textarea, select { width: 100%; padding: 10px; border: 1px solid #444; border-radius: 3px; font-size: 14px; background: #2D2D2D; color: #c0c0c0; }
+        input[type="file"] { width: 100%; padding: 10px; border: 1px dashed #444; border-radius: 3px; background: #2D2D2D; color: #c0c0c0; }
+        button, .button { background: #369; color: white; padding: 12px 24px; border: none; border-radius: 3px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background .2s; display: inline-block; text-decoration: none; }
+        button:hover, .button:hover { background: #258; }
+        .btn-danger { background: #c33; }
+        .btn-danger:hover { background: #a22; }
+        .btn-success { background: #3c3; }
+        .btn-success:hover { background: #2a2; }
+        .alert { padding: 15px 20px; margin-bottom: 20px; border-radius: 3px; color: #fff; }
+        .alert-success { background: rgba(60,204,60,.3); border: 1px solid #3c3; }
+        .alert-error   { background: rgba(204,51,51,.3);  border: 1px solid #c33; }
+        .alert-info    { background: rgba(51,102,153,.3); border: 1px solid #369; }
+        .alert-warning { background: rgba(204,153,51,.3); border: 1px solid #c93; }
+        /* p.info/success/error/warning (aktuell genutzt) */
+        p.info, p.success, p.error, p.warning { padding: 15px 20px; margin-bottom: 20px; border-radius: 3px; color: #fff; border: 1px solid; }
+        p.info    { background: rgba(51,102,153,.3);  border-color: #369; }
+        p.success { background: rgba(60,204,60,.3);   border-color: #3c3; }
+        p.error   { background: rgba(204,51,51,.3);   border-color: #c33; }
+        p.warning { background: rgba(204,153,51,.3);  border-color: #c93; }
+        .back-link, .recoveryBackLink { display: inline-block; margin-bottom: 20px; color: #fff; text-decoration: none; }
+        .back-link:hover, .recoveryBackLink:hover { text-decoration: underline; }
+        pre { background: #2D2D2D; padding: 15px; border-radius: 3px; overflow-x: auto; font-size: 13px; color: #c0c0c0; border: 1px solid #444; }
+        pre.recoveryLog { max-height: 340px; }
+        small { color: #9D9D9D; }
+        .table, table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        .table th, .table td, table th, table td { padding: 10px 20px; text-align: left; border-bottom: 1px solid #444; color: #c0c0c0; }
+        .table th, table th { border-top: 1px solid #444; border-bottom-width: 2px; font-weight: 600; color: #fff; }
+        .table tbody tr:nth-child(odd), table tbody tr:nth-child(odd) { background: rgba(0,0,0,.125); }
+        .table tbody tr:hover, table tbody tr:hover { background: rgba(0,0,0,.25); }
+        hr { border: none; border-top: 1px solid #444; margin: 30px 0; }
+        /* formSubmit (neue Klasse) */
+        .formSubmit { margin-top: 20px; }
+        /* section/sectionHeader aus neuer Struktur */
+        .section { background: rgba(0,0,0,.15); border: 1px solid #444; border-radius: 3px; padding: 25px; margin-bottom: 20px; }
+        .sectionTitle { color: #fff; font-size: 20px; font-weight: 300; margin: 0 0 8px; }
+        .sectionDescription { color: #9D9D9D; font-size: 13px; margin: 0 0 15px; }
+        /* mode grid (neue Klasse) */
+        .recoveryModeGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }
+        .recoveryModeCard { display: block; padding: 20px; background: rgba(0,0,0,.125); border: 1px solid #444; border-radius: 3px; text-decoration: none; color: #c0c0c0; text-align: center; transition: all .2s; }
+        .recoveryModeCard:hover { background: rgba(0,0,0,.25); border-color: #666; }
+        .recoveryModeCard strong { display: block; font-size: 18px; margin-bottom: 8px; color: #fff; }
+        .recoveryModeCard span { font-size: 13px; color: #9D9D9D; }
+
+        /* ── Light Mode (automatisch per System-Einstellung) ─── */
+        @media (prefers-color-scheme: light) {
+            body { background: #f0f0f0; color: #333; }
+            .container { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+            footer { color: #777; }
+            footer a:hover { color: #369; }
+            h1, h2 { color: #333; }
+            .subtitle { color: #666; }
+            code { color: #369; background: #f0f4ff; padding: 1px 5px; border-radius: 2px; }
+            .mode-button, .recoveryModeCard { background: #f9f9f9; border-color: #ddd; color: #333; }
+            .mode-button:hover, .recoveryModeCard:hover { background: #f0f4ff; border-color: #369; }
+            .mode-button strong, .recoveryModeCard strong { color: #333; }
+            .mode-button span, .recoveryModeCard span { color: #666; }
+            label { color: #333; }
+            input[type="text"], input[type="password"], textarea, select { background: #fff; border-color: #ccc; color: #333; }
+            input[type="file"] { background: #fff; border-color: #ccc; color: #333; }
+            button, .button, .formSubmit input[type="submit"] { background: #369; color: #fff; }
+            .alert, p.info, p.success, p.error, p.warning { color: #333; }
+            .alert-info,  p.info    { background: rgba(51,102,153,.08);  border-color: #369; }
+            .alert-success, p.success { background: rgba(51,153,51,.08); border-color: #3a3; }
+            .alert-error, p.error   { background: rgba(204,51,51,.08);   border-color: #c33; }
+            .alert-warning, p.warning { background: rgba(200,120,40,.08); border-color: #c83; }
+            .back-link, .recoveryBackLink { color: #369; }
+            pre { background: #fafafa; border-color: #ddd; color: #333; }
+            .table th, .table td, table th, table td { border-color: #ddd; color: #333; }
+            .table th, table th { color: #555; border-top-color: #ddd; }
+            .table tbody tr:nth-child(odd), table tbody tr:nth-child(odd) { background: rgba(0,0,0,.03); }
+            .table tbody tr:hover, table tbody tr:hover { background: rgba(0,0,0,.06); }
+            hr { border-top-color: #ddd; }
+            .section { background: #f9f9f9; border-color: #ddd; }
+            .sectionTitle { color: #333; }
+            .sectionDescription { color: #666; }
+            small { color: #777; }
+        }
+    </style>
         /* ── Standard: Dark Theme (original) ─────────────────── */
         *, *::before, *::after { box-sizing: border-box; min-width: 0; }
 
@@ -613,29 +728,8 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle, ?a
         }
     </style>
 </head>
-<body id="tplPluginRecovery" data-template="pluginRecovery" data-application="wcf" class="wcfAcp">
-<a id="top"></a>
-<div id="pageContainer" class="pageContainer acpPageHiddenMenu">
-    <div class="pageHeaderContainer">
-        <header id="pageHeaderFacade" class="pageHeaderFacade">
-            <div class="layoutBoundary">
-                <div id="pageHeaderLogo" class="pageHeaderLogo">
-                    <?php if ($assets['woltlabSuite.png'] !== ''): ?>
-                    <img src="<?= \htmlspecialchars($assets['woltlabSuite.png']) ?>" alt="" class="pageHeaderLogoLarge" style="width: 281px;height: 40px;display: inline !important;">
-                    <?php else: ?>
-                    <strong>WoltLab Suite</strong>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </header>
-    </div>
-    <div id="acpPageContentContainer" class="acpPageContentContainer">
-        <section id="main" class="main" role="main">
-            <div class="layoutBoundary">
-                <div id="content" class="content">
-                    <header class="contentHeader">
-                        <h1 class="contentTitle"><?= \htmlspecialchars($contentTitle) ?></h1>
-                    </header>
+<body>
+<div class="container">
 <?php
 }
 
@@ -648,24 +742,13 @@ function recoveryRenderPageEnd(?array $assets = null): void
     } catch (\Throwable) {
     }
     ?>
-                </div>
-            </div>
-        </section>
-    </div>
 </div>
-<footer id="pageFooter" class="pageFooter">
-    <div id="pageFooterCopyright" class="pageFooterCopyright">
-        <div class="layoutBoundary">
-            <div class="copyright">
-                <a href="https://github.com/benjarogit/sc-woltlab-plugin-recovery" target="_blank" rel="noopener">Plugin Recovery Tool</a>
-                &copy; <?= \date('Y') ?> Sunny C.
-                <?php if ($baseUrl !== ''): ?>
-                · <a href="<?= \htmlspecialchars($baseUrl) ?>">Installation</a>
-                <?php endif; ?>
-                · <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank" rel="noopener">WoltLab Recovery</a>
-            </div>
-        </div>
-    </div>
+<footer>
+    <a href="https://github.com/benjarogit/sc-woltlab-plugin-recovery" target="_blank" rel="noopener">Plugin Recovery Tool</a> &copy; <?= \date('Y') ?> Sunny C.
+    <?php if ($baseUrl !== ''): ?>
+    | <a href="<?= \htmlspecialchars($baseUrl) ?>">Installation</a>
+    <?php endif; ?>
+    | <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank" rel="noopener">WoltLab Recovery</a>
 </footer>
 </body>
 </html>
