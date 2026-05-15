@@ -35,6 +35,69 @@ if (\PHP_VERSION_ID < 80100) {
     echo '</body></html>';
     exit;
 }
+
+// #region agent log
+/** NDJSON-Debug: Ziel über Umgebung oder Datei neben diesem Skript (öffentliches Repo ohne festen User-Pfad). */
+function recoveryAgentDebugLogPath(): string
+{
+    $p = \getenv('RECOVERY_AGENT_LOG_PATH');
+
+    return (\is_string($p) && $p !== '') ? $p : (__DIR__ . '/plugin-recovery-agent-debug.ndjson');
+}
+
+/** @internal NDJSON-Zeilen für gezieltes Debugging (Hypothesen / Fatals). */
+function recoveryAgentDebugLog(string $hypothesisId, string $location, string $message, array $data = []): void
+{
+    $path = recoveryAgentDebugLogPath();
+    $payload = [
+        'sessionId' => '54d5f7',
+        'hypothesisId' => $hypothesisId,
+        'location' => $location,
+        'message' => $message,
+        'data' => $data,
+        'timestamp' => (int) \round(\microtime(true) * 1000),
+        'runId' => $_SERVER['RECOVERY_DEBUG_RUN'] ?? 'pre-fix',
+    ];
+    $line = \json_encode($payload, \JSON_UNESCAPED_UNICODE | \JSON_INVALID_UTF8_SUBSTITUTE);
+    if ($line !== false) {
+        @\file_put_contents($path, $line . "\n", \FILE_APPEND | \LOCK_EX);
+    }
+}
+
+\register_shutdown_function(static function (): void {
+    $path = recoveryAgentDebugLogPath();
+    $e = \error_get_last();
+    if ($e === null) {
+        return;
+    }
+    $fatalTypes = [\E_ERROR, \E_PARSE, \E_CORE_ERROR, \E_COMPILE_ERROR];
+    if (!\in_array((int) $e['type'], $fatalTypes, true)) {
+        return;
+    }
+    $line = \json_encode([
+        'sessionId' => '54d5f7',
+        'hypothesisId' => 'H-FATAL',
+        'location' => 'shutdown',
+        'message' => 'php_fatal',
+        'data' => [
+            'type' => $e['type'],
+            'message' => $e['message'],
+            'file' => $e['file'],
+            'line' => $e['line'],
+        ],
+        'timestamp' => (int) \round(\microtime(true) * 1000),
+        'runId' => $_SERVER['RECOVERY_DEBUG_RUN'] ?? 'pre-fix',
+    ], \JSON_UNESCAPED_UNICODE | \JSON_INVALID_UTF8_SUBSTITUTE);
+    if ($line !== false) {
+        @\file_put_contents($path, $line . "\n", \FILE_APPEND | \LOCK_EX);
+    }
+});
+recoveryAgentDebugLog('H1', 'tool:boot', 'php_version_gate_passed', [
+    'phpVersion' => \PHP_VERSION,
+    'sapi' => \PHP_SAPI,
+]);
+// #endregion
+
 define('RECOVERY_MODE_SELECTION', 0);
 define('RECOVERY_MODE_ACP_REPAIR', 1);
 define('RECOVERY_MODE_PLUGIN_UNINSTALL', 2);
@@ -2955,10 +3018,17 @@ function recoveryUserDisable2FA(\wcf\system\database\Database $db, int $userID):
  */
 function recoveryGetSetupAssets(): array
 {
+    // #region agent log
+    recoveryAgentDebugLog('H4', 'recoveryGetSetupAssets', 'enter', ['wcfDirDefined' => \defined('WCF_DIR')]);
+    // #endregion
     if (!\defined('WCF_DIR')) {
         try {
             \define('WCF_DIR', recoveryResolveWcfDir());
         } catch (\Throwable $ignored) {
+            // #region agent log
+            recoveryAgentDebugLog('H4', 'recoveryGetSetupAssets', 'wcf_resolve_failed', ['exceptionClass' => \get_class($ignored)]);
+            // #endregion
+
             return ['WCFSetup.css' => '', 'woltlabSuite.png' => ''];
         }
     }
@@ -2974,6 +3044,14 @@ function recoveryGetSetupAssets(): array
         $assets['woltlabSuite.png'] = 'acp/images/woltlabSuite.png';
     }
 
+    // #region agent log
+    recoveryAgentDebugLog('H4', 'recoveryGetSetupAssets', 'exit', [
+        'cssHrefLen' => \strlen($assets['WCFSetup.css']),
+        'pngHrefLen' => \strlen($assets['woltlabSuite.png']),
+        'wcfDirTail' => \substr(\str_replace('\\', '/', (string) (\defined('WCF_DIR') ? \constant('WCF_DIR') : '')), -48),
+    ]);
+    // #endregion
+
     return $assets;
 }
 
@@ -2987,9 +3065,15 @@ function recoveryRenderStandaloneMessage(string $documentTitle, string $contentT
 
 function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '', ?array $assets = null): void
 {
+    // #region agent log
+    recoveryAgentDebugLog('H4', 'recoveryRenderPageStart', 'enter', ['assetsProvided' => $assets !== null]);
+    // #endregion
     try {
         $assets ??= recoveryGetSetupAssets();
     } catch (\Throwable $ignored) {
+        // #region agent log
+        recoveryAgentDebugLog('H4', 'recoveryRenderPageStart', 'getAssets_throw', ['exceptionClass' => \get_class($ignored)]);
+        // #endregion
         $assets = ['WCFSetup.css' => '', 'woltlabSuite.png' => ''];
     }
     ?>
@@ -3294,13 +3378,27 @@ function recoveryRenderGlobalNav(int $mode, string $authHash, string $baseUrl): 
 // AUTHENTIFIZIERUNG (wie WoltLab wsc-recovery.php)
 // ============================================================================
 
+// #region agent log
+recoveryAgentDebugLog('H3', 'tool:auth', 'before_branch', [
+    'method' => $_SERVER['REQUEST_METHOD'] ?? '',
+    'hasTokenParam' => isset($_REQUEST['t']),
+    'tokenLooksValid' => !empty($_REQUEST['t']) && (bool) \preg_match('~^[a-f0-9]{40}$~', (string) $_REQUEST['t']),
+]);
+// #endregion
+
 // Hash generieren bei erstem Aufruf
 if (empty($_REQUEST['t']) || !preg_match('~^[a-f0-9]{40}$~', $_REQUEST['t'])) {
+    // #region agent log
+    recoveryAgentDebugLog('H3', 'tool:auth', 'branch_redirect_new_token', []);
+    // #endregion
     $authHash = bin2hex(random_bytes(20));
     header("Location: plugin-recovery-tool.php?t={$authHash}");
     exit;
 } else {
     $authHash = $_REQUEST['t'];
+    // #region agent log
+    recoveryAgentDebugLog('H3', 'tool:auth', 'branch_using_existing_token', ['tokenLen' => \strlen((string) $authHash)]);
+    // #endregion
 }
 
 $action = (!empty($_GET['action'])) ? $_GET['action'] : '';
@@ -4417,6 +4515,14 @@ if ($isAuthenticated) {
         $recoveryBootstrapError = $e;
     }
 }
+
+// #region agent log
+recoveryAgentDebugLog('H5', 'tool:main', 'pre_render', [
+    'authenticated' => $isAuthenticated,
+    'bootstrapError' => $recoveryBootstrapError !== null ? \get_class($recoveryBootstrapError) : null,
+    'mode' => $mode,
+]);
+// #endregion
 
 recoveryRenderPageStart('Plugin Recovery Tool', 'Plugin Recovery Tool');
 
