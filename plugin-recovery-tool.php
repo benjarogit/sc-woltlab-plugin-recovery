@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.2.7
+ * @version 1.2.8
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -19,7 +19,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.2.7');
+define('RECOVERY_VERSION', '1.2.8');
 define('RECOVERY_MODE_SELECTION', 0);
 define('RECOVERY_MODE_ACP_REPAIR', 1);
 define('RECOVERY_MODE_PLUGIN_UNINSTALL', 2);
@@ -1726,6 +1726,139 @@ function recoveryGenerateSqlBackup(
     return $out;
 }
 
+
+// ============================================================================
+// USER MANAGEMENT HELPERS
+// ============================================================================
+
+function recoveryUserHashPassword(string $password): string
+{
+    // WoltLab Suite 6.x: "Bcrypt:{php_bcrypt_hash}" (wie wsc-recovery.php multifactor-backup)
+    return 'Bcrypt:' . \password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
+}
+
+function recoveryUserGenerateRandomPassword(int $length = 16): string
+{
+    return \substr(
+        \str_replace(['+', '/', '='], '', \base64_encode(\random_bytes(20))),
+        0,
+        $length
+    );
+}
+
+function recoveryUserSearch(\wcf\system\database\Database $db, string $query): array
+{
+    $n = WCF_N;
+    $sql = "SELECT userID, username, email, banned, activationCode, multifactorActive
+            FROM wcf{$n}_user
+            WHERE username LIKE ? OR email LIKE ?
+            ORDER BY userID
+            LIMIT 50";
+    $stmt = $db->prepareStatement($sql);
+    $stmt->execute([$query . '%', $query . '%']);
+    $users = [];
+    while ($row = $stmt->fetchArray()) {
+        $users[] = $row;
+    }
+    return $users;
+}
+
+function recoveryUserGetByID(\wcf\system\database\Database $db, int $userID): ?array
+{
+    $n = WCF_N;
+    $sql = "SELECT userID, username, email, banned, activationCode, multifactorActive
+            FROM wcf{$n}_user WHERE userID = ?";
+    $stmt = $db->prepareStatement($sql);
+    $stmt->execute([$userID]);
+    $row = $stmt->fetchArray();
+    return $row ?: null;
+}
+
+function recoveryUserGetAllGroups(\wcf\system\database\Database $db): array
+{
+    $n = WCF_N;
+    $sql = "SELECT groupID, groupName, groupType FROM wcf{$n}_user_group ORDER BY groupID";
+    $stmt = $db->prepareStatement($sql);
+    $stmt->execute([]);
+    $groups = [];
+    while ($row = $stmt->fetchArray()) {
+        $groups[] = $row;
+    }
+    return $groups;
+}
+
+function recoveryUserGetGroupIDs(\wcf\system\database\Database $db, int $userID): array
+{
+    $n = WCF_N;
+    $sql = "SELECT groupID FROM wcf{$n}_user_to_group WHERE userID = ?";
+    $stmt = $db->prepareStatement($sql);
+    $stmt->execute([$userID]);
+    $ids = [];
+    while ($row = $stmt->fetchArray()) {
+        $ids[] = (int)$row['groupID'];
+    }
+    return $ids;
+}
+
+function recoveryUserResetPassword(\wcf\system\database\Database $db, int $userID, string $newPassword): void
+{
+    $n = WCF_N;
+    $hash = recoveryUserHashPassword($newPassword);
+    // accessToken leeren → alle Sitzungen ungültig
+    $sql = "UPDATE wcf{$n}_user SET password = ?, accessToken = '' WHERE userID = ?";
+    $stmt = $db->prepareStatement($sql);
+    $stmt->execute([$hash, $userID]);
+}
+
+function recoveryUserSetGroups(\wcf\system\database\Database $db, int $userID, array $groupIDs): void
+{
+    $n = WCF_N;
+    // System-Gruppen (Everyone=1, Registered=2) immer behalten
+    foreach ([1, 2] as $sys) {
+        if (!\in_array($sys, $groupIDs, true)) {
+            $groupIDs[] = $sys;
+        }
+    }
+    $groupIDs = \array_unique(\array_map('intval', $groupIDs));
+
+    $sql = "DELETE FROM wcf{$n}_user_to_group WHERE userID = ?";
+    $stmt = $db->prepareStatement($sql);
+    $stmt->execute([$userID]);
+
+    foreach ($groupIDs as $gid) {
+        $sql = "INSERT IGNORE INTO wcf{$n}_user_to_group (userID, groupID) VALUES (?, ?)";
+        $stmt = $db->prepareStatement($sql);
+        $stmt->execute([$userID, $gid]);
+    }
+}
+
+function recoveryUserChangeEmail(\wcf\system\database\Database $db, int $userID, string $email): void
+{
+    $n = WCF_N;
+    $sql = "UPDATE wcf{$n}_user SET email = ? WHERE userID = ?";
+    $stmt = $db->prepareStatement($sql);
+    $stmt->execute([$email, $userID]);
+}
+
+function recoveryUserActivate(\wcf\system\database\Database $db, int $userID): void
+{
+    $n = WCF_N;
+    $sql = "UPDATE wcf{$n}_user SET activationCode = 0, banned = 0, banReason = '', banExpires = 0 WHERE userID = ?";
+    $stmt = $db->prepareStatement($sql);
+    $stmt->execute([$userID]);
+}
+
+function recoveryUserDisable2FA(\wcf\system\database\Database $db, int $userID): void
+{
+    $n = WCF_N;
+    $sql = "UPDATE wcf{$n}_user SET multifactorActive = 0 WHERE userID = ?";
+    $stmt = $db->prepareStatement($sql);
+    $stmt->execute([$userID]);
+    // Alle 2FA-Setups (inkl. Backup-Codes) löschen
+    $sql = "DELETE FROM wcf{$n}_user_multifactor WHERE userID = ?";
+    $stmt = $db->prepareStatement($sql);
+    $stmt->execute([$userID]);
+}
 
 // ============================================================================
 // UI (WoltLab WCFSetup.css – wie Rescue Mode / offizielles Recovery Tool)
@@ -3860,22 +3993,307 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 // ============================================================================
 
 elseif ($mode === RECOVERY_MODE_USER_MANAGEMENT) {
+    $umBaseUrl = '?mode=' . RECOVERY_MODE_USER_MANAGEMENT . '&t=' . \htmlspecialchars($authHash);
+    $umUid     = isset($_GET['um_uid']) ? (int)$_GET['um_uid'] : 0;
+    $umMessages = [];
+    $umErrors   = [];
+
+    // --- POST-Aktionen verarbeiten ---
+    if ($umUid > 0 && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $umAction = $_POST['um_action'] ?? '';
+        try {
+            switch ($umAction) {
+                case 'reset_password':
+                    $newPwd = recoveryUserGenerateRandomPassword();
+                    recoveryUserResetPassword($db, $umUid, $newPwd);
+                    $umMessages[] = 'Passwort wurde auf <code>' . \htmlspecialchars($newPwd) . '</code> gesetzt. Bitte sofort notieren!';
+                    break;
+
+                case 'reset_password_custom':
+                    $customPwd = \trim($_POST['custom_password'] ?? '');
+                    if ($customPwd === '') {
+                        $umErrors[] = 'Bitte ein Passwort eingeben.';
+                    } elseif (\strlen($customPwd) < 8) {
+                        $umErrors[] = 'Passwort muss mindestens 8 Zeichen lang sein.';
+                    } else {
+                        recoveryUserResetPassword($db, $umUid, $customPwd);
+                        $umMessages[] = 'Passwort wurde erfolgreich gesetzt.';
+                    }
+                    break;
+
+                case 'set_groups':
+                    $groupIDs = isset($_POST['group_ids']) && \is_array($_POST['group_ids'])
+                        ? \array_map('intval', $_POST['group_ids'])
+                        : [];
+                    recoveryUserSetGroups($db, $umUid, $groupIDs);
+                    $umMessages[] = 'Gruppenmitgliedschaften wurden aktualisiert.';
+                    break;
+
+                case 'add_admin':
+                    $currentGIDs = recoveryUserGetGroupIDs($db, $umUid);
+                    if (!\in_array(4, $currentGIDs, true)) {
+                        $currentGIDs[] = 4;
+                        recoveryUserSetGroups($db, $umUid, $currentGIDs);
+                        $umMessages[] = 'Benutzer wurde zur Administrator-Gruppe (ID&nbsp;4) hinzugefügt.';
+                    } else {
+                        $umMessages[] = 'Benutzer ist bereits in der Administrator-Gruppe.';
+                    }
+                    break;
+
+                case 'change_email':
+                    $newEmail = \trim($_POST['new_email'] ?? '');
+                    if ($newEmail === '' || !\filter_var($newEmail, FILTER_VALIDATE_EMAIL)) {
+                        $umErrors[] = 'Bitte eine gültige E-Mail-Adresse eingeben.';
+                    } else {
+                        recoveryUserChangeEmail($db, $umUid, $newEmail);
+                        $umMessages[] = 'E-Mail-Adresse auf <code>' . \htmlspecialchars($newEmail) . '</code> geändert.';
+                    }
+                    break;
+
+                case 'activate':
+                    recoveryUserActivate($db, $umUid);
+                    $umMessages[] = 'Benutzer wurde aktiviert und Sperre aufgehoben.';
+                    break;
+
+                case 'disable_2fa':
+                    recoveryUserDisable2FA($db, $umUid);
+                    $umMessages[] = 'Zwei-Faktor-Authentifizierung wurde deaktiviert und alle 2FA-Setups gelöscht.';
+                    break;
+            }
+        } catch (\Throwable $e) {
+            $umErrors[] = 'Fehler: ' . \htmlspecialchars(recoveryFormatUserError($e));
+            recoveryRenderExceptionDetails($e);
+        }
+    }
 ?>
     <h1>User Management</h1>
-    <p class="subtitle">Für User-Management nutzen Sie das offizielle WoltLab Recovery Tool</p>
+    <p class="subtitle">Benutzersuche, Passwort-Reset, Gruppen, E-Mail &amp; Kontoverwaltung</p>
 
-    <div class="alert alert-info">
-        <strong>WoltLab Recovery Tool (wsc-recovery.php)</strong><br><br>
-        Für Admin-Passwort-Reset und Benutzer-Management verwenden Sie bitte das offizielle Tool von WoltLab:<br><br>
-        <strong>Download &amp; Anleitung:</strong><br>
-        <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank" rel="noopener">manual.woltlab.com/de/recovery-tool/</a><br><br>
-        <strong>Funktionen des WoltLab Tools:</strong><br>
-        Admin-Passwort zurücksetzen<br>
-        Benutzer zu Administrator-Gruppe hinzufügen<br>
-        E-Mail-Adressen ändern<br>
-        Benutzer aktivieren/deaktivieren
+<?php if ($umUid > 0):
+    $umUser = recoveryUserGetByID($db, $umUid);
+    if ($umUser === null): ?>
+    <div class="alert alert-error">Benutzer mit ID <code><?= $umUid ?></code> nicht gefunden.</div>
+    <a href="<?= $umBaseUrl ?>" class="back-link">&#8592; Zurück zur Suche</a>
+<?php else:
+    $currentGroupIDs = recoveryUserGetGroupIDs($db, (int)$umUser['userID']);
+?>
+    <a href="<?= $umBaseUrl ?>" class="back-link">&#8592; Anderen Benutzer suchen</a>
+
+    <h2>Benutzer: <code><?= \htmlspecialchars($umUser['username']) ?></code> <small style="font-size:16px; color:#9D9D9D;">(ID&nbsp;<?= (int)$umUser['userID'] ?>)</small></h2>
+
+    <table style="margin-bottom: 24px;">
+        <tbody>
+            <tr><th style="width:160px">Benutzername</th><td><?= \htmlspecialchars($umUser['username']) ?></td></tr>
+            <tr><th>E-Mail</th><td><?= \htmlspecialchars($umUser['email']) ?></td></tr>
+            <tr><th>Status</th><td>
+                <?php if ($umUser['banned']): ?>
+                    <span style="color:#e74c3c">&#9632; Gesperrt</span>
+                <?php elseif ($umUser['activationCode'] != 0): ?>
+                    <span style="color:#f39c12">&#9632; Aktivierung ausstehend</span>
+                <?php else: ?>
+                    <span style="color:#00bc8c">&#9632; Aktiv</span>
+                <?php endif; ?>
+            </td></tr>
+            <tr><th>2FA</th><td><?= $umUser['multifactorActive'] ? '<span style="color:#f39c12">Aktiv</span>' : '<span style="color:#9D9D9D">Inaktiv</span>' ?></td></tr>
+            <tr><th>Gruppen</th><td><?= \implode(', ', $currentGroupIDs) ?></td></tr>
+        </tbody>
+    </table>
+
+    <?php foreach ($umErrors as $err): ?>
+    <div class="alert alert-error"><?= $err ?></div>
+    <?php endforeach; ?>
+    <?php foreach ($umMessages as $msg): ?>
+    <div class="alert alert-success"><?= $msg ?></div>
+    <?php endforeach; ?>
+
+    <!-- ── Passwort zurücksetzen ──────────────────────────────────────── -->
+    <h2>Passwort zurücksetzen</h2>
+    <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start;">
+        <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>" style="flex:1; min-width:200px;">
+            <input type="hidden" name="um_action" value="reset_password">
+            <p style="margin-bottom:12px; font-size:13px; color:#9D9D9D;">Generiert ein zufälliges sicheres Passwort und zeigt es einmalig an.</p>
+            <button type="submit" class="btn-danger">Zufälliges Passwort setzen</button>
+        </form>
+        <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>" style="flex:2; min-width:280px;">
+            <input type="hidden" name="um_action" value="reset_password_custom">
+            <div class="form-group">
+                <label for="um_custom_pwd">Eigenes Passwort setzen (min. 8 Zeichen)</label>
+                <input type="password" id="um_custom_pwd" name="custom_password" autocomplete="new-password" placeholder="Neues Passwort eingeben">
+            </div>
+            <button type="submit">Passwort setzen</button>
+        </form>
     </div>
 
+    <!-- ── E-Mail ändern ──────────────────────────────────────────────── -->
+    <h2>E-Mail-Adresse ändern</h2>
+    <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>">
+        <input type="hidden" name="um_action" value="change_email">
+        <div class="form-group">
+            <label for="um_email">Neue E-Mail-Adresse</label>
+            <input type="text" id="um_email" name="new_email" value="<?= \htmlspecialchars($umUser['email']) ?>" placeholder="neue@email.de">
+        </div>
+        <button type="submit">E-Mail ändern</button>
+    </form>
+
+    <!-- ── Konto aktivieren / Sperre aufheben ────────────────────────── -->
+    <?php if ($umUser['banned'] || $umUser['activationCode'] != 0): ?>
+    <h2>Konto aktivieren &amp; Sperre aufheben</h2>
+    <p style="margin-bottom:12px; font-size:13px; color:#9D9D9D;">
+        Setzt <code>activationCode&nbsp;=&nbsp;0</code>, <code>banned&nbsp;=&nbsp;0</code> und löscht den Sperr-Grund.
+    </p>
+    <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>">
+        <input type="hidden" name="um_action" value="activate">
+        <button type="submit" class="btn-success">Benutzer aktivieren &amp; entsperren</button>
+    </form>
+    <?php endif; ?>
+
+    <!-- ── 2FA deaktivieren ───────────────────────────────────────────── -->
+    <?php if ($umUser['multifactorActive']): ?>
+    <h2>Zwei-Faktor-Authentifizierung deaktivieren</h2>
+    <p style="margin-bottom:12px; font-size:13px; color:#9D9D9D;">
+        Löscht alle 2FA-Setups (inkl. Backup-Codes) und setzt <code>multifactorActive&nbsp;=&nbsp;0</code>.
+    </p>
+    <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>">
+        <input type="hidden" name="um_action" value="disable_2fa">
+        <button type="submit" class="btn-danger">2FA deaktivieren</button>
+    </form>
+    <?php endif; ?>
+
+    <!-- ── Schnell zur Administrator-Gruppe ──────────────────────────── -->
+    <h2>Administrator-Gruppe (ID&nbsp;4)</h2>
+    <?php if (\in_array(4, $currentGroupIDs, true)): ?>
+    <div class="alert alert-info">Benutzer ist bereits in der Administrator-Gruppe (ID&nbsp;4).</div>
+    <?php else: ?>
+    <p style="margin-bottom:12px; font-size:13px; color:#9D9D9D;">
+        Fügt den Benutzer direkt zur WoltLab-Standard-Administrator-Gruppe (groupID&nbsp;4) hinzu.
+    </p>
+    <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>">
+        <input type="hidden" name="um_action" value="add_admin">
+        <button type="submit" class="btn-success">Zur Administrator-Gruppe hinzufügen</button>
+    </form>
+    <?php endif; ?>
+
+    <!-- ── Alle Gruppen verwalten ─────────────────────────────────────── -->
+    <h2>Alle Gruppen verwalten</h2>
+    <?php $allGroups = recoveryUserGetAllGroups($db); ?>
+    <form method="POST" action="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umUser['userID'] ?>">
+        <input type="hidden" name="um_action" value="set_groups">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width:1px"></th>
+                    <th style="width:55px">ID</th>
+                    <th>Gruppe</th>
+                    <th style="width:80px">Typ</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php foreach ($allGroups as $grp):
+                $gid      = (int)$grp['groupID'];
+                $isSystem = \in_array($gid, [1, 2], true);
+                $isMember = \in_array($gid, $currentGroupIDs, true);
+                $gType    = match((int)$grp['groupType']) {
+                    1 => 'System',
+                    4 => 'Admin',
+                    default => 'Normal',
+                };
+            ?>
+                <tr>
+                    <td style="text-align:center;">
+                        <input type="checkbox" name="group_ids[]" id="grp_<?= $gid ?>"
+                            value="<?= $gid ?>"
+                            <?= $isMember ? 'checked' : '' ?>
+                            <?= $isSystem ? 'disabled' : '' ?>>
+                        <?php if ($isSystem): ?>
+                        <input type="hidden" name="group_ids[]" value="<?= $gid ?>">
+                        <?php endif; ?>
+                    </td>
+                    <td><?= $gid ?></td>
+                    <td><label for="grp_<?= $gid ?>"><?= \htmlspecialchars($grp['groupName']) ?></label></td>
+                    <td><small><?= $gType ?></small></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        <button type="submit" style="margin-top:15px;">Gruppen speichern</button>
+    </form>
+
+<?php endif; // $umUser !== null
+
+else: // $umUid === 0 → Suchmaske ?>
+
+    <?php foreach ($umErrors as $err): ?>
+    <div class="alert alert-error"><?= $err ?></div>
+    <?php endforeach; ?>
+    <?php foreach ($umMessages as $msg): ?>
+    <div class="alert alert-success"><?= $msg ?></div>
+    <?php endforeach; ?>
+
+    <h2>Benutzer suchen</h2>
+    <form method="POST" action="<?= $umBaseUrl ?>">
+        <div class="form-group">
+            <label for="um_search">Benutzername oder E-Mail (Präfix-Suche, max. 50 Treffer)</label>
+            <input type="text" id="um_search" name="um_search"
+                value="<?= \htmlspecialchars($_POST['um_search'] ?? '') ?>"
+                placeholder="z.&thinsp;B. Admin oder admin@example.com" autofocus>
+        </div>
+        <button type="submit">Suchen</button>
+    </form>
+
+    <?php
+    $umSearchQuery = \trim($_POST['um_search'] ?? '');
+    if ($umSearchQuery !== ''):
+        try {
+            $umResults = recoveryUserSearch($db, $umSearchQuery);
+        } catch (\Throwable $e) {
+            $umResults = [];
+            echo '<div class="alert alert-error">Suchfehler: ' . \htmlspecialchars($e->getMessage()) . '</div>';
+        }
+    ?>
+
+    <?php if (empty($umResults)): ?>
+    <div class="alert alert-info" style="margin-top:20px;">
+        Keine Benutzer für <code><?= \htmlspecialchars($umSearchQuery) ?></code> gefunden.
+    </div>
+    <?php else: ?>
+    <table style="margin-top:20px;">
+        <thead>
+            <tr>
+                <th style="width:55px">ID</th>
+                <th>Benutzername</th>
+                <th>E-Mail</th>
+                <th style="width:100px">Status</th>
+                <th style="width:55px">2FA</th>
+                <th style="width:1px"></th>
+            </tr>
+        </thead>
+        <tbody>
+        <?php foreach ($umResults as $umRow): ?>
+            <tr>
+                <td><?= (int)$umRow['userID'] ?></td>
+                <td><?= \htmlspecialchars($umRow['username']) ?></td>
+                <td><?= \htmlspecialchars($umRow['email']) ?></td>
+                <td>
+                    <?php if ($umRow['banned']): ?>
+                        <span style="color:#e74c3c">Gesperrt</span>
+                    <?php elseif ($umRow['activationCode'] != 0): ?>
+                        <span style="color:#f39c12">Inaktiv</span>
+                    <?php else: ?>
+                        <span style="color:#00bc8c">Aktiv</span>
+                    <?php endif; ?>
+                </td>
+                <td><?= $umRow['multifactorActive'] ? '<span style="color:#f39c12">Ja</span>' : 'Nein' ?></td>
+                <td>
+                    <a href="<?= $umBaseUrl ?>&amp;um_uid=<?= (int)$umRow['userID'] ?>" class="button" style="padding:5px 12px; font-size:13px;">Bearbeiten</a>
+                </td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+    <?php endif; ?>
+    <?php endif; // $umSearchQuery !== '' ?>
+
+<?php endif; // $umUid > 0 ?>
 <?php
 }
 
