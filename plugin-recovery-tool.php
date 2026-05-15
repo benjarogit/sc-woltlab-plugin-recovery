@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.4.1
+ * @version 1.4.2
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -19,7 +19,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.4.1');
+define('RECOVERY_VERSION', '1.4.2');
 
 // PHP 7.4 polyfills (str_* in PHP 8.0+)
 if (!\function_exists('str_starts_with')) {
@@ -384,7 +384,9 @@ function recoveryHandlePackageUpload(array $file): array
 
 function recoveryCleanupUploadWorkspace(?string $uploadDir = null): void
 {
-    $uploadDir ??= __DIR__ . '/uploads';
+    if ($uploadDir === null) {
+        $uploadDir = __DIR__ . '/uploads';
+    }
     if (!\is_dir($uploadDir)) {
         return;
     }
@@ -637,7 +639,9 @@ function recoveryEnsureSession(): void
 function recoveryStorePackageContext(string $authHash, string $packageIdentifier, ?string $extractDir): void
 {
     recoveryEnsureSession();
-    $_SESSION['recovery_pkg'] ??= [];
+    if (!isset($_SESSION['recovery_pkg'])) {
+        $_SESSION['recovery_pkg'] = [];
+    }
     $_SESSION['recovery_pkg'][$authHash] = [
         'packageIdentifier' => $packageIdentifier,
         'extractDir' => $extractDir,
@@ -1798,7 +1802,9 @@ function recoveryPerformFullPluginCleanup(
         }
 
         $baseTables = \array_map(
-            static fn(string $name): string => \str_replace('`', '', $name),
+            function ($name) {
+                return \str_replace('`', '', (string) $name);
+            },
             getBasePluginTables($wcfN)
         );
         if (\in_array($safeTable, $baseTables, true)) {
@@ -2815,7 +2821,9 @@ function recoveryRenderStandaloneMessage(string $documentTitle, string $contentT
 
 function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '', ?array $assets = null): void
 {
-    $assets ??= recoveryGetSetupAssets();
+    if ($assets === null) {
+        $assets = recoveryGetSetupAssets();
+    }
     ?>
 <!DOCTYPE html>
 <html lang="de">
@@ -3181,7 +3189,9 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
 
 function recoveryRenderPageEnd(?array $assets = null): void
 {
-    $assets ??= recoveryGetSetupAssets();
+    if ($assets === null) {
+        $assets = recoveryGetSetupAssets();
+    }
     $baseUrl = '';
     try {
         $baseUrl = recoveryGetSiteBaseUrl();
@@ -3224,7 +3234,13 @@ function recoveryRenderGlobalNav(int $mode, string $authHash, string $baseUrl): 
 
 // Hash generieren bei erstem Aufruf
 if (empty($_REQUEST['t']) || !preg_match('~^[a-f0-9]{40}$~', $_REQUEST['t'])) {
-    $authHash = bin2hex(random_bytes(20));
+    if (\function_exists('random_bytes')) {
+        $authHash = \bin2hex(\random_bytes(20));
+    } elseif (\function_exists('openssl_random_pseudo_bytes')) {
+        $authHash = \bin2hex(\openssl_random_pseudo_bytes(20));
+    } else {
+        $authHash = \bin2hex(\hash('sha256', \uniqid((string) \mt_rand(), true), true));
+    }
     header("Location: plugin-recovery-tool.php?t={$authHash}");
     exit;
 } else {
@@ -4881,7 +4897,9 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 
                     // Eingaben validieren
                     $pipMap    = recoveryGetPipResourceMap();
-                    $validPips = \array_values(\array_filter($selectedPips, fn($p) => isset($pipMap[$p]) && $pipMap[$p]['safe'] && $pipMap[$p]['table'] !== ''));
+                    $validPips = \array_values(\array_filter($selectedPips, function ($p) use ($pipMap) {
+                        return isset($pipMap[$p]) && $pipMap[$p]['safe'] && $pipMap[$p]['table'] !== '';
+                    }));
                     $validDropTables = [];
                     foreach ($dropTables as $t) {
                         $s = \str_replace('`', '', (string)$t);
@@ -5018,7 +5036,9 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     $deleteFiles   = !empty($_POST['delete_files']) && $_POST['delete_files'] === '1';
 
                     $pipMap    = recoveryGetPipResourceMap();
-                    $validPips = \array_values(\array_filter($selectedPips, fn($p) => isset($pipMap[$p]) && $pipMap[$p]['safe'] && $pipMap[$p]['table'] !== ''));
+                    $validPips = \array_values(\array_filter($selectedPips, function ($p) use ($pipMap) {
+                        return isset($pipMap[$p]) && $pipMap[$p]['safe'] && $pipMap[$p]['table'] !== '';
+                    }));
                     $validDropTables = [];
                     foreach ($dropTables as $t) {
                         $s = \str_replace('`', '', (string)$t);
