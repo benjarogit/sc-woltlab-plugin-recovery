@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.2.9
+ * @version 1.3.0
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
  * Kein global.php – funktioniert auch wenn das ACP durch ein Plugin kaputt ist.
@@ -19,7 +19,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.2.9');
+define('RECOVERY_VERSION', '1.3.0');
 define('RECOVERY_MODE_SELECTION', 0);
 define('RECOVERY_MODE_ACP_REPAIR', 1);
 define('RECOVERY_MODE_PLUGIN_UNINSTALL', 2);
@@ -2034,6 +2034,21 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         .table tbody tr:hover, table tbody tr:hover { background: rgba(0, 0, 0, .25); }
         hr { border: none; border-top: 1px solid #444444; margin: 30px 0; }
 
+        /* ── Wizard Step Indicator ─────────────────────────────────────── */
+        .wizardSteps { display: flex; align-items: flex-start; margin: 0 0 30px; padding: 0; }
+        .wizardStep { display: flex; flex-direction: column; align-items: center; position: relative; flex: 1; }
+        .wizardStep::after { content: ''; position: absolute; top: 20px; left: 50%; width: 100%; height: 2px; background: #444; z-index: 0; }
+        .wizardStep:last-child::after { display: none; }
+        .wizardStepNumber { width: 40px; height: 40px; border-radius: 50%; background: #444; color: #9D9D9D; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; position: relative; z-index: 1; border: 2px solid #444; transition: background .3s, border-color .3s, color .3s; }
+        .wizardStep.active .wizardStepNumber { background: #369; color: #fff; border-color: #369; }
+        .wizardStep.completed .wizardStepNumber { background: #3c3; color: transparent; border-color: #3c3; }
+        .wizardStep.completed .wizardStepNumber::after { content: '✓'; color: #fff; font-size: 16px; font-weight: 700; position: absolute; }
+        .wizardStepLabel { margin-top: 8px; font-size: 12px; color: #9D9D9D; text-align: center; line-height: 1.3; }
+        .wizardStep.active .wizardStepLabel { color: #fff; font-weight: 600; }
+        .wizardStep.completed .wizardStepLabel { color: #5d5; }
+        .wizardPanel { display: none; }
+        .wizardPanel.active { display: block; }
+
         @media (prefers-color-scheme: light) {
             body { background: #f0f0f0; color: #333; }
             .container { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
@@ -2064,6 +2079,13 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
             small { color: #777; }
             .recovery-global-nav { border-bottom-color: #ddd; }
             .recovery-nav-link { color: #369; }
+            .wizardStep::after { background: #ddd; }
+            .wizardStepNumber { background: #e0e0e0; color: #888; border-color: #ddd; }
+            .wizardStep.active .wizardStepNumber { background: #369; color: #fff; border-color: #369; }
+            .wizardStep.completed .wizardStepNumber { background: #3a3; border-color: #3a3; }
+            .wizardStepLabel { color: #888; }
+            .wizardStep.active .wizardStepLabel { color: #369; font-weight: 600; }
+            .wizardStep.completed .wizardStepLabel { color: #3a3; }
         }
         .recovery-global-nav {
             display: flex;
@@ -2082,7 +2104,6 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         }
         .recovery-nav-link:hover { text-decoration: underline; }
         .recovery-nav-acp { margin-left: auto; }
-        .recovery-top-actions { text-align: right; margin-bottom: 20px; }
 
         /* Font Awesome Icon-Abstände */
         .fa-solid, .fas { margin-right: 6px; }
@@ -2134,11 +2155,6 @@ function recoveryRenderGlobalNav(int $mode, string $authHash, string $baseUrl): 
     echo '</nav>';
 }
 
-function recoveryRenderAcpSuccessLink(string $baseUrl, string $label = 'Zum ACP'): void
-{
-    echo '<br><a href="' . \htmlspecialchars($baseUrl . 'acp/') . '" class="button btn-success">'
-        . '<i class="fa-solid fa-gauge-high"></i> ' . \htmlspecialchars($label) . '</a>';
-}
 
 // ============================================================================
 // AUTHENTIFIZIERUNG (wie WoltLab wsc-recovery.php)
@@ -3194,22 +3210,51 @@ if (!$isAuthenticated) {
     <h1>Plugin Recovery Tool</h1>
     <p class="subtitle">Authentifizierung erforderlich</p>
 
-    <div class="alert alert-warning">
-        <strong><i class="fa-solid fa-file-arrow-down"></i> Schritt 1:</strong> Auth-Datei herunterladen<br>
-        <a href="?action=download-auth-file&amp;t=<?= htmlspecialchars($authHash) ?>" class="button" style="display: inline-block; margin-top: 10px;" id="downloadBtn">
+    <div class="wizardSteps" id="authWizardSteps">
+        <div class="wizardStep active">
+            <div class="wizardStepNumber">1</div>
+            <div class="wizardStepLabel">Auth-Datei laden</div>
+        </div>
+        <div class="wizardStep">
+            <div class="wizardStepNumber">2</div>
+            <div class="wizardStepLabel">Hochladen</div>
+        </div>
+        <div class="wizardStep">
+            <div class="wizardStepNumber">3</div>
+            <div class="wizardStepLabel">Starten</div>
+        </div>
+    </div>
+
+    <div class="wizardPanel active" id="wp1">
+        <div class="alert alert-info">
+            <strong><i class="fa-solid fa-file-arrow-down"></i> Schritt 1: Auth-Datei herunterladen</strong><br>
+            Laden Sie die Authentifizierungsdatei herunter. Sie enthält ein einmaliges Token
+            und wird benötigt, um Ihren Zugriff auf dieses Tool zu verifizieren.
+        </div>
+        <a href="?action=download-auth-file&amp;t=<?= htmlspecialchars($authHash) ?>" class="button" id="downloadBtn">
             <i class="fa-solid fa-file-arrow-down"></i> plugin-recovery-auth.php herunterladen
         </a>
     </div>
 
-    <div class="alert alert-info" style="margin-top: 20px;" id="step2" style="display: none;">
-        <strong><i class="fa-solid fa-file-arrow-up"></i> Schritt 2:</strong> Datei hochladen<br>
-        Laden Sie die heruntergeladene Datei <code><?= htmlspecialchars($authFilename) ?></code> in dasselbe Verzeichnis hoch,
-        in dem sich diese <code>plugin-recovery-tool.php</code> befindet.
+    <div class="wizardPanel" id="wp2">
+        <div class="alert alert-info">
+            <strong><i class="fa-solid fa-file-arrow-up"></i> Schritt 2: Datei hochladen</strong><br>
+            Laden Sie die heruntergeladene Datei <code><?= htmlspecialchars($authFilename) ?></code> in dasselbe
+            Verzeichnis hoch, in dem sich diese <code>plugin-recovery-tool.php</code> befindet.<br><br>
+            <small>Nutzen Sie FTP, SFTP oder den Dateimanager Ihres Hosters. Das Tool erkennt den Upload automatisch.</small>
+        </div>
+        <button type="button" class="button" id="uploadedBtn">
+            <i class="fa-solid fa-circle-check"></i> Ich habe die Datei hochgeladen
+        </button>
+        <span id="pollStatus" style="display:inline-block;margin-left:14px;color:#9D9D9D;font-size:13px;"></span>
     </div>
 
-    <div class="alert alert-info" style="margin-top: 20px;" id="step3" style="display: none;">
-        <strong><i class="fa-solid fa-rocket"></i> Schritt 3:</strong> Recovery starten<br>
-        <a href="?t=<?= htmlspecialchars($authHash) ?>&amp;auth_ok=1" class="button btn-success" style="margin-top: 10px;">
+    <div class="wizardPanel" id="wp3">
+        <div class="alert alert-success">
+            <strong><i class="fa-solid fa-circle-check"></i> Authentifizierung erfolgreich!</strong><br>
+            Die Auth-Datei wurde erkannt. Sie können das Recovery Tool jetzt starten.
+        </div>
+        <a href="?t=<?= htmlspecialchars($authHash) ?>&amp;auth_ok=1" class="button btn-success" style="font-size:16px;padding:16px 32px;">
             <i class="fa-solid fa-rocket"></i> Recovery Tool starten
         </a>
     </div>
@@ -3221,28 +3266,47 @@ if (!$isAuthenticated) {
     </div>
 
     <script>
-    document.getElementById('downloadBtn').addEventListener('click', function() {
-        setTimeout(function() {
-            document.getElementById('step2').style.display = 'block';
-            document.getElementById('step3').style.display = 'block';
+    (function () {
+        var authToken = <?= \json_encode($authHash) ?>;
+        var pollInterval = null;
+
+        function goToStep(n) {
+            document.querySelectorAll('#authWizardSteps .wizardStep').forEach(function (el, i) {
+                el.classList.remove('active', 'completed');
+                if (i + 1 < n) { el.classList.add('completed'); }
+                if (i + 1 === n) { el.classList.add('active'); }
+            });
+            document.querySelectorAll('.wizardPanel').forEach(function (el, i) {
+                el.classList.toggle('active', i + 1 === n);
+            });
+        }
+
+        document.getElementById('downloadBtn').addEventListener('click', function () {
+            setTimeout(function () { goToStep(2); }, 800);
+        });
+
+        document.getElementById('uploadedBtn').addEventListener('click', function () {
+            document.getElementById('pollStatus').textContent = 'Prüfe Upload\u2026';
             startAuthPolling();
-        }, 500);
-    });
-    function startAuthPolling() {
-        var token = new URLSearchParams(window.location.search).get('t');
-        if (!token) return;
-        var interval = setInterval(function() {
-            fetch('?action=auth-status&t=' + encodeURIComponent(token))
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    if (data.ok) {
-                        clearInterval(interval);
-                        window.location.href = '?t=' + encodeURIComponent(token) + '&auth_ok=1';
-                    }
-                })
-                .catch(function() {});
-        }, 2000);
-    }
+        });
+
+        function startAuthPolling() {
+            if (pollInterval) { clearInterval(pollInterval); }
+            pollInterval = setInterval(function () {
+                fetch('?action=auth-status&t=' + encodeURIComponent(authToken))
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (data.ok) {
+                            clearInterval(pollInterval);
+                            goToStep(3);
+                        } else {
+                            document.getElementById('pollStatus').textContent = 'Datei noch nicht gefunden \u2013 prüfe erneut\u2026';
+                        }
+                    })
+                    .catch(function () {});
+            }, 2000);
+        }
+    }());
     </script>
 <?php
     recoveryRenderPageEnd();
@@ -3290,10 +3354,6 @@ if ($mode === RECOVERY_MODE_SELECTION) {
     <?php if (isset($_GET['auth_ok'])): ?>
     <div class="alert alert-success"><i class="fa-solid fa-circle-check"></i> <strong>Authentifizierung erfolgreich.</strong> Sie können jetzt einen Recovery-Modus wählen.</div>
     <?php endif; ?>
-
-    <div class="recovery-top-actions">
-        <a href="<?= htmlspecialchars($recoveryBaseUrl) ?>acp/" class="button"><i class="fa-solid fa-gauge-high"></i> Zum ACP</a>
-    </div>
 
     <h1>WoltLab Suite Recovery Tool</h1>
     <p class="subtitle">Wählen Sie den gewünschten Recovery-Modus</p>
@@ -3484,8 +3544,7 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
                         echo '<div class="alert alert-success">';
                         echo '<strong>✓ ACP-Repair erfolgreich!</strong><br>';
                         echo 'Gelöschte Menüeinträge: ' . $deletedCount . '<br>';
-                        echo 'Cache wurde geleert.<br><br>';
-                        recoveryRenderAcpSuccessLink($recoveryBaseUrl, '→ Zum ACP');
+                        echo 'Cache wurde geleert.<br>';
                         echo '</div>';
                     } catch (\Throwable $e) {
                         recoverySafeRollBackTransaction($db);
@@ -3512,19 +3571,6 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 ?>
     <h1>Plugin Uninstall</h1>
     <p class="subtitle">Deinstalliert Plugin komplett – per-Ressource-Auswahl, SQL-Backup &amp; Dry-Run</p>
-    <style>
-        .step-indicator { display: flex; gap: 0; margin-bottom: 28px; }
-        .step-indicator .si-step { flex: 1; text-align: center; padding: 10px 8px; font-size: 13px;
-            background: rgba(0,0,0,.15); border: 1px solid #444; color: #999; }
-        .step-indicator .si-step:not(:last-child) { border-right: none; }
-        .step-indicator .si-step.active { background: rgba(51,102,153,.25); border-color: #369; color: #fff; font-weight: 600; }
-        .step-indicator .si-step.done { background: rgba(60,153,60,.15); border-color: #3a3; color: #9d9; }
-        @media (prefers-color-scheme: light) {
-            .step-indicator .si-step { background: #f5f5f5; border-color: #ccc; color: #888; }
-            .step-indicator .si-step.active { background: #e8f0ff; border-color: #369; color: #369; }
-            .step-indicator .si-step.done { background: #e8ffe8; border-color: #3a3; color: #3a3; }
-        }
-    </style>
 
 <?php
     $uninstallStep = isset($_POST['uninstall_step']) ? (string)\trim($_POST['uninstall_step']) : '';
@@ -3534,10 +3580,19 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
     // ── EINGABE-SCREEN ────────────────────────────────────────────────────────
     if (!$hasIdentifierInput && $uninstallStep === '') {
 ?>
-    <div class="step-indicator">
-        <div class="si-step active">1 · Analyse &amp; Auswahl</div>
-        <div class="si-step">2 · Backup</div>
-        <div class="si-step">3 · Ausführen</div>
+    <div class="wizardSteps">
+        <div class="wizardStep active">
+            <div class="wizardStepNumber">1</div>
+            <div class="wizardStepLabel">Analyse &amp; Auswahl</div>
+        </div>
+        <div class="wizardStep">
+            <div class="wizardStepNumber">2</div>
+            <div class="wizardStepLabel">Backup</div>
+        </div>
+        <div class="wizardStep">
+            <div class="wizardStepNumber">3</div>
+            <div class="wizardStepLabel">Ausführen</div>
+        </div>
     </div>
 
     <form method="POST">
@@ -3591,10 +3646,19 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                 // ── SCHRITT 1: ANALYSE + AUSWAHL ──────────────────────────────
                 if ($uninstallStep === '') {
 ?>
-    <div class="step-indicator">
-        <div class="si-step active">1 · Analyse &amp; Auswahl</div>
-        <div class="si-step">2 · Backup</div>
-        <div class="si-step">3 · Ausführen</div>
+    <div class="wizardSteps">
+        <div class="wizardStep active">
+            <div class="wizardStepNumber">1</div>
+            <div class="wizardStepLabel">Analyse &amp; Auswahl</div>
+        </div>
+        <div class="wizardStep">
+            <div class="wizardStepNumber">2</div>
+            <div class="wizardStepLabel">Backup</div>
+        </div>
+        <div class="wizardStep">
+            <div class="wizardStepNumber">3</div>
+            <div class="wizardStepLabel">Ausführen</div>
+        </div>
     </div>
 <?php
                     // Paket-Info-Box
@@ -3982,9 +4046,6 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                             echo '&bull; ' . \htmlspecialchars($entry) . '<br>';
                         }
 
-                        if (!$isDryRun) {
-                            recoveryRenderAcpSuccessLink($recoveryBaseUrl);
-                        }
                         echo '</div>';
 
                     } catch (\Throwable $e) {
@@ -4339,8 +4400,7 @@ elseif ($mode === RECOVERY_MODE_CACHE_CLEAR) {
 
         echo '<div class="alert alert-success">';
         echo '<strong>Cache erfolgreich geleert.</strong><br>';
-        echo 'Gelöschte Dateien: ' . $deletedFiles . '<br><br>';
-        recoveryRenderAcpSuccessLink($recoveryBaseUrl);
+        echo 'Gelöschte Dateien: ' . $deletedFiles . '<br>';
         echo '</div>';
     }
 }
@@ -4389,7 +4449,6 @@ elseif ($mode === RECOVERY_MODE_PACKAGE_LIST_REPAIR) {
                 echo '• ' . \htmlspecialchars($entry) . '<br>';
             }
             echo '<br>Cache-Dateien gelöscht: ' . (int) $deletedFiles . '<br>';
-            recoveryRenderAcpSuccessLink($recoveryBaseUrl, '→ ACP-Paketliste testen');
             echo '</div>';
         } catch (\Throwable $e) {
             echo '<div class="alert alert-error"><strong>Fehler:</strong> '
