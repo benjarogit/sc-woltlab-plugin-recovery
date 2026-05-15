@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.1
+ * @version 1.5.2
  * @requires PHP >= 8.3
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -20,7 +20,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.1');
+define('RECOVERY_VERSION', '1.5.2');
 define('RECOVERY_MIN_PHP_VERSION', '8.3.0');
 
 if (\PHP_VERSION_ID < 80300) {
@@ -1093,6 +1093,115 @@ function recoveryTryDeleteByPackageId(
     }
 }
 
+function recoveryTryExecuteDelete(
+    \wcf\system\database\Database $db,
+    string $sql,
+    array $parameters,
+    string $logLabel,
+    array &$log
+): void {
+    try {
+        recoveryExecuteDelete($db, $sql, $parameters, $logLabel, $log);
+    } catch (\Throwable $e) {
+        $log[] = $logLabel . ' übersprungen: ' . $e->getMessage();
+    }
+}
+
+function recoveryTryDeletePackageRequirements(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    int $packageID,
+    array &$log
+): void {
+    recoveryTryExecuteDelete(
+        $db,
+        "DELETE FROM wcf{$wcfN}_package_requirement WHERE packageID = ? OR requirement = ?",
+        [$packageID, $packageID],
+        'Package-Requirements',
+        $log
+    );
+}
+
+/**
+ * @param array<string, mixed> $row
+ * @return list<string>
+ */
+function recoveryGuessTableLabelColumns(array $row): array
+{
+    $preferred = [
+        'title', 'name', 'menuItem', 'optionName', 'objectType', 'identifier',
+        'package', 'templateName', 'cronjobName', 'eventName', 'languageItem',
+    ];
+    $cols = [];
+    foreach ($preferred as $key) {
+        if (\array_key_exists($key, $row)) {
+            $cols[] = $key;
+        }
+    }
+    if ($cols === []) {
+        foreach (\array_keys($row) as $key) {
+            if ($key === 'packageID' || \str_ends_with($key, 'ID')) {
+                continue;
+            }
+            $cols[] = $key;
+            if (\count($cols) >= 4) {
+                break;
+            }
+        }
+    }
+
+    return \array_slice($cols, 0, 5);
+}
+
+/**
+ * @return array{columns: list<string>, rows: list<array<string, mixed>>, total: int, table: string}
+ */
+function recoveryFetchPackageIdTablePreview(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    string $tableName,
+    int $packageID,
+    int $limit = 30
+): array {
+    $tableName = \str_replace('`', '', $tableName);
+    if (!recoveryValidateSqlTableName($tableName) || $packageID <= 0) {
+        return ['columns' => [], 'rows' => [], 'total' => 0, 'table' => $tableName];
+    }
+
+    $tableFull = "wcf{$wcfN}_{$tableName}";
+    $total = 0;
+
+    try {
+        $countStmt = $db->prepareStatement("SELECT COUNT(*) AS cnt FROM {$tableFull} WHERE packageID = ?");
+        $countStmt->execute([$packageID]);
+        $total = (int) ($countStmt->fetchArray()['cnt'] ?? 0);
+
+        $stmt = $db->prepareStatement("SELECT * FROM {$tableFull} WHERE packageID = ? LIMIT " . (int) $limit);
+        $stmt->execute([$packageID]);
+        $rows = [];
+        while ($row = $stmt->fetchArray()) {
+            $rows[] = $row;
+        }
+
+        $columns = $rows !== [] ? recoveryGuessTableLabelColumns($rows[0]) : [];
+
+        return [
+            'columns' => $columns,
+            'rows' => $rows,
+            'total' => $total,
+            'table' => $tableFull,
+        ];
+    } catch (\Throwable $e) {
+        return [
+            'columns' => [],
+            'rows' => [],
+            'total' => 0,
+            'table' => $tableFull,
+            'error' => $e->getMessage(),
+        ];
+    }
+}
+
 /**
  * @return list<string> Tabellennamen ohne wcf{N}_-Präfix
  */
@@ -1483,7 +1592,7 @@ function recoveryRepairOrphanedPackageReferences(
 
     recoveryExecuteDelete(
         $db,
-        "DELETE r FROM {$prefix}package_requirements r
+        "DELETE r FROM {$prefix}package_requirement r
          LEFT JOIN {$prefix}package p ON r.packageID = p.packageID
          WHERE p.packageID IS NULL",
         [],
@@ -1493,7 +1602,7 @@ function recoveryRepairOrphanedPackageReferences(
 
     recoveryExecuteDelete(
         $db,
-        "DELETE r FROM {$prefix}package_requirements r
+        "DELETE r FROM {$prefix}package_requirement r
          LEFT JOIN {$prefix}package p ON r.requirement = p.packageID
          WHERE p.packageID IS NULL",
         [],
@@ -1565,11 +1674,11 @@ DELETE q FROM {$p}package_installation_queue q
 LEFT JOIN {$p}package p ON q.packageID = p.packageID
 WHERE q.packageID IS NOT NULL AND p.packageID IS NULL;
 
-DELETE r FROM {$p}package_requirements r
+DELETE r FROM {$p}package_requirement r
 LEFT JOIN {$p}package p ON r.packageID = p.packageID
 WHERE p.packageID IS NULL;
 
-DELETE r FROM {$p}package_requirements r
+DELETE r FROM {$p}package_requirement r
 LEFT JOIN {$p}package p ON r.requirement = p.packageID
 WHERE p.packageID IS NULL;
 
@@ -1648,15 +1757,9 @@ function recoveryPerformFullPluginCleanup(
             recoveryTryDeleteByPackageId($db, $wcfN, $table, $packageID, $label, $log);
         }
 
-        recoveryExecuteDelete(
-            $db,
-            "DELETE FROM wcf{$wcfN}_package_requirements WHERE packageID = ? OR requirement = ?",
-            [$packageID, $packageID],
-            'Package-Requirements',
-            $log
-        );
+        recoveryTryDeletePackageRequirements($db, $wcfN, $packageID, $log);
 
-        recoveryExecuteDelete(
+        recoveryTryExecuteDelete(
             $db,
             "DELETE FROM wcf{$wcfN}_package_installation_sql_log WHERE packageID = ?",
             [$packageID],
@@ -1664,7 +1767,7 @@ function recoveryPerformFullPluginCleanup(
             $log
         );
 
-        recoveryExecuteDelete(
+        recoveryTryExecuteDelete(
             $db,
             "DELETE FROM wcf{$wcfN}_package WHERE packageID = ?",
             [$packageID],
@@ -1928,6 +2031,61 @@ function recoveryGetPipDbCounts(
     }
 
     return $counts;
+}
+
+/**
+ * Ergänzt pipMap/pipCounts um weitere Tabellen mit packageID-Spalte (z. B. Core-Tabellen).
+ *
+ * @param array<string, array{table: string, col: string, safe: bool, label: string}> $pipMap
+ * @param array<string, int> $pipCounts
+ */
+function recoveryMergeDiscoveredPipTables(
+    array &$pipMap,
+    array &$pipCounts,
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    int $packageID
+): void {
+    $knownTables = [];
+    foreach ($pipMap as $info) {
+        if ($info['table'] !== '') {
+            $knownTables[$info['table']] = true;
+        }
+    }
+
+    foreach (recoveryDiscoverPackageIdTables($db, $wcfN) as $discTable) {
+        if (isset($knownTables[$discTable])) {
+            continue;
+        }
+
+        $pipKey = 'discovered_' . $discTable;
+        try {
+            $sql = "SELECT COUNT(*) AS cnt FROM wcf{$wcfN}_{$discTable} WHERE packageID = ?";
+            $statement = $db->prepareStatement($sql);
+            $statement->execute([$packageID]);
+            $row = $statement->fetchArray();
+            $pipMap[$pipKey] = [
+                'table' => $discTable,
+                'col' => 'packageID',
+                'safe' => true,
+                'label' => 'Weitere DB-Tabelle',
+            ];
+            $pipCounts[$pipKey] = (int) ($row['cnt'] ?? 0);
+        } catch (\Throwable $ignored) {
+            $pipCounts[$pipKey] = -1;
+        }
+    }
+}
+
+function recoveryRenderPipCountCell(int $count, string $tableName, int $packageID): string
+{
+    if ($count <= 0) {
+        return '0';
+    }
+
+    return '<button type="button" class="recovery-pip-count-btn" data-table="'
+        . \htmlspecialchars($tableName, ENT_QUOTES, 'UTF-8') . '" data-package-id="'
+        . $packageID . '" title="Einträge dieses Plugins anzeigen">' . $count . '</button>';
 }
 
 /**
@@ -2348,6 +2506,24 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         }
         @keyframes recovery-spin { to { transform: rotate(360deg); } }
 
+        .recovery-pip-count-btn {
+            background: transparent; border: none; color: #fc6; font-weight: 700;
+            cursor: pointer; text-decoration: underline; font-size: inherit; padding: 0;
+        }
+        .recovery-pip-count-btn:hover { color: #fff; }
+        .recovery-pip-count-btn--zero { color: #888; cursor: default; text-decoration: none; }
+        #recoveryPipPreviewModal {
+            position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center;
+            justify-content: center; padding: 20px; background: rgba(0, 0, 0, 0.65);
+        }
+        #recoveryPipPreviewModal[hidden] { display: none !important; }
+        .recovery-pip-preview-dialog {
+            width: 100%; max-width: 820px; max-height: 85vh; overflow: auto;
+            background: #3D3D3D; border: 1px solid #555; border-radius: 4px; padding: 20px;
+        }
+        .recovery-pip-preview-dialog h3 { margin: 0 0 12px; color: #fff; font-size: 18px; }
+        .recovery-dryrun-quick { display: none; margin-top: 14px; }
+
         @media (prefers-color-scheme: light) {
             body { background: #f0f0f0; color: #333; }
             .container { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
@@ -2535,6 +2711,28 @@ if ($action === 'cleanup') {
 if ($action === 'auth-status') {
     \header('Content-Type: application/json; charset=utf-8');
     echo \json_encode(['ok' => $isAuthenticated]);
+    exit;
+}
+
+// Vorschau: Zeilen einer Tabelle mit packageID (Plugin Uninstall Schritt 1)
+if ($action === 'pip-preview') {
+    \header('Content-Type: application/json; charset=utf-8');
+    if (!$isAuthenticated) {
+        \http_response_code(403);
+        echo \json_encode(['ok' => false, 'error' => 'Nicht authentifiziert.']);
+        exit;
+    }
+
+    try {
+        $db = recoveryBootstrapDatabase();
+        $packageID = (int) ($_GET['package_id'] ?? 0);
+        $tableName = \str_replace('`', '', (string) ($_GET['table'] ?? ''));
+        $preview = recoveryFetchPackageIdTablePreview($db, WCF_N, $tableName, $packageID);
+        echo \json_encode(['ok' => true] + $preview, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    } catch (\Throwable $e) {
+        \http_response_code(500);
+        echo \json_encode(['ok' => false, 'error' => $e->getMessage()]);
+    }
     exit;
 }
 
@@ -4001,9 +4199,12 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     }
                     echo '</div>';
 
-                    // PIP-Counts aus DB
+                    // PIP-Counts aus DB (+ weitere Tabellen mit packageID-Spalte)
                     $pipMap    = recoveryGetPipResourceMap();
                     $pipCounts = $packageID ? recoveryGetPipDbCounts($db, $wcfN, $packageID) : [];
+                    if ($packageID) {
+                        recoveryMergeDiscoveredPipTables($pipMap, $pipCounts, $db, $wcfN, $packageID);
+                    }
 
                     // Plugin-eigene Tabellen ermitteln
                     $customTables = [];
@@ -4029,8 +4230,12 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
 
                     // Dry-Run Toggle
                     echo '<div class="alert alert-warning" style="margin-bottom:20px">';
-                    echo '<label style="cursor:pointer"><input type="checkbox" name="dry_run" value="1" style="margin-right:6px">';
+                    echo '<label style="cursor:pointer"><input type="checkbox" name="dry_run" id="recoveryDryRunToggle" value="1" style="margin-right:6px">';
                     echo '<strong>Dry-Run-Modus:</strong> Zeigt was gelöscht WÜRDE, ohne tatsächliche Änderungen vorzunehmen</label>';
+                    echo '<div id="recoveryDryRunQuick" class="recovery-dryrun-quick">';
+                    echo '<button type="submit" class="button" style="margin-top:12px"><i class="fa-solid fa-play"></i> Dry-Run jetzt starten</button>';
+                    echo '<br><small>Startet direkt mit Dry-Run – ohne nach unten zu scrollen.</small>';
+                    echo '</div>';
                     echo '</div>';
 
                     // ── DB-Einträge nach packageID ────────────────────────────
@@ -4041,7 +4246,8 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                         }
 
                         echo '<h2 style="margin-bottom:10px">DB-Einträge nach packageID</h2>';
-                        echo '<p style="margin-bottom:12px"><small>Nur Einträge mit <code>packageID = ' . $packageID . '</code> werden gelöscht – keine Massenlöschungen.</small></p>';
+                        echo '<p style="margin-bottom:12px"><small>Nur Einträge mit <code>packageID = ' . $packageID . '</code> werden gelöscht – keine Massenlöschungen. '
+                            . 'Klicken Sie auf die <strong>Zahl</strong> in „Einträge“, um die betroffenen Zeilen zu sehen.</small></p>';
                         echo '<table class="table">';
                         echo '<thead><tr>';
                         echo '<th style="width:36px"><input type="checkbox" id="chkAllPip" title="Alle aus/abwählen"></th>';
@@ -4068,23 +4274,107 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                                 echo '<td><input type="checkbox" name="pip_select[]" value="' . \htmlspecialchars($pip) . '"' . $checked . '></td>';
                                 echo '<td>' . \htmlspecialchars($info['label']) . '</td>';
                                 echo '<td><code>wcf' . $wcfN . '_' . \htmlspecialchars($info['table']) . '</code></td>';
-                                echo '<td style="text-align:right">' . ($count > 0 ? '<strong>' . $count . '</strong>' : '0') . '</td>';
+                                echo '<td style="text-align:right">'
+                                    . recoveryRenderPipCountCell($count, $info['table'], $packageID) . '</td>';
                                 echo '</tr>';
                             }
                         }
                         echo '</tbody></table>';
+                        echo '<div id="recoveryPipPreviewModal" hidden>';
+                        echo '<div class="recovery-pip-preview-dialog" role="dialog" aria-modal="true">';
+                        echo '<h3 id="recoveryPipPreviewTitle">Einträge</h3>';
+                        echo '<div id="recoveryPipPreviewBody"></div>';
+                        echo '<p style="margin-top:16px"><button type="button" class="button" id="recoveryPipPreviewClose">Schließen</button></p>';
+                        echo '</div></div>';
                         echo '<script>
-                            var counts = ' . \json_encode($pipCounts) . ';
-                            var allChecked = Object.values(counts).some(function(v){ return v > 0; });
-                            var chkAllPip = document.getElementById("chkAllPip");
-                            if (chkAllPip) {
-                                chkAllPip.checked = allChecked;
-                                chkAllPip.addEventListener("change", function () {
-                                    document.querySelectorAll("input[name=\\"pip_select[]\\"]:not(:disabled)").forEach(function (c) {
-                                        c.checked = chkAllPip.checked;
+                            (function () {
+                                var authToken = ' . \json_encode($authHash) . ';
+                                var dryToggle = document.getElementById("recoveryDryRunToggle");
+                                var dryQuick = document.getElementById("recoveryDryRunQuick");
+                                if (dryToggle && dryQuick) {
+                                    dryToggle.addEventListener("change", function () {
+                                        dryQuick.style.display = dryToggle.checked ? "block" : "none";
+                                    });
+                                }
+                                var counts = ' . \json_encode($pipCounts) . ';
+                                var allChecked = Object.values(counts).some(function (v) { return v > 0; });
+                                var chkAllPip = document.getElementById("chkAllPip");
+                                if (chkAllPip) {
+                                    chkAllPip.checked = allChecked;
+                                    chkAllPip.addEventListener("change", function () {
+                                        document.querySelectorAll("input[name=\\"pip_select[]\\"]:not(:disabled)").forEach(function (c) {
+                                            c.checked = chkAllPip.checked;
+                                        });
+                                    });
+                                }
+                                var modal = document.getElementById("recoveryPipPreviewModal");
+                                var modalBody = document.getElementById("recoveryPipPreviewBody");
+                                var modalTitle = document.getElementById("recoveryPipPreviewTitle");
+                                var modalClose = document.getElementById("recoveryPipPreviewClose");
+                                function escapeHtml(s) {
+                                    var d = document.createElement("div");
+                                    d.textContent = s;
+                                    return d.innerHTML;
+                                }
+                                function closeModal() { if (modal) { modal.hidden = true; } }
+                                if (modalClose) { modalClose.addEventListener("click", closeModal); }
+                                if (modal) {
+                                    modal.addEventListener("click", function (e) {
+                                        if (e.target === modal) { closeModal(); }
+                                    });
+                                }
+                                document.querySelectorAll(".recovery-pip-count-btn").forEach(function (btn) {
+                                    btn.addEventListener("click", function () {
+                                        var table = btn.getAttribute("data-table");
+                                        var packageId = btn.getAttribute("data-package-id");
+                                        if (!table || !packageId) { return; }
+                                        modalTitle.textContent = "Lade …";
+                                        modalBody.innerHTML = "<p>Bitte warten …</p>";
+                                        modal.hidden = false;
+                                        fetch("?action=pip-preview&t=" + encodeURIComponent(authToken)
+                                            + "&table=" + encodeURIComponent(table)
+                                            + "&package_id=" + encodeURIComponent(packageId))
+                                            .then(function (r) { return r.json(); })
+                                            .then(function (data) {
+                                                if (!data.ok) {
+                                                    modalBody.innerHTML = "<p class=\\"alert alert-error\\">"
+                                                        + escapeHtml(data.error || "Fehler") + "</p>";
+                                                    return;
+                                                }
+                                                modalTitle.textContent = data.table + " (" + data.total + " Einträge)";
+                                                if (!data.rows || data.rows.length === 0) {
+                                                    modalBody.innerHTML = "<p><em>Keine Zeilen gefunden.</em></p>";
+                                                    return;
+                                                }
+                                                var html = "<p><small>Vorschau (max. " + data.rows.length
+                                                    + " von " + data.total + "):</small></p>";
+                                                html += "<table class=\\"table\\"><thead><tr>";
+                                                (data.columns || []).forEach(function (c) {
+                                                    html += "<th>" + escapeHtml(c) + "</th>";
+                                                });
+                                                html += "</tr></thead><tbody>";
+                                                data.rows.forEach(function (row) {
+                                                    html += "<tr>";
+                                                    (data.columns || []).forEach(function (c) {
+                                                        var val = row[c];
+                                                        if (val === null || val === undefined) { val = "—"; }
+                                                        else if (String(val).length > 120) {
+                                                            val = String(val).substring(0, 117) + "…";
+                                                        }
+                                                        html += "<td><code>" + escapeHtml(String(val)) + "</code></td>";
+                                                    });
+                                                    html += "</tr>";
+                                                });
+                                                html += "</tbody></table>";
+                                                modalBody.innerHTML = html;
+                                            })
+                                            .catch(function (err) {
+                                                modalBody.innerHTML = "<p class=\\"alert alert-error\\">"
+                                                    + escapeHtml(String(err)) + "</p>";
+                                            });
                                     });
                                 });
-                            }
+                            })();
                         </script>';
                     } else {
                         echo '<div class="alert alert-warning">Keine packageID – DB-Einträge per packageID nicht analysierbar.</div>';
@@ -4187,12 +4477,15 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                         echo '<button type="submit" class="button"><i class="fa-solid fa-download"></i> SQL-Backup herunterladen (.sql)</button>';
                         echo '</form>';
                         // Client-seitiger JS-Download (Fallback)
-                        echo '<button type="button" class="button" style="margin-left:8px" onclick="(function(){';
+                        echo '<button type="button" class="button" id="recoveryJsSqlDownload" style="margin-left:8px">';
+                        echo '<i class="fa-solid fa-download"></i> JS-Download</button>';
+                        echo '<script>(function(){var el=document.getElementById("recoveryJsSqlDownload");';
+                        echo 'if(!el){return;}el.addEventListener("click",function(){';
                         echo 'var s=atob(' . \json_encode($backupB64) . ');';
-                        echo 'var b=new Blob([s],{type:\'text/plain\'});';
-                        echo 'var a=document.createElement(\'a\');a.href=URL.createObjectURL(b);';
-                        echo 'a.download=\'recovery-backup-' . \date('Y-m-d-His') . '.sql\';a.click();';
-                        echo '})()"><i class=\"fa-solid fa-download\"></i> JS-Download</button>';
+                        echo 'var b=new Blob([s],{type:"text/plain;charset=utf-8"});';
+                        echo 'var a=document.createElement("a");a.href=URL.createObjectURL(b);';
+                        echo 'a.download="recovery-backup-' . \date('Y-m-d-His') . '.sql";document.body.appendChild(a);';
+                        echo 'a.click();document.body.removeChild(a);URL.revokeObjectURL(a.href);});})();</script>';
                         echo '<br><br>';
                         echo '<details><summary style="cursor:pointer">SQL-Inhalt anzeigen (' . \number_format(\strlen($backupSql)) . ' Bytes)</summary>';
                         echo '<textarea style="width:100%;height:220px;margin-top:10px;font-size:12px;font-family:monospace;background:#2D2D2D;color:#c0c0c0;border:1px solid #444;padding:10px;border-radius:3px;box-sizing:border-box" readonly>';
@@ -4334,21 +4627,15 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                             } else {
                                 recoveryCleanupPackageInstallationArtifacts($db, $wcfN, $packageID, $packageIdentifier, $log);
                                 recoveryCleanupPackageUpdateEntries($db, $wcfN, $packageIdentifier, $log);
-                                recoveryExecuteDelete(
-                                    $db,
-                                    "DELETE FROM wcf{$wcfN}_package_requirements WHERE packageID = ? OR requirement = ?",
-                                    [$packageID, $packageID],
-                                    'Package-Requirements',
-                                    $log
-                                );
-                                recoveryExecuteDelete(
+                                recoveryTryDeletePackageRequirements($db, $wcfN, $packageID, $log);
+                                recoveryTryExecuteDelete(
                                     $db,
                                     "DELETE FROM wcf{$wcfN}_package_installation_sql_log WHERE packageID = ?",
                                     [$packageID],
                                     'Package SQL-Log',
                                     $log
                                 );
-                                recoveryExecuteDelete(
+                                recoveryTryExecuteDelete(
                                     $db,
                                     "DELETE FROM wcf{$wcfN}_package WHERE packageID = ?",
                                     [$packageID],
@@ -4793,7 +5080,7 @@ elseif ($mode === RECOVERY_MODE_PACKAGE_LIST_REPAIR) {
         • Deinstallation: <code>assert($package !== null)</code> bei hängender Queue<br><br>
         <strong>Bereinigt (generisch, alle Plugins):</strong> verwaiste <code>application</code>-Zeilen,
         <code>package_installation_queue</code> / <code>node</code> / <code>form</code>,
-        <code>package_requirements</code>, <code>package_exclusion</code>, File-Logs.
+        <code>package_requirement</code>, <code>package_exclusion</code>, File-Logs.
     </div>
 
     <details style="margin: 1rem 0;">
