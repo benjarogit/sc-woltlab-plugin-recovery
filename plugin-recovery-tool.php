@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.22
+ * @version 1.5.23
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.22');
+define('RECOVERY_VERSION', '1.5.23');
 define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
@@ -875,21 +875,42 @@ function recoveryFormLoadingScript(): void
     ?>
 <script>
 (function () {
-    document.querySelectorAll('form[data-recovery-loading]').forEach(function (form) {
-        form.addEventListener('submit', function () {
-            var container = document.querySelector('.container');
-            if (!container) { return; }
-            var el = document.getElementById('recovery-loading-overlay');
-            if (!el) {
-                el = document.createElement('div');
-                el.id = 'recovery-loading-overlay';
-                el.className = 'recovery-loading';
-                container.appendChild(el);
+    function showOverlay(message) {
+        var container = document.querySelector('.container');
+        if (!container) {
+            return;
+        }
+        var old = document.getElementById('recovery-loading-overlay');
+        if (old) {
+            old.remove();
+        }
+        var el = document.createElement('div');
+        el.id = 'recovery-loading-overlay';
+        el.className = 'recovery-loading';
+        el.style.display = 'block';
+        el.innerHTML = '<div class="recovery-loading-msg"></div>'
+            + '<div class="recovery-loading-track"><div class="recovery-loading-fill"></div></div>';
+        el.querySelector('.recovery-loading-msg').textContent = message;
+        container.insertBefore(el, container.firstChild);
+    }
+
+    function bindForms() {
+        document.querySelectorAll('form[data-recovery-loading]').forEach(function (form) {
+            if (form.dataset.recoveryLoadingBound === '1') {
+                return;
             }
-            el.textContent = form.getAttribute('data-recovery-loading') || 'Bitte warten …';
-            el.style.display = 'block';
+            form.dataset.recoveryLoadingBound = '1';
+            form.addEventListener('submit', function () {
+                showOverlay(form.getAttribute('data-recovery-loading') || 'Bitte warten …');
+            });
         });
-    });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bindForms);
+    } else {
+        bindForms();
+    }
 })();
 </script>
 <?php
@@ -3355,17 +3376,27 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
             border: 1px solid #369;
             border-radius: 3px;
         }
-        .recovery-loading::after {
-            content: '';
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            margin-left: 10px;
-            vertical-align: middle;
-            border: 2px solid #369;
-            border-top-color: transparent;
-            border-radius: 50%;
-            animation: recovery-spin 0.8s linear infinite;
+        .recovery-loading-msg { display: block; font-size: 15px; color: #e8e8e8; margin-bottom: 6px; }
+        .recovery-loading-track {
+            height: 6px;
+            background: rgba(0, 0, 0, .35);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 14px;
+            max-width: 520px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .recovery-loading-fill {
+            height: 100%;
+            width: 42%;
+            background: linear-gradient(90deg, #369, #6EC2FF);
+            border-radius: 3px;
+            animation: recovery-indeterminate 1.35s ease-in-out infinite;
+        }
+        @keyframes recovery-indeterminate {
+            0% { transform: translateX(-110%); }
+            100% { transform: translateX(320%); }
         }
         @keyframes recovery-spin { to { transform: rotate(360deg); } }
 
@@ -3472,6 +3503,7 @@ function recoveryRenderPageEnd(?array $assets = null): void
     <?php endif; ?>
     | <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank" rel="noopener">WoltLab Recovery</a>
 </footer>
+<?php recoveryFormLoadingScript(); ?>
 </body>
 </html>
 <?php
@@ -5481,7 +5513,6 @@ elseif ($mode === RECOVERY_MODE_ACP_REPAIR) {
     <p class="subtitle">Repariert defekte ACP-Menüeinträge eines Plugins</p>
 
 <?php
-    recoveryFormLoadingScript();
     if (recoveryWasPostTruncated()) {
         recoveryRenderPostTruncatedWarning();
     }
@@ -5672,7 +5703,6 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
     <p class="subtitle">Deinstalliert Plugin komplett – per-Ressource-Auswahl, SQL-Backup &amp; Dry-Run</p>
 
 <?php
-    recoveryFormLoadingScript();
     if (recoveryWasPostTruncated()) {
         recoveryRenderPostTruncatedWarning();
     }
@@ -6763,7 +6793,6 @@ elseif ($mode === RECOVERY_MODE_PACKAGE_FILE_REPAIR) {
     <p class="subtitle">Fehlende PHP-Klassen (Bootstrap-Registrierung) aus hochgeladenem Paket wiederherstellen</p>
 
 <?php
-    recoveryFormLoadingScript();
     if (recoveryWasPostTruncated()) {
         recoveryRenderPostTruncatedWarning();
     }
@@ -6979,13 +7008,21 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         }
         $extractDir = recoveryResolveTrustedExtractDir();
 ?>
-    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($wizardUrl) ?>">
+    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($wizardUrl) ?>" data-recovery-loading="Recovery-Schritte werden ausgeführt (Dateien, Datenbank, Cache) …">
         <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_RECOVERY_WIZARD, $authHash); ?>
         <input type="hidden" name="wizard_phase" value="run">
         <input type="hidden" name="wizard_execute" value="1">
         <?php if ($extractDir): ?>
         <input type="hidden" name="extract_dir" value="<?= \htmlspecialchars($extractDir) ?>">
         <?php endif; ?>
+
+        <div class="alert alert-warning" style="margin-bottom:16px">
+            <strong>ACP weiterhin kaputt nach „Dateien wiederherstellen“?</strong>
+            Dateien allein reichen oft nicht: In der Datenbank können weiterhin <strong>Event-Listener</strong>, Objekttypen,
+            Menüeinträge etc. auf Plugin-Klassen zeigen. Nutzen Sie bei Bedarf den Modus <strong>Plugin Uninstall</strong>
+            (Paket komplett aus DB + optional Dateien) oder <strong>ACP Repair</strong>.
+            Das Recovery Tool arbeitet direkt auf dem Webspace — zusätzliche FTP-Logins sind nicht nötig und werden nicht gespeichert.
+        </div>
 
         <h2>Schritte auswählen (Reihenfolge bei Ausführung)</h2>
         <ol style="margin:0 0 16px 20px;color:#9D9D9D">
@@ -7097,7 +7134,7 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
     <div class="alert alert-error"><?= \htmlspecialchars($wizardUploadError) ?></div>
     <?php endif; ?>
 
-    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($wizardUrl) ?>">
+    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($wizardUrl) ?>" data-recovery-loading="Paket wird hochgeladen und Diagnose vorbereitet …">
         <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_RECOVERY_WIZARD, $authHash); ?>
         <input type="hidden" name="wizard_phase" value="diagnose">
         <input type="hidden" name="wizard_to_diagnose" value="1">
@@ -7113,7 +7150,7 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         </p>
     </form>
 
-    <form method="POST" action="<?= \htmlspecialchars($wizardUrl) ?>" style="margin-top:12px">
+    <form method="POST" action="<?= \htmlspecialchars($wizardUrl) ?>" style="margin-top:12px" data-recovery-loading="Live-Diagnose läuft (Bootstrap-Scan kann einige Sekunden dauern) …">
         <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_RECOVERY_WIZARD, $authHash); ?>
         <input type="hidden" name="wizard_phase" value="diagnose">
         <input type="hidden" name="wizard_to_diagnose" value="1">
@@ -7180,7 +7217,7 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
     } ?></pre></details>
     <?php endif; ?>
 
-    <form method="POST" action="<?= \htmlspecialchars($wizardUrl) ?>">
+    <form method="POST" action="<?= \htmlspecialchars($wizardUrl) ?>" data-recovery-loading="Plan &amp; Auswahl wird geladen …">
         <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_RECOVERY_WIZARD, $authHash); ?>
         <input type="hidden" name="wizard_phase" value="plan">
         <input type="hidden" name="wizard_to_plan" value="1">
