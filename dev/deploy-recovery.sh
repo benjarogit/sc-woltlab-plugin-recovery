@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Kopiert das Plugin Recovery Tool (eine Datei) ins WoltLab-Hauptverzeichnis.
+# Kopiert plugin-recovery-tool.php ins WoltLab-Hauptverzeichnis (nur Entwicklung).
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TOOLS_DIR="$(dirname "$SCRIPT_DIR")"
+DEV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$DEV_DIR")"
+TOOLS_DIR="$(dirname "$REPO_ROOT")"
 
 TARGET=""
 
@@ -30,14 +31,14 @@ if [ ! -f "$TARGET/global.php" ]; then
 	exit 1
 fi
 
-if [ -x "$SCRIPT_DIR/validate-php-syntax.sh" ]; then
-	"$SCRIPT_DIR/validate-php-syntax.sh"
+if [ -x "$DEV_DIR/validate-php-syntax.sh" ]; then
+	"$DEV_DIR/validate-php-syntax.sh"
 fi
 
-cp -v "$SCRIPT_DIR/plugin-recovery-tool.php" "$TARGET/plugin-recovery-tool.php"
+cp -v "$REPO_ROOT/plugin-recovery-tool.php" "$TARGET/plugin-recovery-tool.php"
 
 echo ""
 echo "Recovery Tool (eine Datei) bereitgestellt in: $TARGET"
 echo "Aufruf: …/plugin-recovery-tool.php"
-echo "Auth-Datei wird im Tool heruntergeladen (plugin-recovery-auth.php)."
+echo "Auth-Datei wird vom Tool erzeugt (plugin-recovery-auth.php) — nicht von GitHub."
 echo "Nach Gebrauch: Cleanup im Tool."

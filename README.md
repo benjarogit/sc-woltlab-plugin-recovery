@@ -19,6 +19,16 @@
   <img src="https://github.com/user-attachments/assets/9b2b31e5-63a4-449d-85b1-ad6ce56dc1e4" width="15%">
 </p>
 
+## Für Endnutzer: nur eine Datei
+
+> **Sie brauchen genau eine Datei:** [`plugin-recovery-tool.php`](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases/latest/download/plugin-recovery-tool.php) aus den **[Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases)** (nicht „Code herunterladen“ / nicht den Ordner `dev/`).
+>
+> 1. Diese Datei per FTP ins WoltLab-Hauptverzeichnis (neben `global.php`) legen  
+> 2. Im Browser aufrufen  
+> 3. Das Tool erzeugt dann **`plugin-recovery-auth.php`** auf Ihrem Server — diese Auth-Datei laden Sie herunter und laden sie wieder hoch (wie bei WoltLabs `wsc-recovery.php`). **Sie wird nicht von GitHub mitgeliefert.**
+>
+> Weitere Dateien im Repository (`dev/`, Skripte) sind **nur für Entwickler** und werden nicht benötigt.
+
 ## Wann wird dieses Tool benötigt?
 
 - Das ACP zeigt „Call to a member function toHtml() on null"

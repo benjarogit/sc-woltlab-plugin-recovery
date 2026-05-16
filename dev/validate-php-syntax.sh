@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Syntax-Check für plugin-recovery-tool.php (vor Deploy/Release).
+# Syntax-Check für plugin-recovery-tool.php (nur Entwicklung / vor Release).
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET="${SCRIPT_DIR}/plugin-recovery-tool.php"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TARGET="${REPO_ROOT}/plugin-recovery-tool.php"
 
 PHP_BIN="${PHP_BIN:-php}"
 if ! command -v "$PHP_BIN" >/dev/null 2>&1; then
