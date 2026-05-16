@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.17
+ * @version 1.5.18
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.17');
+define('RECOVERY_VERSION', '1.5.18');
 define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
@@ -6803,6 +6803,7 @@ elseif ($mode === RECOVERY_MODE_PACKAGE_FILE_REPAIR) {
         <button type="submit" class="btn-danger"><i class="fa-solid fa-screwdriver-wrench"></i> Dateien jetzt wiederherstellen + Cache leeren</button>
     </form>
 <?php
+        }
         }
     } else {
 ?>

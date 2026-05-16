@@ -30,6 +30,10 @@ if [ ! -f "$TARGET/global.php" ]; then
 	exit 1
 fi
 
+if [ -x "$SCRIPT_DIR/validate-php-syntax.sh" ]; then
+	"$SCRIPT_DIR/validate-php-syntax.sh"
+fi
+
 cp -v "$SCRIPT_DIR/plugin-recovery-tool.php" "$TARGET/plugin-recovery-tool.php"
 
 echo ""
