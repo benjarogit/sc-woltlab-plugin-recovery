@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.6.4
+ * @version 1.7.0
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.6.4');
+define('RECOVERY_VERSION', '1.7.0');
 define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
@@ -221,6 +221,7 @@ define('RECOVERY_MODE_CACHE_CLEAR', 4);
 define('RECOVERY_MODE_PACKAGE_LIST_REPAIR', 5);
 define('RECOVERY_MODE_PACKAGE_FILE_REPAIR', 6);
 define('RECOVERY_MODE_RECOVERY_WIZARD', 7);
+define('RECOVERY_MODE_SYSTEM_CHECK', 8);
 
 /** Stack-Traces nur bei true oder ?debug=1 (mit gültigem Auth-Token). */
 define('RECOVERY_ENABLE_DEBUG', false);
@@ -2331,6 +2332,15 @@ function recoveryDisplayDbCleanupPreview(
         echo '<br><small>Entfernung nur nach expliziter Bestätigung im Deinstallationsformular.</small>';
     }
 
+    if ($packageID > 0) {
+        $filePaths = recoveryLoadPackageFileLogPaths($db, $wcfN, $packageID);
+        echo '<br><br><strong>package_installation_file_log:</strong> ' . \count($filePaths) . ' Datei(en)';
+        $sqlPreview = recoveryPreviewSqlRollback($db, $wcfN, $packageID);
+        if ($sqlPreview['actions'] !== []) {
+            echo '<br><strong>SQL-Rollback (optional):</strong> ' . \count($sqlPreview['actions']) . ' Aktion(en) möglich';
+        }
+    }
+
     echo '</div>';
 }
 
@@ -2620,6 +2630,698 @@ WHERE p.packageID IS NULL;
 SQL;
 }
 
+// ============================================================================
+// v1.7.0 – Uninstall-Script, file_log, SQL-Rollback, Bootstrap-Rebuild
+// ============================================================================
+
+function recoveryPackageAbbreviation(string $package): string
+{
+    $parts = \explode('.', $package);
+
+    return (string) \array_pop($parts);
+}
+
+/**
+ * @return array<string, string> application abbreviation => absolute directory with trailing slash
+ */
+function recoveryBuildApplicationDirectoryMap(\wcf\system\database\Database $db, int $wcfN): array
+{
+    if (!\defined('WCF_DIR')) {
+        \define('WCF_DIR', recoveryResolveWcfDir());
+    }
+
+    $map = ['wcf' => \rtrim(WCF_DIR, '/\\') . '/'];
+
+    try {
+        $sql = "SELECT p.package, p.packageDir
+                FROM wcf{$wcfN}_application a
+                INNER JOIN wcf{$wcfN}_package p ON a.packageID = p.packageID";
+        $statement = $db->prepareStatement($sql);
+        $statement->execute();
+        while ($row = $statement->fetchArray()) {
+            $abbr = recoveryPackageAbbreviation((string) ($row['package'] ?? ''));
+            $packageDir = \trim((string) ($row['packageDir'] ?? ''), '/\\');
+            if ($abbr === '' || $packageDir === '') {
+                continue;
+            }
+            $map[$abbr] = \rtrim(WCF_DIR, '/\\') . '/' . $packageDir . '/';
+        }
+    } catch (\Throwable $ignored) {
+    }
+
+    return $map;
+}
+
+function recoveryExecutePackageUninstallScript(string $packageIdentifier, array &$log, bool $dryRun = false): bool
+{
+    if (!\defined('WCF_DIR')) {
+        \define('WCF_DIR', recoveryResolveWcfDir());
+    }
+
+    $packageIdentifier = recoveryValidatePackageIdentifier($packageIdentifier);
+    $script = \rtrim(WCF_DIR, '/\\') . '/acp/uninstall/' . $packageIdentifier . '.php';
+
+    if (!\is_file($script)) {
+        $log[] = 'Uninstall-Script: keine Datei ' . $packageIdentifier . '.php';
+
+        return true;
+    }
+
+    if ($dryRun) {
+        $log[] = '[DRY-RUN] WÜRDE Uninstall-Script ausführen: acp/uninstall/' . $packageIdentifier . '.php';
+
+        return true;
+    }
+
+    try {
+        include $script;
+        $log[] = 'Uninstall-Script ausgeführt: acp/uninstall/' . $packageIdentifier . '.php';
+
+        return true;
+    } catch (\Throwable $e) {
+        $log[] = 'Uninstall-Script fehlgeschlagen: ' . $e->getMessage();
+
+        return false;
+    }
+}
+
+/**
+ * @return list<string>
+ */
+function recoveryGetDatabaseTableNames(\wcf\system\database\Database $db, int $wcfN): array
+{
+    $names = [];
+    try {
+        $statement = $db->prepareStatement('SHOW TABLES LIKE ?');
+        $statement->execute(['wcf' . $wcfN . '_%']);
+        while ($row = $statement->fetchArray()) {
+            $value = \reset($row);
+            if (\is_string($value) && $value !== '') {
+                $names[] = $value;
+            }
+        }
+    } catch (\Throwable $ignored) {
+    }
+
+    return $names;
+}
+
+/**
+ * @return list<array{sqlTable: string, sqlColumn: string, sqlIndex: string, isIndex: int, isColumn: int, isForeignKey: int}>
+ */
+function recoveryFetchSqlLogEntries(\wcf\system\database\Database $db, int $wcfN, int $packageID): array
+{
+    $sql = "SELECT sqlTable, sqlColumn, sqlIndex,
+                   CASE WHEN sqlIndex <> '' THEN 1 ELSE 0 END AS isIndex,
+                   CASE WHEN sqlColumn <> '' THEN 1 ELSE 0 END AS isColumn,
+                   CASE WHEN SUBSTRING(sqlIndex, -3) = '_fk' THEN 1 ELSE 0 END AS isForeignKey
+            FROM wcf{$wcfN}_package_installation_sql_log
+            WHERE packageID = ?
+            ORDER BY isIndex DESC, isForeignKey DESC, sqlIndex, isColumn DESC, sqlColumn";
+    $statement = $db->prepareStatement($sql);
+    $statement->execute([$packageID]);
+    $entries = [];
+    while ($row = $statement->fetchArray()) {
+        $entries[] = $row;
+    }
+
+    return $entries;
+}
+
+/**
+ * @return array{actions: list<string>, warnings: list<string>}
+ */
+function recoveryPreviewSqlRollback(\wcf\system\database\Database $db, int $wcfN, int $packageID): array
+{
+    $actions = [];
+    $warnings = [];
+    $entries = recoveryFetchSqlLogEntries($db, $wcfN, $packageID);
+    if ($entries === []) {
+        return ['actions' => [], 'warnings' => ['Kein SQL-Log für dieses Paket.']];
+    }
+
+    $existing = recoveryGetDatabaseTableNames($db, $wcfN);
+
+    foreach ($entries as $entry) {
+        $table = (string) ($entry['sqlTable'] ?? '');
+        $column = (string) ($entry['sqlColumn'] ?? '');
+        $index = (string) ($entry['sqlIndex'] ?? '');
+
+        if ($column !== '') {
+            $isDropped = false;
+            foreach ($entries as $entry2) {
+                if (
+                    $table === (string) ($entry2['sqlTable'] ?? '')
+                    && ($entry2['sqlColumn'] ?? '') === ''
+                    && ($entry2['sqlIndex'] ?? '') === ''
+                ) {
+                    $isDropped = true;
+                }
+            }
+            if ($isDropped) {
+                continue;
+            }
+        }
+
+        if ($table !== '' && $column === '' && $index === '') {
+            $actions[] = 'DROP TABLE `' . $table . '`';
+        } elseif (\in_array($table, $existing, true) && $column !== '') {
+            $actions[] = 'ALTER TABLE `' . $table . '` DROP COLUMN `' . $column . '`';
+        } elseif (\in_array($table, $existing, true) && $index !== '') {
+            if (\str_ends_with($index, '_fk')) {
+                $actions[] = 'ALTER TABLE `' . $table . '` DROP FOREIGN KEY `' . $index . '`';
+            } else {
+                $actions[] = 'ALTER TABLE `' . $table . '` DROP INDEX `' . $index . '`';
+            }
+        }
+    }
+
+    if (\count($actions) > 0) {
+        $warnings[] = 'Schema-Änderungen sind destruktiv. Vorher Datenbank-Backup anlegen.';
+    }
+
+    return ['actions' => $actions, 'warnings' => $warnings];
+}
+
+function recoveryExecuteSqlRollback(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    int $packageID,
+    array &$log,
+    bool $dryRun = false
+): void {
+    $preview = recoveryPreviewSqlRollback($db, $wcfN, $packageID);
+    $pfx = $dryRun ? '[DRY-RUN] ' : '';
+
+    if ($preview['actions'] === []) {
+        $log[] = $pfx . 'SQL-Rollback: keine Aktionen im Log.';
+
+        return;
+    }
+
+    foreach ($preview['warnings'] as $warning) {
+        $log[] = $pfx . 'SQL-Rollback Hinweis: ' . $warning;
+    }
+
+    if ($dryRun) {
+        foreach ($preview['actions'] as $action) {
+            $log[] = $pfx . 'WÜRDE: ' . $action;
+        }
+
+        return;
+    }
+
+    $entries = recoveryFetchSqlLogEntries($db, $wcfN, $packageID);
+    $existing = recoveryGetDatabaseTableNames($db, $wcfN);
+
+    foreach ($entries as $entry) {
+        $table = (string) ($entry['sqlTable'] ?? '');
+        $column = (string) ($entry['sqlColumn'] ?? '');
+        $index = (string) ($entry['sqlIndex'] ?? '');
+
+        if ($column !== '') {
+            $isDropped = false;
+            foreach ($entries as $entry2) {
+                if (
+                    $table === (string) ($entry2['sqlTable'] ?? '')
+                    && ($entry2['sqlColumn'] ?? '') === ''
+                    && ($entry2['sqlIndex'] ?? '') === ''
+                ) {
+                    $isDropped = true;
+                }
+            }
+            if ($isDropped) {
+                continue;
+            }
+        }
+
+        try {
+            if ($table !== '' && $column === '' && $index === '') {
+                $stmt = $db->prepareStatement('DROP TABLE IF EXISTS `' . \str_replace('`', '', $table) . '`');
+                $stmt->execute();
+                $log[] = 'SQL-Rollback: DROP TABLE ' . $table;
+            } elseif (\in_array($table, $existing, true) && $column !== '') {
+                $safeTable = \str_replace('`', '', $table);
+                $safeColumn = \str_replace('`', '', $column);
+                $stmt = $db->prepareStatement('ALTER TABLE `' . $safeTable . '` DROP COLUMN `' . $safeColumn . '`');
+                $stmt->execute();
+                $log[] = 'SQL-Rollback: Spalte ' . $table . '.' . $column . ' entfernt';
+            } elseif (\in_array($table, $existing, true) && $index !== '') {
+                $safeTable = \str_replace('`', '', $table);
+                $safeIndex = \str_replace('`', '', $index);
+                if (\str_ends_with($safeIndex, '_fk')) {
+                    $stmt = $db->prepareStatement('ALTER TABLE `' . $safeTable . '` DROP FOREIGN KEY `' . $safeIndex . '`');
+                } else {
+                    $stmt = $db->prepareStatement('ALTER TABLE `' . $safeTable . '` DROP INDEX `' . $safeIndex . '`');
+                }
+                $stmt->execute();
+                $log[] = 'SQL-Rollback: Index ' . $table . '.' . $index . ' entfernt';
+            }
+        } catch (\Throwable $e) {
+            $log[] = 'SQL-Rollback fehlgeschlagen (' . $table . '): ' . $e->getMessage();
+        }
+    }
+
+    recoveryTryExecuteDelete(
+        $db,
+        "DELETE FROM wcf{$wcfN}_package_installation_sql_log WHERE packageID = ?",
+        [$packageID],
+        'Package SQL-Log (nach Rollback)',
+        $log
+    );
+}
+
+/**
+ * @return list<string> relative paths (forward slashes)
+ */
+function recoveryLoadPackageFileLogPaths(\wcf\system\database\Database $db, int $wcfN, int $packageID): array
+{
+    $paths = [];
+    try {
+        $sql = "SELECT application, filename FROM wcf{$wcfN}_package_installation_file_log WHERE packageID = ?";
+        $statement = $db->prepareStatement($sql);
+        $statement->execute([$packageID]);
+        while ($row = $statement->fetchArray()) {
+            $application = (string) ($row['application'] ?? 'wcf');
+            $filename = (string) ($row['filename'] ?? '');
+            if ($filename === '') {
+                continue;
+            }
+            $paths[] = $application . '/' . \ltrim(\str_replace('\\', '/', $filename), '/');
+        }
+    } catch (\Throwable $ignored) {
+    }
+
+    return $paths;
+}
+
+function recoveryResolveFileLogAbsolutePath(string $wcfDir, string $application, string $filename, array $appMap): ?string
+{
+    $filename = \ltrim(\str_replace('\\', '/', $filename), '/');
+    if ($filename === '' || \str_contains($filename, '..')) {
+        return null;
+    }
+
+    $base = $appMap[$application] ?? $appMap['wcf'] ?? null;
+    if ($base === null) {
+        return null;
+    }
+
+    $absolute = \rtrim($base, '/\\') . '/' . $filename;
+    $wcfReal = \realpath(\rtrim($wcfDir, '/\\'));
+    $fileReal = \realpath($absolute);
+    if ($wcfReal === false) {
+        return null;
+    }
+    if ($fileReal !== false) {
+        if (!\str_starts_with($fileReal, $wcfReal . \DIRECTORY_SEPARATOR) && $fileReal !== $wcfReal) {
+            return null;
+        }
+
+        return $fileReal;
+    }
+
+    $candidate = \rtrim($base, '/\\') . '/' . $filename;
+    $prefix = \rtrim($wcfDir, '/\\') . '/';
+    if (!\str_starts_with(\str_replace('\\', '/', $candidate), \str_replace('\\', '/', $prefix))) {
+        return null;
+    }
+
+    return $candidate;
+}
+
+function recoveryDeletePackageFilesFromLog(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    int $packageID,
+    array &$log,
+    bool $performDelete = false,
+    bool $dryRun = false
+): void {
+    if (!\defined('WCF_DIR')) {
+        \define('WCF_DIR', recoveryResolveWcfDir());
+    }
+
+    $wcfDir = \rtrim(WCF_DIR, '/\\') . '/';
+    $appMap = recoveryBuildApplicationDirectoryMap($db, $wcfN);
+    $pfx = $dryRun ? '[DRY-RUN] ' : '';
+
+    try {
+        $sql = "SELECT application, filename FROM wcf{$wcfN}_package_installation_file_log WHERE packageID = ?";
+        $statement = $db->prepareStatement($sql);
+        $statement->execute([$packageID]);
+        $filesByApp = [];
+        while ($row = $statement->fetchArray()) {
+            $app = (string) ($row['application'] ?? 'wcf');
+            $fn = (string) ($row['filename'] ?? '');
+            if ($fn === '') {
+                continue;
+            }
+            $filesByApp[$app][] = $fn;
+        }
+    } catch (\Throwable $e) {
+        $log[] = $pfx . 'File-Log: Lesen fehlgeschlagen – ' . $e->getMessage();
+
+        return;
+    }
+
+    if ($filesByApp === []) {
+        $log[] = $pfx . 'File-Log: keine Einträge für packageID ' . $packageID;
+
+        return;
+    }
+
+    $total = 0;
+    foreach ($filesByApp as $filenames) {
+        $total += \count($filenames);
+    }
+
+    if ($dryRun || !$performDelete) {
+        $shown = 0;
+        foreach ($filesByApp as $application => $filenames) {
+            \usort($filenames, static fn(string $a, string $b): int => \strlen($b) <=> \strlen($a));
+            foreach ($filenames as $filename) {
+                if ($shown >= 20) {
+                    break 2;
+                }
+                $abs = recoveryResolveFileLogAbsolutePath($wcfDir, $application, $filename, $appMap);
+                $log[] = $pfx . 'File-Log' . ($performDelete ? '' : ' (Vorschau)')
+                    . ': ' . ($abs !== null ? $abs : $application . '/' . $filename);
+                $shown++;
+            }
+        }
+        if ($total > 20) {
+            $log[] = $pfx . 'File-Log: … und ' . ($total - 20) . ' weitere Datei(en)';
+        }
+        $log[] = $pfx . 'File-Log gesamt: ' . $total . ' Datei(en)';
+
+        return;
+    }
+
+    $deleted = 0;
+    foreach ($filesByApp as $application => $filenames) {
+        \usort($filenames, static fn(string $a, string $b): int => \strlen($b) <=> \strlen($a));
+        foreach ($filenames as $filename) {
+            $abs = recoveryResolveFileLogAbsolutePath($wcfDir, $application, $filename, $appMap);
+            if ($abs === null || !\is_file($abs)) {
+                continue;
+            }
+            if (@\unlink($abs)) {
+                $deleted++;
+            }
+        }
+    }
+
+    $log[] = 'File-Log: ' . $deleted . ' von ' . $total . ' Datei(en) gelöscht';
+
+    recoveryTryExecuteDelete(
+        $db,
+        "DELETE FROM wcf{$wcfN}_package_installation_file_log WHERE packageID = ?",
+        [$packageID],
+        'Package-File-Log',
+        $log
+    );
+}
+
+function recoveryRebuildBootstrapLoader(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    array &$log,
+    bool $dryRun = false
+): bool
+{
+    if (!\defined('WCF_DIR')) {
+        \define('WCF_DIR', recoveryResolveWcfDir());
+    }
+
+    $pfx = $dryRun ? '[DRY-RUN] ' : '';
+    $requires = [];
+
+    try {
+        $sql = "SELECT package FROM wcf{$wcfN}_package ORDER BY installPriority ASC, package ASC";
+        $statement = $db->prepareStatement($sql);
+        $statement->execute();
+        while ($row = $statement->fetchArray()) {
+            $package = (string) ($row['package'] ?? '');
+            if ($package === '') {
+                continue;
+            }
+            $bootstrap = WCF_DIR . 'lib/bootstrap/' . $package . '.php';
+            if (\is_file($bootstrap)) {
+                $requires[] = $package;
+            }
+        }
+    } catch (\Throwable $e) {
+        $log[] = $pfx . 'Bootstrap-Rebuild: Paketliste nicht lesbar – ' . $e->getMessage();
+
+        return false;
+    }
+
+    $now = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format('c');
+    $body = "<?php /* {$now} */\n\nreturn [\n";
+    foreach ($requires as $package) {
+        $body .= "    require(__DIR__ . '/bootstrap/{$package}.php'),\n";
+    }
+    $body .= "];\n";
+
+    if ($dryRun) {
+        $log[] = $pfx . 'WÜRDE lib/bootstrap.php neu schreiben (' . \count($requires) . ' Paket-Bootstrap(s))';
+
+        return true;
+    }
+
+    $target = WCF_DIR . 'lib/bootstrap.php';
+    $tmp = $target . '.recovery-' . \bin2hex(\random_bytes(4)) . '.tmp';
+    if (@\file_put_contents($tmp, $body) === false) {
+        $log[] = 'Bootstrap-Rebuild: temporäre Datei konnte nicht geschrieben werden';
+
+        return false;
+    }
+    if (!@\rename($tmp, $target)) {
+        @\unlink($tmp);
+        $log[] = 'Bootstrap-Rebuild: lib/bootstrap.php konnte nicht ersetzt werden';
+
+        return false;
+    }
+    if (\function_exists('opcache_invalidate')) {
+        @\opcache_invalidate($target, true);
+    } elseif (!\function_exists('opcache_reset')) {
+        $log[] = 'Bootstrap-Rebuild: Opcache-Invalidierung nicht verfügbar – ggf. PHP-FPM neu laden';
+    }
+    $log[] = 'lib/bootstrap.php neu erzeugt (' . \count($requires) . ' Paket-Bootstrap(s))';
+
+    return true;
+}
+
+/**
+ * @param array{
+ *   dryRun?: bool,
+ *   sqlRollback?: bool,
+ *   deleteFiles?: bool,
+ *   rebuildBootstrap?: bool,
+ *   runUninstallScript?: bool,
+ * } $options
+ */
+function recoveryRunPreDbRemovalSteps(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    string $packageIdentifier,
+    ?int $packageID,
+    array $options,
+    array &$log
+): void {
+    $dryRun = !empty($options['dryRun']);
+    $pfx = $dryRun ? '[DRY-RUN] ' : '';
+
+    if (!empty($options['runUninstallScript'])) {
+        recoveryExecutePackageUninstallScript($packageIdentifier, $log, $dryRun);
+    }
+
+    if (!empty($options['sqlRollback']) && $packageID !== null && $packageID > 0) {
+        recoveryExecuteSqlRollback($db, $wcfN, $packageID, $log, $dryRun);
+    } elseif (!empty($options['sqlRollback'])) {
+        $log[] = $pfx . 'SQL-Rollback übersprungen (keine packageID).';
+    }
+}
+
+/**
+ * @param array{
+ *   dryRun?: bool,
+ *   deleteFiles?: bool,
+ *   rebuildBootstrap?: bool,
+ * } $options
+ */
+function recoveryRunPostDbRemovalSteps(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    string $packageIdentifier,
+    ?array $packageData,
+    ?int $packageID,
+    array $options,
+    array &$log,
+    ?string $extractDir = null
+): void {
+    $dryRun = !empty($options['dryRun']);
+    $deleteLog = !empty($options['deleteFilesLog']) || !empty($options['deleteFiles']);
+    $deleteDir = !empty($options['deleteFilesDir']) || (!empty($options['deleteFiles']) && empty($options['deleteFilesLog']));
+    $performDelete = !$dryRun;
+
+    if ($deleteLog && $packageID !== null && $packageID > 0) {
+        recoveryDeletePackageFilesFromLog($db, $wcfN, $packageID, $log, $performDelete, $dryRun);
+    }
+
+    if ($deleteDir) {
+        recoveryDeletePluginFilesOnDisk(
+            $packageData,
+            $packageIdentifier,
+            $log,
+            $performDelete,
+            $db,
+            $wcfN,
+            $extractDir
+        );
+    }
+
+    if (!empty($options['rebuildBootstrap'])) {
+        recoveryRebuildBootstrapLoader($db, $wcfN, $log, $dryRun);
+    }
+}
+
+/**
+ * @return list<array{key: string, label: string, status: string, detail: string}>
+ */
+function recoveryRunSystemChecks(
+    string $wcfDir,
+    ?\wcf\system\database\Database $db,
+    ?int $wcfN,
+    ?array $assets = null
+): array {
+    $checks = [];
+    $phpOk = \PHP_VERSION_ID >= 80100;
+    $checks[] = [
+        'key' => 'php',
+        'label' => 'PHP-Version',
+        'status' => $phpOk ? 'ok' : 'error',
+        'detail' => \PHP_VERSION . ($phpOk ? '' : ' (min. 8.1)'),
+    ];
+
+    $writable = [
+        'cache/' => \is_writable($wcfDir . 'cache'),
+        'tmp/' => \is_writable($wcfDir . 'tmp'),
+        'lib/bootstrap.php' => \is_writable($wcfDir . 'lib/bootstrap.php') || \is_writable($wcfDir . 'lib/'),
+    ];
+    foreach ($writable as $path => $ok) {
+        $checks[] = [
+            'key' => 'write_' . $path,
+            'label' => 'Schreibrecht ' . $path,
+            'status' => $ok ? 'ok' : 'error',
+            'detail' => $ok ? 'beschreibbar' : 'nicht beschreibbar',
+        ];
+    }
+
+    $dbOk = false;
+    if ($db !== null && $wcfN !== null) {
+        try {
+            $stmt = $db->prepareStatement('SELECT 1');
+            $stmt->execute();
+            $dbOk = true;
+        } catch (\Throwable $e) {
+            $checks[] = [
+                'key' => 'db',
+                'label' => 'Datenbank',
+                'status' => 'error',
+                'detail' => $e->getMessage(),
+            ];
+        }
+    }
+    if ($dbOk) {
+        $checks[] = [
+            'key' => 'db',
+            'label' => 'Datenbank',
+            'status' => 'ok',
+            'detail' => 'Verbindung OK (wcf' . $wcfN . '_*)',
+        ];
+    }
+
+    $assets ??= recoveryGetSetupAssets();
+    $checks[] = [
+        'key' => 'wcfsetup_css',
+        'label' => 'WCFSetup.css',
+        'status' => ($assets['WCFSetup.css'] ?? '') !== '' ? 'ok' : 'warn',
+        'detail' => ($assets['WCFSetup.css'] ?? '') !== '' ? 'lokal verfügbar' : 'nicht lesbar',
+    ];
+    $faLocal = !empty($assets['fontAwesomeLocal']);
+    $checks[] = [
+        'key' => 'fontawesome',
+        'label' => 'Font Awesome',
+        'status' => $faLocal ? 'ok' : 'warn',
+        'detail' => $faLocal ? 'lokal (WCF v7)' : 'CDN-Fallback',
+    ];
+
+    $logHits = recoveryScanWoltLabLogForRecentErrors($wcfDir, 5);
+    $classNotFound = false;
+    foreach ($logHits as $line) {
+        if (\str_contains((string) $line, 'ClassNotFound') || \str_contains((string) $line, 'Unable to find class')) {
+            $classNotFound = true;
+            break;
+        }
+    }
+    $checks[] = [
+        'key' => 'log',
+        'label' => 'WoltLab-Log (ClassNotFound)',
+        'status' => $classNotFound ? 'warn' : 'ok',
+        'detail' => $classNotFound ? 'kürzlich ClassNotFound im Log' : 'kein ClassNotFound in den letzten Zeilen',
+    ];
+
+    return $checks;
+}
+
+function recoveryRenderSystemCheckPage(
+    string $authHash,
+    string $wcfDir,
+    ?\wcf\system\database\Database $db,
+    ?int $wcfN,
+    ?array $assets
+): void {
+    $checks = recoveryRunSystemChecks($wcfDir, $db, $wcfN, $assets);
+    $statusIcon = static function (string $status): string {
+        return match ($status) {
+            'ok' => '<i class="fa-solid fa-circle-check" style="color:#3c3"></i>',
+            'warn' => '<i class="fa-solid fa-triangle-exclamation" style="color:#c93"></i>',
+            default => '<i class="fa-solid fa-circle-xmark" style="color:#c33"></i>',
+        };
+    };
+    ?>
+    <h1><i class="fa-solid fa-stethoscope"></i> System-Check</h1>
+    <p class="subtitle">Kurzprüfung der Voraussetzungen für Recovery-Schritte (wie WoltLab test.php).</p>
+    <table class="table" style="margin-top:16px">
+        <thead><tr><th style="width:40px"></th><th>Prüfung</th><th>Ergebnis</th></tr></thead>
+        <tbody>
+        <?php foreach ($checks as $check): ?>
+            <tr>
+                <td><?= $statusIcon((string) $check['status']) ?></td>
+                <td><?= \htmlspecialchars((string) $check['label']) ?></td>
+                <td><small><?= \htmlspecialchars((string) $check['detail']) ?></small></td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+    <details class="recovery-info-panel" style="margin-top:20px">
+        <summary>Technische Details</summary>
+        <ul style="margin:12px 0 0 20px">
+            <li>Recovery Tool v<?= \htmlspecialchars(RECOVERY_VERSION) ?></li>
+            <li>WCF_DIR: <code><?= \htmlspecialchars($wcfDir) ?></code></li>
+            <?php if ($wcfN !== null): ?>
+            <li>WCF_N: <?= (int) $wcfN ?></li>
+            <?php endif; ?>
+        </ul>
+    </details>
+    <p style="margin-top:20px">
+        <a href="<?= \htmlspecialchars(recoveryHomeUrl($authHash)) ?>" class="button"><i class="fa-solid fa-house"></i> Zurück zum Start</a>
+    </p>
+    <?php
+}
+
 /**
  * Generische Vollbereinigung für jedes Plugin (ohne WoltLab-Paket-Deinstaller).
  *
@@ -2634,7 +3336,11 @@ function recoveryPerformFullPluginCleanup(
     ?array $resources,
     array &$log,
     bool $deleteFilesOnDisk = false,
-    ?string $extractDir = null
+    ?string $extractDir = null,
+    bool $sqlRollback = false,
+    bool $rebuildBootstrap = true,
+    bool $dryRun = false,
+    bool $runUninstallScript = true
 ): void {
     $packageIdentifier = recoveryValidatePackageIdentifier($packageIdentifier);
 
@@ -2643,6 +3349,15 @@ function recoveryPerformFullPluginCleanup(
     }
 
     $packageID = $packageData ? (int) $packageData['packageID'] : null;
+    $removalOpts = [
+        'dryRun' => $dryRun,
+        'sqlRollback' => $sqlRollback,
+        'deleteFiles' => $deleteFilesOnDisk,
+        'rebuildBootstrap' => $rebuildBootstrap,
+        'runUninstallScript' => $runUninstallScript,
+    ];
+
+    recoveryRunPreDbRemovalSteps($db, $wcfN, $packageIdentifier, $packageID, $removalOpts, $log);
 
     $optionConstants = recoveryCollectOptionConstantNames($db, $wcfN, $packageID);
     if ($resources && !empty($resources['options']['items'])) {
@@ -2690,13 +3405,15 @@ function recoveryPerformFullPluginCleanup(
 
         recoveryTryDeletePackageRequirements($db, $wcfN, $packageID, $log);
 
-        recoveryTryExecuteDelete(
-            $db,
-            "DELETE FROM wcf{$wcfN}_package_installation_sql_log WHERE packageID = ?",
-            [$packageID],
-            'Package SQL-Log',
-            $log
-        );
+        if (!$sqlRollback) {
+            recoveryTryExecuteDelete(
+                $db,
+                "DELETE FROM wcf{$wcfN}_package_installation_sql_log WHERE packageID = ?",
+                [$packageID],
+                'Package SQL-Log',
+                $log
+            );
+        }
 
         recoveryTryExecuteDelete(
             $db,
@@ -2854,15 +3571,26 @@ function recoveryPerformFullPluginCleanup(
         $log[] = 'options.inc.php bereinigt (Plugin-Konstanten entfernt)';
     }
 
-    recoveryDeletePluginFilesOnDisk(
-        $packageData,
-        $packageIdentifier,
-        $log,
-        $deleteFilesOnDisk,
+    recoveryRunPostDbRemovalSteps(
         $db,
         $wcfN,
+        $packageIdentifier,
+        $packageData,
+        $packageID,
+        $removalOpts,
+        $log,
         $extractDir
     );
+
+    if (!$dryRun && ($deleteFilesOnDisk || $rebuildBootstrap)) {
+        $optionFbLog = [];
+        recoveryEnsureOptionConstantFallbacks($db, $wcfN, $optionFbLog);
+        foreach ($optionFbLog as $entry) {
+            $log[] = $entry;
+        }
+        $deletedCacheFiles = clearCompiledTemplates();
+        $log[] = 'Cache gelöscht: ' . $deletedCacheFiles . ' Dateien';
+    }
 }
 
 // ============================================================================
@@ -3235,7 +3963,7 @@ function recoveryUserDisable2FA(\wcf\system\database\Database $db, int $userID):
  * Früher: komplette CSS/PNG als data:-URI (base64) — bei großen Dateien oder knappem memory_limit
  * häufig **fatal / HTTP 500 ohne Ausgabe** auf Shared Hosting.
  *
- * @return array{WCFSetup.css: string, woltlabSuite.png: string} Relative URLs zur Installations-Root (leer wenn nicht lesbar)
+ * @return array{WCFSetup.css: string, woltlabSuite.png: string, fontAwesomeCss: string, fontAwesomeLocal: bool}
  */
 function recoveryGetSetupAssets(): array
 {
@@ -3250,19 +3978,34 @@ function recoveryGetSetupAssets(): array
             recoveryAgentDebugLog('H4', 'recoveryGetSetupAssets', 'wcf_resolve_failed', ['exceptionClass' => \get_class($ignored)]);
             // #endregion
 
-            return ['WCFSetup.css' => '', 'woltlabSuite.png' => ''];
+            return [
+                'WCFSetup.css' => '',
+                'woltlabSuite.png' => '',
+                'fontAwesomeCss' => '',
+                'fontAwesomeLocal' => false,
+            ];
         }
     }
 
-    $assets = ['WCFSetup.css' => '', 'woltlabSuite.png' => ''];
+    $assets = [
+        'WCFSetup.css' => '',
+        'woltlabSuite.png' => '',
+        'fontAwesomeCss' => '',
+        'fontAwesomeLocal' => false,
+    ];
     $cssPath = WCF_DIR . 'acp/style/setup/WCFSetup.css';
     $imgPath = WCF_DIR . 'acp/images/woltlabSuite.png';
+    $faPath = WCF_DIR . 'icon/font-awesome/v7/css/all.min.css';
 
     if (\is_readable($cssPath)) {
         $assets['WCFSetup.css'] = 'acp/style/setup/WCFSetup.css';
     }
     if (\is_readable($imgPath)) {
         $assets['woltlabSuite.png'] = 'acp/images/woltlabSuite.png';
+    }
+    if (\is_readable($faPath)) {
+        $assets['fontAwesomeCss'] = 'icon/font-awesome/v7/css/all.min.css';
+        $assets['fontAwesomeLocal'] = true;
     }
 
     // #region agent log
@@ -3295,21 +4038,58 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         // #region agent log
         recoveryAgentDebugLog('H4', 'recoveryRenderPageStart', 'getAssets_throw', ['exceptionClass' => \get_class($ignored)]);
         // #endregion
-        $assets = ['WCFSetup.css' => '', 'woltlabSuite.png' => ''];
+        $assets = [
+            'WCFSetup.css' => '',
+            'woltlabSuite.png' => '',
+            'fontAwesomeCss' => '',
+            'fontAwesomeLocal' => false,
+        ];
     }
+    $faHref = ($assets['fontAwesomeCss'] ?? '') !== ''
+        ? (string) $assets['fontAwesomeCss']
+        : 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css';
+    $faIntegrity = ($assets['fontAwesomeLocal'] ?? false)
+        ? ''
+        : ' integrity="sha512-Evv84Mr4kqVGRNSgIGL/F/aIDqQb7xQ2vcrdIwxfjThSH8CSR7PBEakCr51Ck+w+/U6swU2Im1vVX0SVk9ABhg==" crossorigin="anonymous" referrerpolicy="no-referrer"';
     ?>
 <!DOCTYPE html>
-<html lang="de">
+<html lang="de" data-recovery-theme="dark">
 <head>
     <meta charset="utf-8">
     <meta name="robots" content="noindex">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= \htmlspecialchars($documentTitle) ?></title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" integrity="sha512-Evv84Mr4kqVGRNSgIGL/F/aIDqQb7xQ2vcrdIwxfjThSH8CSR7PBEakCr51Ck+w+/U6swU2Im1vVX0SVk9ABhg==" crossorigin="anonymous" referrerpolicy="no-referrer">
+    <script>
+    (function () {
+        var k = 'recoveryTheme', t = localStorage.getItem(k) || 'dark';
+        document.documentElement.setAttribute('data-recovery-theme', t);
+    })();
+    </script>
+    <link rel="stylesheet" href="<?= \htmlspecialchars($faHref) ?>"<?= $faIntegrity ?>>
     <?php if ($assets['WCFSetup.css'] !== ''): ?>
     <link rel="stylesheet" href="<?= \htmlspecialchars($assets['WCFSetup.css']) ?>">
     <?php endif; ?>
     <style>
+        :root, html[data-recovery-theme="dark"] {
+            --recovery-bg: #2D2D2D;
+            --recovery-text: #c0c0c0;
+            --recovery-card: #3D3D3D;
+            --recovery-border: #444444;
+            --recovery-heading: #fff;
+            --recovery-muted: #9D9D9D;
+            --recovery-link: #6EC2FF;
+            --recovery-input-bg: #2D2D2D;
+        }
+        html[data-recovery-theme="light"] {
+            --recovery-bg: #f0f0f0;
+            --recovery-text: #333;
+            --recovery-card: #fff;
+            --recovery-border: #ddd;
+            --recovery-heading: #333;
+            --recovery-muted: #666;
+            --recovery-link: #369;
+            --recovery-input-bg: #fff;
+        }
         /* WCFSetup.css neutralisieren – einfaches Container-Layout beibehalten */
         .pageHeaderContainer, .pageHeaderFacade, .pageHeader, .pageHeaderLogo,
         .pageContainer, #pageContainer, .pageNavigation,
@@ -3334,18 +4114,28 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #2D2D2D;
-            color: #c0c0c0;
+            background: var(--recovery-bg);
+            color: var(--recovery-text);
             padding: 50px 20px;
             line-height: 1.5;
         }
         .container {
             max-width: 980px;
             margin: 0 auto;
-            background: #3D3D3D;
+            background: var(--recovery-card);
             padding: 40px;
             border-radius: 3px;
         }
+        .recovery-theme-bar {
+            display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+            margin-bottom: 16px; font-size: 12px; color: var(--recovery-muted);
+        }
+        .recovery-theme-btn {
+            background: transparent; border: 1px solid var(--recovery-border);
+            color: var(--recovery-text); border-radius: 4px; padding: 4px 10px;
+            cursor: pointer; font-size: 12px;
+        }
+        .recovery-theme-btn.is-active { background: rgba(51,102,153,.35); border-color: #369; }
         footer {
             max-width: 980px;
             margin: 20px auto 0;
@@ -3356,10 +4146,11 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         }
         footer a { color: inherit; text-decoration: none; }
         footer a:hover { color: #fff; }
-        h1 { color: #fff; margin-bottom: 10px; font-size: 32px; font-weight: 300; }
-        h2 { color: #fff; margin: 40px 0 10px 0; font-size: 24px; font-weight: 300; }
-        .subtitle { color: #9D9D9D; margin-bottom: 30px; font-size: 14px; }
-        code { color: #fff; font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; word-break: break-word; }
+        h1 { color: var(--recovery-heading); margin-bottom: 10px; font-size: 32px; font-weight: 300; }
+        h2 { color: var(--recovery-heading); margin: 40px 0 10px 0; font-size: 24px; font-weight: 300; }
+        .subtitle { color: var(--recovery-muted); margin-bottom: 30px; font-size: 14px; }
+        code { color: var(--recovery-heading); font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; word-break: break-word; }
+        html[data-recovery-theme="light"] code { color: #369; background: #f0f4ff; padding: 1px 5px; border-radius: 2px; }
         .mode-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -3391,14 +4182,14 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         @media (max-width: 720px) { .recovery-option-cards { grid-template-columns: 1fr; } }
         .recovery-option-card h3 { margin: 0 0 12px; font-size: 16px; color: #fff; }
         .form-group { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 8px; font-weight: 600; color: #fff; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: var(--recovery-heading); }
         input[type="text"], input[type="password"], textarea, select {
-            width: 100%; padding: 10px; border: 1px solid #444444; border-radius: 3px;
-            font-size: 14px; background: #2D2D2D; color: #c0c0c0;
+            width: 100%; padding: 10px; border: 1px solid var(--recovery-border); border-radius: 3px;
+            font-size: 14px; background: var(--recovery-input-bg); color: var(--recovery-text);
         }
         input[type="file"] {
-            width: 100%; padding: 10px; border: 1px dashed #444444; border-radius: 3px;
-            background: #2D2D2D; color: #c0c0c0;
+            width: 100%; padding: 10px; border: 1px dashed var(--recovery-border); border-radius: 3px;
+            background: var(--recovery-input-bg); color: var(--recovery-text);
         }
         button, .button {
             background: #369; color: white; padding: 12px 24px; border: none; border-radius: 3px;
@@ -3722,6 +4513,43 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
 </head>
 <body>
 <div class="container">
+<div class="recovery-theme-bar" role="group" aria-label="Darstellung">
+    <span>Theme:</span>
+    <button type="button" class="recovery-theme-btn" data-recovery-set-theme="light" title="Hell">Hell</button>
+    <button type="button" class="recovery-theme-btn" data-recovery-set-theme="dark" title="Dunkel">Dunkel</button>
+    <button type="button" class="recovery-theme-btn" data-recovery-set-theme="system" title="System">System</button>
+</div>
+<script>
+(function () {
+    var key = 'recoveryTheme';
+    function resolved(theme) {
+        if (theme === 'system') {
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        return theme === 'light' ? 'light' : 'dark';
+    }
+    function apply(theme) {
+        document.documentElement.setAttribute('data-recovery-theme', theme);
+        document.querySelectorAll('[data-recovery-set-theme]').forEach(function (btn) {
+            btn.classList.toggle('is-active', btn.getAttribute('data-recovery-set-theme') === theme);
+        });
+    }
+    var stored = localStorage.getItem(key) || 'dark';
+    apply(stored);
+    document.querySelectorAll('[data-recovery-set-theme]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var t = btn.getAttribute('data-recovery-set-theme') || 'dark';
+            localStorage.setItem(key, t);
+            apply(t);
+        });
+    });
+    if (stored === 'system') {
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+            if (localStorage.getItem(key) === 'system') { apply('system'); }
+        });
+    }
+})();
+</script>
 <?php
 }
 
@@ -3948,6 +4776,7 @@ function recoveryRenderBreadcrumb(int $mode, string $authHash): void
         RECOVERY_MODE_CACHE_CLEAR => 'Cache leeren',
         RECOVERY_MODE_PACKAGE_LIST_REPAIR => 'Paketliste',
         RECOVERY_MODE_PACKAGE_FILE_REPAIR => 'Dateien reparieren',
+        RECOVERY_MODE_SYSTEM_CHECK => 'System-Check',
     ];
 
     if (isset($labels[$mode])) {
@@ -3997,6 +4826,11 @@ function recoveryRenderExpertModesGrid(string $authHash): void
             <strong>Recovery-Wizard</strong>
             <span>Geführte Diagnose (empfohlen)</span>
         </a>
+        <a href="<?= \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_SYSTEM_CHECK, $authHash)) ?>" class="mode-button">
+            <i class="fa-solid fa-stethoscope"></i>
+            <strong>System-Check</strong>
+            <span>PHP, Rechte, DB, Assets</span>
+        </a>
     </div>
     <?php
 }
@@ -4015,6 +4849,8 @@ function recoveryRenderGlobalNav(int $mode, string $authHash, string $baseUrl): 
         echo '<a href="#recovery-sysinfo" class="recovery-nav-link">'
             . '<i class="fa-solid fa-circle-info"></i> Systeminfo</a>';
     }
+    echo '<a href="' . \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_SYSTEM_CHECK, $authHash)) . '" class="recovery-nav-link">'
+        . '<i class="fa-solid fa-stethoscope"></i> System-Check</a>';
     echo '</nav>';
 }
 
@@ -7517,13 +8353,38 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                         echo '<p style="color:#999"><em>Keine plugin-eigenen Tabellen gefunden.</em></p>';
                     }
 
+                    $fileLogCount = $packageID ? \count(recoveryLoadPackageFileLogPaths($db, $wcfN, $packageID)) : 0;
+                    $sqlPreviewStep = $packageID ? recoveryPreviewSqlRollback($db, $wcfN, $packageID) : ['actions' => []];
+
+                    if ($packageID) {
+                        echo '<h2 style="margin:24px 0 10px"><i class="fa-solid fa-gears"></i> Erweiterte Schritte</h2>';
+                        echo '<div class="alert alert-info" style="margin-bottom:12px">';
+                        echo '<label style="cursor:pointer;display:block;margin-bottom:8px">';
+                        echo '<input type="checkbox" name="rebuild_bootstrap" value="1" checked> ';
+                        echo '<strong>lib/bootstrap.php neu erzeugen</strong> (empfohlen)</label>';
+                        if ($fileLogCount > 0) {
+                            echo '<label style="cursor:pointer;display:block;margin-bottom:8px">';
+                            echo '<input type="checkbox" name="delete_files_log" value="1" checked> ';
+                            echo '<strong>Dateien aus file_log löschen</strong> (' . $fileLogCount . ')</label>';
+                        }
+                        if ($sqlPreviewStep['actions'] !== []) {
+                            echo '<label style="cursor:pointer;display:block">';
+                            echo '<input type="checkbox" name="sql_rollback" value="1"> ';
+                            echo '<strong>SQL-Schema zurücksetzen</strong> (' . \count($sqlPreviewStep['actions']) . ' Aktionen — optional)</label>';
+                            echo '<br><small style="margin-top:6px;display:block">Destruktiv — nur mit DB-Backup.</small>';
+                        }
+                        echo '</div>';
+                    }
+
                     // ── Dateisystem ───────────────────────────────────────────
-                    echo '<h2 style="margin:24px 0 10px"><i class="fa-solid fa-folder-open"></i> Dateisystem</h2>';
+                    echo '<h2 style="margin:24px 0 10px"><i class="fa-solid fa-folder-open"></i> Dateisystem (Verzeichnis-Fallback)</h2>';
                     if ($fsEval['deletable']) {
                         echo '<div class="alert alert-warning">';
-                        echo '<label style="cursor:pointer"><input type="checkbox" name="delete_files" value="1"> ';
+                        echo '<label style="cursor:pointer"><input type="checkbox" name="delete_files_dir" value="1"';
+                        if ($fileLogCount === 0) { echo ' checked'; }
+                        echo '> ';
                         echo 'Plugin-Verzeichnis <code>' . \htmlspecialchars((string)$fsEval['relativePath']) . '/</code> auf dem Server löschen</label>';
-                        echo '<br><small style="margin-top:6px;display:block">Sicherheitsprüfung: nur wenn Pfad innerhalb WCF_DIR und kein geschütztes Verzeichnis.</small>';
+                        echo '<br><small style="margin-top:6px;display:block">Zusätzlich zu file_log oder als Fallback.</small>';
                         echo '</div>';
                     } else {
                         echo '<div class="alert alert-info"><strong>Dateisystem:</strong> ' . \htmlspecialchars($fsEval['reason']) . '</div>';
@@ -7539,7 +8400,12 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     $isDryRun      = isset($_POST['dry_run']) && $_POST['dry_run'] === '1';
                     $selectedPips  = \is_array($_POST['pip_select'] ?? null)  ? (array)$_POST['pip_select']  : [];
                     $dropTables    = \is_array($_POST['drop_tables'] ?? null)  ? (array)$_POST['drop_tables']  : [];
-                    $deleteFiles   = !empty($_POST['delete_files']) && $_POST['delete_files'] === '1';
+                    $deleteFilesLog = !empty($_POST['delete_files_log']) && $_POST['delete_files_log'] === '1';
+                    $deleteFilesDir = !empty($_POST['delete_files_dir']) && $_POST['delete_files_dir'] === '1';
+                    $deleteFilesLegacy = !empty($_POST['delete_files']) && $_POST['delete_files'] === '1';
+                    $deleteFiles   = $deleteFilesLog || $deleteFilesDir || $deleteFilesLegacy;
+                    $sqlRollback   = !empty($_POST['sql_rollback']) && $_POST['sql_rollback'] === '1';
+                    $rebuildBootstrap = !isset($_POST['rebuild_bootstrap']) || $_POST['rebuild_bootstrap'] === '1';
 
                     // Eingaben validieren
                     $pipMap    = recoveryGetPipResourceMap();
@@ -7639,12 +8505,24 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                         echo '<br>';
                     }
 
-                    if ($deleteFiles) {
+                    if ($packageID) {
+                        echo '<strong>Uninstall-Script:</strong> acp/uninstall/' . \htmlspecialchars($packageIdentifier) . '.php '
+                            . (\is_file(\rtrim(WCF_DIR, '/\\') . '/acp/uninstall/' . $packageIdentifier . '.php') ? '(vorhanden)' : '(nicht vorhanden)') . '<br>';
+                        if ($sqlRollback) {
+                            $sp = recoveryPreviewSqlRollback($db, $wcfN, $packageID);
+                            echo '<strong>SQL-Rollback:</strong> ' . \count($sp['actions']) . ' Aktion(en)<br>';
+                        }
+                        if ($rebuildBootstrap) {
+                            echo '<strong>Bootstrap:</strong> lib/bootstrap.php wird neu erzeugt<br>';
+                        }
+                    }
+                    if ($deleteFilesLog) {
+                        echo '<strong>File-Log:</strong> ' . \count(recoveryLoadPackageFileLogPaths($db, $wcfN, (int)$packageID)) . ' Datei(en)<br>';
+                    }
+                    if ($deleteFilesDir) {
                         $fsEval2 = recoveryEvaluatePluginDirectoryDeletion($packageData, $packageIdentifier, $db, $wcfN, $extractDir);
                         if ($fsEval2['deletable']) {
-                            echo '<strong>Dateisystem:</strong> Verzeichnis <code>' . \htmlspecialchars((string)$fsEval2['relativePath']) . '/</code> wird gelöscht<br>';
-                        } else {
-                            echo '<strong>Dateisystem:</strong> ' . \htmlspecialchars($fsEval2['reason']) . ' (kein Löschen)<br>';
+                            echo '<strong>Verzeichnis:</strong> <code>' . \htmlspecialchars((string)$fsEval2['relativePath']) . '/</code><br>';
                         }
                     }
                     echo '</div>';
@@ -7661,8 +8539,17 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     if ($isDryRun) {
                         echo '<input type="hidden" name="dry_run" value="1">';
                     }
-                    if ($deleteFiles) {
-                        echo '<input type="hidden" name="delete_files" value="1">';
+                    if ($deleteFilesLog) {
+                        echo '<input type="hidden" name="delete_files_log" value="1">';
+                    }
+                    if ($deleteFilesDir) {
+                        echo '<input type="hidden" name="delete_files_dir" value="1">';
+                    }
+                    if ($sqlRollback) {
+                        echo '<input type="hidden" name="sql_rollback" value="1">';
+                    }
+                    if ($rebuildBootstrap) {
+                        echo '<input type="hidden" name="rebuild_bootstrap" value="1">';
                     }
                     foreach ($validPips as $pip) {
                         echo '<input type="hidden" name="pip_select[]" value="' . \htmlspecialchars($pip) . '">';
@@ -7680,7 +8567,12 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     $isDryRun      = !empty($_POST['dry_run']) && $_POST['dry_run'] === '1';
                     $selectedPips  = \is_array($_POST['pip_select'] ?? null)  ? (array)$_POST['pip_select']  : [];
                     $dropTables    = \is_array($_POST['drop_tables'] ?? null)  ? (array)$_POST['drop_tables']  : [];
-                    $deleteFiles   = !empty($_POST['delete_files']) && $_POST['delete_files'] === '1';
+                    $deleteFilesLog = !empty($_POST['delete_files_log']) && $_POST['delete_files_log'] === '1';
+                    $deleteFilesDir = !empty($_POST['delete_files_dir']) && $_POST['delete_files_dir'] === '1';
+                    $deleteFilesLegacy = !empty($_POST['delete_files']) && $_POST['delete_files'] === '1';
+                    $deleteFiles   = $deleteFilesLog || $deleteFilesDir || $deleteFilesLegacy;
+                    $sqlRollback   = !empty($_POST['sql_rollback']) && $_POST['sql_rollback'] === '1';
+                    $rebuildBootstrap = !isset($_POST['rebuild_bootstrap']) || $_POST['rebuild_bootstrap'] === '1';
 
                     $pipMap    = recoveryGetPipResourceMap();
                     $validPips = \array_values(\array_filter($selectedPips, fn($p) => isset($pipMap[$p]) && $pipMap[$p]['safe'] && $pipMap[$p]['table'] !== ''));
@@ -7708,8 +8600,25 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
     </div>
 <?php
                     $log = [];
+                    $removalOpts = [
+                        'dryRun' => $isDryRun,
+                        'sqlRollback' => $sqlRollback,
+                        'deleteFilesLog' => $deleteFilesLog || ($deleteFilesLegacy && !$deleteFilesDir),
+                        'deleteFilesDir' => $deleteFilesDir || $deleteFilesLegacy,
+                        'rebuildBootstrap' => $rebuildBootstrap,
+                        'runUninstallScript' => true,
+                    ];
 
                     try {
+                        recoveryRunPreDbRemovalSteps(
+                            $db,
+                            $wcfN,
+                            $packageIdentifier,
+                            $packageID ?: null,
+                            $removalOpts,
+                            $log
+                        );
+
                         // ── DB-Bereinigung nach packageID ─────────────────────
                         if ($packageID && !empty($validPips)) {
                             foreach ($validPips as $pip) {
@@ -7737,13 +8646,15 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                                 recoveryCleanupPackageInstallationArtifacts($db, $wcfN, $packageID, $packageIdentifier, $log);
                                 recoveryCleanupPackageUpdateEntries($db, $wcfN, $packageIdentifier, $log);
                                 recoveryTryDeletePackageRequirements($db, $wcfN, $packageID, $log);
-                                recoveryTryExecuteDelete(
-                                    $db,
-                                    "DELETE FROM wcf{$wcfN}_package_installation_sql_log WHERE packageID = ?",
-                                    [$packageID],
-                                    'Package SQL-Log',
-                                    $log
-                                );
+                                if (!$sqlRollback) {
+                                    recoveryTryExecuteDelete(
+                                        $db,
+                                        "DELETE FROM wcf{$wcfN}_package_installation_sql_log WHERE packageID = ?",
+                                        [$packageID],
+                                        'Package SQL-Log',
+                                        $log
+                                    );
+                                }
                                 recoveryTryExecuteDelete(
                                     $db,
                                     "DELETE FROM wcf{$wcfN}_package WHERE packageID = ?",
@@ -7769,12 +8680,16 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                             }
                         }
 
-                        // ── Dateisystem ───────────────────────────────────────
-                        if ($deleteFiles) {
-                            recoveryDeletePluginFilesOnDisk(
-                                $packageData, $packageIdentifier, $log, !$isDryRun, $db, $wcfN, $extractDir
-                            );
-                        }
+                        recoveryRunPostDbRemovalSteps(
+                            $db,
+                            $wcfN,
+                            $packageIdentifier,
+                            $packageData,
+                            $packageID ?: null,
+                            $removalOpts,
+                            $log,
+                            $extractDir
+                        );
 
                         // ── options.inc.php + Cache ───────────────────────────
                         if (!$isDryRun) {
@@ -8435,6 +9350,26 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
     </div>
 
 <?php
+    $wizardEmergencyFixed = recoverySessionGetEmergencyFixed($authHash);
+    if ($wizardEmergencyFixed !== null) {
+        $suggestedPkg = '';
+        foreach (recoveryExtractMissingClassesFromLog($wcfDir) as $cn) {
+            if (\preg_match('/^([a-z0-9]+)\\\\/', (string) $cn, $m)) {
+                $suggestedPkg = 'de.sunnyc.wsc.' . $m[1];
+                break;
+            }
+        }
+        $removeUrl = recoveryBuildModeUrl(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash, $suggestedPkg !== '' ? ['package_identifier' => $suggestedPkg] : []);
+        ?>
+    <div class="alert alert-warning" style="margin-bottom:20px">
+        <strong>ACP-Notfall wurde bereits ausgeführt.</strong> Dateien nicht wiederherstellen — Plugin vollständig entfernen.
+        <a href="<?= \htmlspecialchars($removeUrl) ?>" class="button" style="margin-left:12px;margin-top:8px;display:inline-block">
+            <i class="fa-solid fa-trash-can"></i> Plugin entfernen
+        </a>
+    </div>
+        <?php
+    }
+
     if ($phase === 'run' && isset($_POST['wizard_execute'])) {
         if (recoveryHasUploadedPackageFile()) {
             $upload = recoveryHandlePackageUpload($_FILES['package_file']);
@@ -8446,7 +9381,7 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         $scopeForRun = isset($wizardState['scopeApplication']) ? (string) $wizardState['scopeApplication'] : '';
         $plan = [
             'orphans' => !empty($_POST['do_orphans']),
-            'files' => !empty($_POST['do_files']),
+            'files' => !empty($_POST['do_files']) && $wizardEmergencyFixed === null,
             'neutralizeBootstrap' => !empty($_POST['do_neutralize_bootstrap']),
             'dbEventListeners' => !empty($_POST['do_db_event_listeners']),
             'cache' => !empty($_POST['do_cache']),
@@ -8604,8 +9539,8 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         <div class="recovery-step-help"><?= $recByKey['orphans']['why'] ?? '' ?></div>
         <?php endif; ?>
 
-        <p><label><input type="checkbox" name="do_files" value="1" <?= !empty($suggest['files']) ? 'checked' : '' ?>>
-            <strong>2. Plugin-Dateien wiederherstellen</strong> (<?= \count($missing) ?> fehlende Klassen)</label></p>
+        <p><label><input type="checkbox" name="do_files" value="1" <?= !empty($suggest['files']) && !$acpAlreadyFixed ? 'checked' : '' ?> <?= $acpAlreadyFixed ? 'disabled' : '' ?>>
+            <strong>2. Plugin-Dateien wiederherstellen</strong> (<?= \count($missing) ?> fehlende Klassen)<?= $acpAlreadyFixed ? ' — nach ACP-Notfall deaktiviert' : '' ?></label></p>
         <?php if (isset($recByKey['files'])): ?>
         <div class="recovery-step-help"><?= $recByKey['files']['why'] ?? '' ?></div>
         <?php endif; ?>
@@ -8870,6 +9805,17 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
     </form>
 <?php
     }
+}
+
+// ============================================================================
+// MODUS 8: SYSTEM-CHECK
+// ============================================================================
+
+elseif ($mode === RECOVERY_MODE_SYSTEM_CHECK) {
+    $wcfDirCheck = \rtrim(WCF_DIR, '/\\') . \DIRECTORY_SEPARATOR;
+    $assetsCheck = recoveryGetSetupAssets();
+    recoveryRenderBreadcrumb($mode, $authHash);
+    recoveryRenderSystemCheckPage($authHash, $wcfDirCheck, $db, WCF_N, $assetsCheck);
 }
 
 }
