@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.28
+ * @version 1.6.0
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.28');
+define('RECOVERY_VERSION', '1.6.0');
 define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
@@ -875,7 +875,9 @@ function recoveryFormLoadingScript(): void
     ?>
 <script>
 (function () {
-    function showOverlay(message) {
+    var progressTimer = null;
+
+    function showOverlay(message, stepsText) {
         var container = document.querySelector('.container');
         if (!container) {
             return;
@@ -889,9 +891,67 @@ function recoveryFormLoadingScript(): void
         el.className = 'recovery-loading';
         el.style.display = 'block';
         el.innerHTML = '<div class="recovery-loading-msg"></div>'
-            + '<div class="recovery-loading-track"><div class="recovery-loading-fill"></div></div>';
+            + '<div class="recovery-loading-pct" id="recovery-loading-pct">0 %</div>'
+            + '<div class="recovery-loading-track"><div class="recovery-loading-fill" id="recovery-loading-fill"></div></div>'
+            + '<div class="recovery-loading-steps" id="recovery-loading-steps"></div>';
         el.querySelector('.recovery-loading-msg').textContent = message;
+        var stepsEl = el.querySelector('#recovery-loading-steps');
+        if (stepsEl && stepsText) {
+            stepsEl.textContent = stepsText;
+        }
         container.insertBefore(el, container.firstChild);
+        if (progressTimer) {
+            clearInterval(progressTimer);
+        }
+        var pct = 0;
+        var fill = el.querySelector('#recovery-loading-fill');
+        var pctEl = el.querySelector('#recovery-loading-pct');
+        progressTimer = setInterval(function () {
+            if (pct < 92) {
+                pct += pct < 50 ? 4 : (pct < 80 ? 2 : 1);
+                if (fill) {
+                    fill.style.width = pct + '%';
+                    fill.style.transform = 'none';
+                    fill.style.animation = 'none';
+                }
+                if (pctEl) {
+                    pctEl.textContent = pct + ' %';
+                }
+            }
+        }, 450);
+    }
+
+    function bindCopyButtons() {
+        document.querySelectorAll('[data-recovery-copy]').forEach(function (btn) {
+            if (btn.dataset.recoveryCopyBound === '1') {
+                return;
+            }
+            btn.dataset.recoveryCopyBound = '1';
+            btn.addEventListener('click', function () {
+                var id = btn.getAttribute('data-recovery-copy');
+                var node = id ? document.getElementById(id) : null;
+                if (!node) {
+                    return;
+                }
+                var text = node.textContent || '';
+                function doneOk() {
+                    btn.classList.add('copied');
+                    var oldHtml = btn.innerHTML;
+                    btn.innerHTML = '<i class="fa-solid fa-check"></i> Kopiert';
+                    setTimeout(function () {
+                        btn.classList.remove('copied');
+                        btn.innerHTML = oldHtml;
+                    }, 2000);
+                }
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(doneOk).catch(function () {
+                        window.prompt('Kopieren (Strg+C):', text);
+                    });
+                } else {
+                    window.prompt('Kopieren (Strg+C):', text);
+                }
+            });
+        });
     }
 
     function bindForms() {
@@ -901,15 +961,29 @@ function recoveryFormLoadingScript(): void
             }
             form.dataset.recoveryLoadingBound = '1';
             form.addEventListener('submit', function () {
-                showOverlay(form.getAttribute('data-recovery-loading') || 'Bitte warten …');
+                showOverlay(
+                    form.getAttribute('data-recovery-loading') || 'Bitte warten …',
+                    form.getAttribute('data-recovery-loading-steps') || ''
+                );
             });
         });
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', bindForms);
-    } else {
+    function init() {
         bindForms();
+        bindCopyButtons();
+        if (window.location.search.indexOf('expert=1') !== -1) {
+            var expert = document.getElementById('recovery-expert-panel');
+            if (expert) {
+                expert.open = true;
+            }
+        }
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
     }
 })();
 </script>
@@ -3479,6 +3553,121 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         }
         .recovery-nav-link:hover { text-decoration: underline; }
         .recovery-nav-acp { margin-left: auto; }
+        .recovery-breadcrumb {
+            font-size: 13px; color: #9D9D9D; margin: 0 0 20px; line-height: 1.6;
+        }
+        .recovery-breadcrumb a { color: #6EC2FF; text-decoration: none; }
+        .recovery-breadcrumb a:hover { text-decoration: underline; }
+        .recovery-breadcrumb strong { color: #e8e8e8; }
+        .recovery-intake-hero { margin-bottom: 28px; }
+        .recovery-intake-hero h1 { margin-bottom: 8px; }
+        .recovery-scenario-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 16px;
+            margin-bottom: 28px;
+        }
+        @media (min-width: 720px) {
+            .recovery-scenario-grid { grid-template-columns: repeat(2, 1fr); }
+            .recovery-scenario-card--primary { grid-column: 1 / -1; }
+        }
+        .recovery-scenario-card {
+            display: block;
+            padding: 22px 24px;
+            background: rgba(0, 0, 0, .2);
+            border: 2px solid #444;
+            border-radius: 6px;
+            text-decoration: none;
+            color: inherit;
+            transition: border-color .2s, background .2s, transform .15s;
+        }
+        .recovery-scenario-card:hover {
+            border-color: #666;
+            background: rgba(0, 0, 0, .3);
+            transform: translateY(-1px);
+        }
+        .recovery-scenario-card--primary {
+            border-color: #369;
+            background: rgba(51, 102, 153, .15);
+        }
+        .recovery-scenario-card--primary:hover { border-color: #6EC2FF; }
+        .recovery-scenario-icon {
+            font-size: 28px; color: #6EC2FF; margin-bottom: 12px; display: block;
+        }
+        .recovery-scenario-card--primary .recovery-scenario-icon { color: #fff; }
+        .recovery-scenario-card h2 {
+            margin: 0 0 10px; font-size: 20px; color: #fff; font-weight: 700;
+        }
+        .recovery-scenario-card p {
+            margin: 0 0 14px; font-size: 14px; line-height: 1.55; color: #b8b8b8;
+        }
+        .recovery-scenario-cta {
+            font-size: 13px; font-weight: 700; color: #6EC2FF; text-transform: uppercase;
+            letter-spacing: .03em;
+        }
+        .recovery-scenario-card--primary .recovery-scenario-cta { color: #fff; }
+        .recovery-info-panel {
+            background: rgba(0, 0, 0, .15);
+            border: 1px solid #444;
+            border-radius: 6px;
+            padding: 18px 20px;
+            margin-bottom: 24px;
+        }
+        .recovery-info-panel h2 {
+            margin: 0 0 6px; font-size: 16px; color: #fff;
+        }
+        .recovery-info-panel .recovery-info-hint {
+            margin: 0 0 16px; font-size: 13px; color: #9D9D9D; line-height: 1.5;
+        }
+        .recovery-info-grid { display: grid; gap: 10px; }
+        .recovery-copy-row {
+            display: grid;
+            grid-template-columns: minmax(120px, 28%) 1fr auto;
+            gap: 10px 12px;
+            align-items: center;
+            padding: 10px 12px;
+            background: rgba(0, 0, 0, .2);
+            border-radius: 4px;
+            border: 1px solid #3a3a3a;
+        }
+        @media (max-width: 640px) {
+            .recovery-copy-row { grid-template-columns: 1fr; }
+        }
+        .recovery-copy-label { font-size: 12px; color: #9D9D9D; font-weight: 600; }
+        .recovery-copy-value {
+            font-size: 13px; color: #e0e0e0; word-break: break-all;
+            margin: 0;
+        }
+        .recovery-copy-btn {
+            background: #444; color: #fff; border: none; border-radius: 4px;
+            padding: 8px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+            white-space: nowrap;
+        }
+        .recovery-copy-btn:hover { background: #555; }
+        .recovery-copy-btn.copied { background: #3a3; }
+        .recovery-expert-panel {
+            margin-top: 8px; border: 1px solid #444; border-radius: 6px;
+            background: rgba(0, 0, 0, .08);
+        }
+        .recovery-expert-panel > summary {
+            cursor: pointer; padding: 16px 20px; font-weight: 700; color: #c0c0c0;
+            list-style: none; user-select: none;
+        }
+        .recovery-expert-panel > summary::-webkit-details-marker { display: none; }
+        .recovery-expert-panel > summary::before {
+            content: '▸ '; color: #6EC2FF;
+        }
+        .recovery-expert-panel[open] > summary::before { content: '▾ '; }
+        .recovery-expert-panel[open] > summary { color: #fff; border-bottom: 1px solid #444; }
+        .recovery-expert-body { padding: 20px; }
+        .recovery-expert-body .mode-grid { margin-bottom: 0; }
+        .recovery-loading-steps {
+            font-size: 13px; color: #9D9D9D; margin-top: 10px; max-width: 520px;
+            margin-left: auto; margin-right: auto; text-align: left;
+        }
+        .recovery-loading-pct {
+            font-size: 12px; color: #6EC2FF; margin-top: 8px; font-variant-numeric: tabular-nums;
+        }
 
         /* Font Awesome Icon-Abstände */
         .fa-solid, .fas { margin-right: 6px; }
@@ -3520,14 +3709,154 @@ function recoveryRenderBackLink(string $href): void
     echo '<a href="' . \htmlspecialchars($href) . '" class="back-link"><i class="fa-solid fa-arrow-left"></i> Zurück zur Auswahl</a>';
 }
 
+function recoveryHomeUrl(string $authHash): string
+{
+    return 'plugin-recovery-tool.php?t=' . \rawurlencode($authHash);
+}
+
+/**
+ * @return list<array{label: string, value: string, mono?: bool}>
+ */
+function recoveryBuildRuntimeInfoRows(string $authHash, string $baseUrl): array
+{
+    $rows = [
+        ['label' => 'Recovery-Tool Version', 'value' => RECOVERY_VERSION],
+        ['label' => 'PHP-Version', 'value' => \PHP_VERSION],
+        ['label' => 'Auth-Token (URL)', 'value' => recoveryHomeUrl($authHash)],
+        ['label' => 'Forum-URL', 'value' => $baseUrl],
+    ];
+
+    if (\defined('WCF_N')) {
+        $rows[] = ['label' => 'WCF_N (Tabellen-Suffix)', 'value' => (string) \constant('WCF_N')];
+    }
+    if (\defined('WCF_DIR')) {
+        $rows[] = ['label' => 'WCF-Verzeichnis', 'value' => \rtrim((string) \constant('WCF_DIR'), '/\\')];
+    }
+    if (\defined('WCF_VERSION')) {
+        $rows[] = ['label' => 'WoltLab Suite', 'value' => (string) \constant('WCF_VERSION')];
+    }
+
+    $wcfDir = \defined('WCF_DIR') ? \rtrim((string) \constant('WCF_DIR'), '/\\') . '/' : null;
+    if ($wcfDir !== null) {
+        $logHits = recoveryScanWoltLabLogForRecentErrors($wcfDir, 3);
+        if ($logHits !== []) {
+            $rows[] = ['label' => 'Letzter Log-Hinweis', 'value' => $logHits[\count($logHits) - 1]];
+        }
+    }
+
+    return $rows;
+}
+
+function recoveryRenderCopyableRow(string $elementId, string $label, string $value): void
+{
+    $elementId = \preg_replace('/[^a-zA-Z0-9_-]/', '', $elementId) ?: 'val';
+    echo '<div class="recovery-copy-row">';
+    echo '<span class="recovery-copy-label">' . \htmlspecialchars($label) . '</span>';
+    echo '<code class="recovery-copy-value" id="recovery-copy-' . \htmlspecialchars($elementId) . '">'
+        . \htmlspecialchars($value) . '</code>';
+    echo '<button type="button" class="recovery-copy-btn" data-recovery-copy="recovery-copy-'
+        . \htmlspecialchars($elementId) . '" title="In Zwischenablage kopieren">'
+        . '<i class="fa-solid fa-copy"></i> Kopieren</button>';
+    echo '</div>';
+}
+
+function recoveryRenderRuntimeInfoPanel(string $authHash, string $baseUrl): void
+{
+    $rows = recoveryBuildRuntimeInfoRows($authHash, $baseUrl);
+    ?>
+    <section class="recovery-info-panel" aria-labelledby="recovery-runtime-info-heading">
+        <h2 id="recovery-runtime-info-heading"><i class="fa-solid fa-circle-info"></i> System-Informationen</h2>
+        <p class="recovery-info-hint">
+            Diese Werte können Sie bei Support-Anfragen mit angeben. Mit <strong>Kopieren</strong> übernehmen Sie sie in die Zwischenablage.
+        </p>
+        <div class="recovery-info-grid">
+        <?php
+        $i = 0;
+    foreach ($rows as $row) {
+        recoveryRenderCopyableRow('info' . $i++, (string) $row['label'], (string) $row['value']);
+    }
+    ?>
+        </div>
+    </section>
+    <?php
+}
+
+function recoveryRenderBreadcrumb(int $mode, string $authHash): void
+{
+    $home = recoveryHomeUrl($authHash);
+    $parts = ['<a href="' . \htmlspecialchars($home) . '">Start</a>'];
+
+    $labels = [
+        RECOVERY_MODE_RECOVERY_WIZARD => 'Recovery-Wizard',
+        RECOVERY_MODE_USER_MANAGEMENT => 'Admin-Konto',
+        RECOVERY_MODE_PLUGIN_UNINSTALL => 'Plugin entfernen',
+        RECOVERY_MODE_ACP_REPAIR => 'ACP Repair',
+        RECOVERY_MODE_CACHE_CLEAR => 'Cache leeren',
+        RECOVERY_MODE_PACKAGE_LIST_REPAIR => 'Paketliste',
+        RECOVERY_MODE_PACKAGE_FILE_REPAIR => 'Dateien reparieren',
+    ];
+
+    if (isset($labels[$mode])) {
+        $parts[] = '<strong>' . \htmlspecialchars($labels[$mode]) . '</strong>';
+    }
+
+    if (\count($parts) < 2) {
+        return;
+    }
+
+    echo '<nav class="recovery-breadcrumb" aria-label="Brotkrumen">'
+        . \implode(' <span aria-hidden="true">›</span> ', $parts)
+        . '</nav>';
+}
+
+function recoveryRenderExpertModesGrid(string $authHash): void
+{
+    ?>
+    <div class="mode-grid">
+        <a href="<?= \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_ACP_REPAIR, $authHash)) ?>" class="mode-button">
+            <i class="fa-solid fa-wrench"></i>
+            <strong>ACP Repair</strong>
+            <span>Defekte ACP-Menüeinträge eines Plugins</span>
+        </a>
+        <a href="<?= \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash)) ?>" class="mode-button">
+            <i class="fa-solid fa-trash-can"></i>
+            <strong>Plugin Uninstall</strong>
+            <span>DB + Dateien — ohne Wizard</span>
+        </a>
+        <a href="<?= \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_PACKAGE_LIST_REPAIR, $authHash)) ?>" class="mode-button">
+            <i class="fa-solid fa-list-check"></i>
+            <strong>Paketliste reparieren</strong>
+            <span>Verwaiste Queue-/Application-Einträge</span>
+        </a>
+        <a href="<?= \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_PACKAGE_FILE_REPAIR, $authHash)) ?>" class="mode-button">
+            <i class="fa-solid fa-file-circle-plus"></i>
+            <strong>Plugin-Dateien reparieren</strong>
+            <span>Fehlende Klassen aus Paket-Archiv</span>
+        </a>
+        <a href="<?= \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_CACHE_CLEAR, $authHash)) ?>" class="mode-button">
+            <i class="fa-solid fa-broom"></i>
+            <strong>Cache Clear</strong>
+            <span>Nur Cache + Option-Fallback</span>
+        </a>
+        <a href="<?= \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_RECOVERY_WIZARD, $authHash)) ?>" class="mode-button" style="border-color:#369">
+            <i class="fa-solid fa-route"></i>
+            <strong>Recovery-Wizard</strong>
+            <span>Geführte Diagnose (empfohlen)</span>
+        </a>
+    </div>
+    <?php
+}
+
 function recoveryRenderGlobalNav(int $mode, string $authHash, string $baseUrl): void
 {
     $acpUrl = $baseUrl . 'acp/';
     echo '<nav class="recovery-global-nav" aria-label="Recovery-Navigation">';
     if ($mode !== RECOVERY_MODE_SELECTION) {
-        echo '<a href="?t=' . \htmlspecialchars($authHash) . '" class="recovery-nav-link"><i class="fa-solid fa-arrow-left"></i> Zurück zur Modus-Auswahl</a>';
+        echo '<a href="' . \htmlspecialchars(recoveryHomeUrl($authHash)) . '" class="recovery-nav-link">'
+            . '<i class="fa-solid fa-house"></i> Zurück zum Start</a>';
     }
-    echo '<a href="' . \htmlspecialchars($acpUrl) . '" class="recovery-nav-link recovery-nav-acp"><i class="fa-solid fa-gauge-high"></i> Zum ACP</a>';
+    echo '<a href="' . \htmlspecialchars($acpUrl) . '" class="recovery-nav-link recovery-nav-acp">'
+        . '<i class="fa-solid fa-gauge-high"></i> Zum ACP</a>';
     echo '</nav>';
 }
 
@@ -5713,69 +6042,90 @@ $recoveryBaseUrl = recoveryGetSiteBaseUrl();
 $db = \wcf\system\WCF::getDB();
 
 recoveryRenderGlobalNav($mode, $authHash, $recoveryBaseUrl);
+recoveryRenderBreadcrumb($mode, $authHash);
 
 ?>
 
 <?php
 // ============================================================================
-// MODUS 0: AUSWAHL
+// MODUS 0: START / SZENARIO-AUSWAHL
 // ============================================================================
 
 if ($mode === RECOVERY_MODE_SELECTION) {
+    $wizardStartUrl = recoveryBuildModeUrl(RECOVERY_MODE_RECOVERY_WIZARD, $authHash);
+    $adminUrl = recoveryBuildModeUrl(RECOVERY_MODE_USER_MANAGEMENT, $authHash);
+    $uninstallUrl = recoveryBuildModeUrl(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash);
+    $expertOpen = !empty($_GET['expert']);
 ?>
     <?php if (isset($_GET['auth_ok'])): ?>
-    <div class="alert alert-success"><i class="fa-solid fa-circle-check"></i> <strong>Authentifizierung erfolgreich.</strong> Sie können jetzt einen Recovery-Modus wählen.</div>
+    <div class="alert alert-success"><i class="fa-solid fa-circle-check"></i> <strong>Anmeldung erfolgreich.</strong> Wählen Sie unten, was auf Ihrer Installation zutrifft.</div>
     <?php endif; ?>
 
-    <h1>WoltLab Suite Recovery Tool</h1>
-    <p class="subtitle">Wählen Sie den gewünschten Recovery-Modus</p>
+    <header class="recovery-intake-hero">
+        <h1>WoltLab Recovery Tool</h1>
+        <p class="subtitle" style="max-width:720px">
+            Geführte Hilfe bei Notfällen — zuerst die Situation wählen. Für defekte Plugins und ein nicht erreichbares ACP
+            ist der <strong>Recovery-Wizard</strong> der empfohlene Weg (Diagnose → Plan → Ausführung).
+        </p>
+    </header>
 
-    <div class="mode-grid">
-        <a href="?mode=<?= RECOVERY_MODE_ACP_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
-            <i class="fa-solid fa-wrench"></i>
-            <strong>ACP Repair</strong>
-            <span>Repariert defekte ACP-Menüeinträge eines Plugins</span>
+    <?php recoveryRenderRuntimeInfoPanel($authHash, $recoveryBaseUrl); ?>
+
+    <h2 style="margin:0 0 16px;font-size:18px;color:#fff">Was ist passiert?</h2>
+    <div class="recovery-scenario-grid">
+        <a href="<?= \htmlspecialchars($wizardStartUrl) ?>" class="recovery-scenario-card recovery-scenario-card--primary">
+            <i class="fa-solid fa-route recovery-scenario-icon" aria-hidden="true"></i>
+            <h2>Plugin defekt / ACP nicht erreichbar</h2>
+            <p>
+                Nach Installation oder Deinstallation bricht das Administrationspanel zusammen, ein Plugin lässt sich
+                nicht deinstallieren, <code>ClassNotFoundException</code> im Log — der Wizard führt Sie Schritt für Schritt
+                durch Diagnose, Reparatur und optionaler Deinstallation.
+            </p>
+            <span class="recovery-scenario-cta">Recovery-Wizard starten →</span>
         </a>
-        <a href="?mode=<?= RECOVERY_MODE_PLUGIN_UNINSTALL ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
-            <i class="fa-solid fa-trash-can"></i>
-            <strong>Plugin Uninstall</strong>
-            <span>Deinstalliert Plugin komplett (DB + Dateien)</span>
+
+        <a href="<?= \htmlspecialchars($adminUrl) ?>" class="recovery-scenario-card">
+            <i class="fa-solid fa-user-shield recovery-scenario-icon" aria-hidden="true"></i>
+            <h2>Admin-Zugang wiederherstellen</h2>
+            <p>
+                Passwort vergessen, kein Zugang zum ACP, Administrator-Rechte nötig — Benutzerkonto und Berechtigungen
+                direkt in der Datenbank anpassen.
+            </p>
+            <span class="recovery-scenario-cta">User Management →</span>
         </a>
-        <a href="?mode=<?= RECOVERY_MODE_USER_MANAGEMENT ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
-            <i class="fa-solid fa-users-gear"></i>
-            <strong>User Management</strong>
-            <span>Admin-Passwort zurücksetzen &amp; Berechtigungen</span>
-        </a>
-        <a href="?mode=<?= RECOVERY_MODE_CACHE_CLEAR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
-            <i class="fa-solid fa-broom"></i>
-            <strong>Cache Clear</strong>
-            <span>Löscht alle Caches &amp; kompilierte Templates</span>
-        </a>
-        <a href="?mode=<?= RECOVERY_MODE_PACKAGE_LIST_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
-            <i class="fa-solid fa-list-check"></i>
-            <strong>Paketliste reparieren</strong>
-            <span>Entfernt verwaiste Queue-/Application-Einträge (ACP-Paketliste)</span>
-        </a>
-        <a href="?mode=<?= RECOVERY_MODE_PACKAGE_FILE_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
-            <i class="fa-solid fa-file-circle-plus"></i>
-            <strong>Plugin-Dateien reparieren</strong>
-            <span>Fehlende Klassen aus Bootstrap erkennen, aus Paket wiederherstellen, Cache leeren</span>
-        </a>
-        <a href="?mode=<?= RECOVERY_MODE_RECOVERY_WIZARD ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button" style="border-color:#369">
-            <i class="fa-solid fa-route"></i>
-            <strong>Recovery-Wizard</strong>
-            <span>Halbautomatisch: Diagnose → Plan wählen → in logischer Reihenfolge ausführen</span>
+
+        <a href="<?= \htmlspecialchars($uninstallUrl) ?>" class="recovery-scenario-card">
+            <i class="fa-solid fa-trash-can recovery-scenario-icon" aria-hidden="true"></i>
+            <h2>Plugin gezielt entfernen</h2>
+            <p>
+                Sie wissen welches Paket weg muss (<code>de.vendor.plugin</code>) und möchten es vollständig aus
+                Datenbank und optional Dateisystem entfernen — ohne den geführten Wizard.
+            </p>
+            <span class="recovery-scenario-cta">Plugin Uninstall →</span>
         </a>
     </div>
 
-    <div class="alert alert-info">
-        <i class="fa-solid fa-circle-info"></i> <strong>Hinweis:</strong> Dieses Tool arbeitet direkt auf Datenbank-Ebene und sollte nur im Notfall verwendet werden.
+    <details class="recovery-expert-panel" id="recovery-expert-panel"<?= $expertOpen ? ' open' : '' ?>>
+        <summary>Experten: Einzelmodi manuell (optional)</summary>
+        <div class="recovery-expert-body">
+            <p style="margin:0 0 16px;color:#9D9D9D;font-size:14px;line-height:1.55">
+                Nur nutzen, wenn Sie genau wissen, welcher Schritt nötig ist. Für die meisten Fälle reicht der
+                <a href="<?= \htmlspecialchars($wizardStartUrl) ?>" style="color:#6EC2FF">Recovery-Wizard</a>.
+            </p>
+            <?php recoveryRenderExpertModesGrid($authHash); ?>
+        </div>
+    </details>
+
+    <div class="alert alert-info" style="margin-top:24px">
+        <i class="fa-solid fa-circle-info"></i>
+        <strong>Hinweis:</strong> Das Tool arbeitet direkt auf dem Server (Datenbank &amp; Dateien). Nur im Notfall verwenden.
+        Nach erfolgreicher Recovery alle Recovery-Dateien vom Webspace entfernen.
     </div>
 
-    <div class="alert alert-warning" style="margin-top: 30px;">
+    <div class="alert alert-warning" style="margin-top: 20px;">
         <i class="fa-solid fa-triangle-exclamation"></i> <strong>Fertig mit Recovery?</strong><br>
-        Wenn Sie alle Reparaturen abgeschlossen haben, sollten Sie das Recovery Tool und alle zugehörigen Dateien löschen.<br><br>
-        <a href="?action=cleanup&amp;t=<?= htmlspecialchars($authHash) ?>" class="button btn-danger" onclick="return confirm('ACHTUNG: Das Recovery Tool wird entfernt (Auth-Datei, Uploads, diese PHP-Datei) und Sie werden ins ACP weitergeleitet. Fortfahren?')">
+        Wenn alles wieder funktioniert, Recovery Tool und Auth-Datei löschen.<br><br>
+        <a href="?action=cleanup&amp;t=<?= \htmlspecialchars($authHash) ?>" class="button btn-danger" onclick="return confirm('ACHTUNG: Das Recovery Tool wird entfernt (Auth-Datei, Uploads, diese PHP-Datei) und Sie werden ins ACP weitergeleitet. Fortfahren?')">
             <i class="fa-solid fa-xmark"></i> Recovery Tool vollständig entfernen
         </a>
     </div>
@@ -7222,7 +7572,12 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
     recoveryRenderWizardPhaseSteps($phaseIndex, ['Paket', 'Diagnose', 'Plan', 'Ausführung']);
 ?>
     <h1>Recovery-Wizard</h1>
-    <p class="subtitle">Geführte Reparatur in sinnvoller Reihenfolge — Sie entscheiden pro Schritt, was ausgeführt wird</p>
+    <p class="subtitle">Geführte Reparatur: Paket festlegen → Diagnose → Schritte wählen → ausführen. Sie behalten die Kontrolle.</p>
+
+    <div class="alert alert-info" style="margin-bottom:20px">
+        <strong>Ziel:</strong> ACP wieder erreichbar machen und defektes Plugin anschließend sauber entfernen.
+        <a href="<?= \htmlspecialchars(recoveryHomeUrl($authHash)) ?>" style="color:#6EC2FF;margin-left:8px">← Andere Situation wählen</a>
+    </div>
 
 <?php
     if ($phase === 'run' && isset($_POST['wizard_execute'])) {
@@ -7306,7 +7661,9 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         $extractDir = recoveryResolveTrustedExtractDir($authHash);
         $sessionPackageId = (string) ($pkgCtx['packageIdentifier'] ?? $state['packageLabel'] ?? '');
 ?>
-    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($wizardUrl) ?>" data-recovery-loading="Recovery wird ausgeführt (Paketliste, Dateien, Bootstrap, Cache) …">
+    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($wizardUrl) ?>"
+        data-recovery-loading="Recovery-Schritte werden ausgeführt …"
+        data-recovery-loading-steps="Reihenfolge: Paketliste → Dateien → Bootstrap → DB-Listener → Cache. Bitte nicht abbrechen.">
         <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_RECOVERY_WIZARD, $authHash); ?>
         <input type="hidden" name="wizard_phase" value="run">
         <input type="hidden" name="wizard_execute" value="1">
