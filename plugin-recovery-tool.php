@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.7.0
+ * @version 1.7.1
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.7.0');
+define('RECOVERY_VERSION', '1.7.1');
 define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
@@ -809,6 +809,13 @@ function recoveryBuildModeUrl(int $mode, string $authHash, array $params = []): 
     return 'plugin-recovery-tool.php?' . \http_build_query($query);
 }
 
+function recoveryBuildHomeUrl(string $authHash, array $params = []): string
+{
+    $query = \array_merge(['t' => $authHash], $params);
+
+    return 'plugin-recovery-tool.php?' . \http_build_query($query);
+}
+
 function recoveryEnsureSession(): void
 {
     if (\session_status() === PHP_SESSION_NONE) {
@@ -866,6 +873,203 @@ function recoveryRenderProcessingError(\Throwable $e): void
     recoveryRenderExceptionDetails($e);
 }
 
+function recoveryRenderWoltLabUiShell(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    ?>
+<div id="recovery-snackbar-container" class="snackbarContainer" aria-live="polite"></div>
+<dialog id="recoveryConfirmDialog" class="dialog recovery-wfl-dialog" role="alertdialog" aria-labelledby="recoveryConfirmTitle">
+    <div class="dialog__document">
+        <header class="dialog__header">
+            <h2 class="dialog__title" id="recoveryConfirmTitle">Bestätigen</h2>
+        </header>
+        <div class="dialog__content" id="recoveryConfirmMessage"></div>
+        <footer class="dialog__control dialog__control--duo-stacked">
+            <button type="button" class="button dialog__control__button--cancel" id="recoveryConfirmCancel">Abbrechen</button>
+            <button type="button" class="button button--primary dialog__control__button--primary" id="recoveryConfirmOk">Fortfahren</button>
+        </footer>
+    </div>
+</dialog>
+<script>
+window.RecoveryUi = (function () {
+    var snackbarContainer = null;
+    var confirmDialog = null;
+    var confirmMessageEl = null;
+    var confirmOkBtn = null;
+    var pendingConfirm = null;
+
+    function ensureSnackbarContainer() {
+        if (!snackbarContainer) {
+            snackbarContainer = document.getElementById('recovery-snackbar-container');
+        }
+        return snackbarContainer;
+    }
+
+    function ensureConfirmDialog() {
+        if (!confirmDialog) {
+            confirmDialog = document.getElementById('recoveryConfirmDialog');
+            confirmMessageEl = document.getElementById('recoveryConfirmMessage');
+            confirmOkBtn = document.getElementById('recoveryConfirmOk');
+            var confirmCancelBtn = document.getElementById('recoveryConfirmCancel');
+            if (confirmOkBtn) {
+                confirmOkBtn.addEventListener('click', function () {
+                    if (confirmDialog) {
+                        confirmDialog.close();
+                    }
+                    if (typeof pendingConfirm === 'function') {
+                        var fn = pendingConfirm;
+                        pendingConfirm = null;
+                        fn();
+                    }
+                });
+            }
+            if (confirmCancelBtn) {
+                confirmCancelBtn.addEventListener('click', function () {
+                    pendingConfirm = null;
+                    if (confirmDialog) {
+                        confirmDialog.close();
+                    }
+                });
+            }
+        }
+        return confirmDialog;
+    }
+
+    function buildSnackbar(message, type) {
+        var el = document.createElement('div');
+        el.className = 'snackbar snackbar--' + (type === 'progress' ? 'progress' : 'success');
+        el.setAttribute('role', 'status');
+        var icon = document.createElement('div');
+        icon.className = 'snackbar__icon';
+        icon.innerHTML = type === 'progress'
+            ? '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>'
+            : '<i class="fa-solid fa-check" aria-hidden="true"></i>';
+        var msg = document.createElement('div');
+        msg.className = 'snackbar__message';
+        msg.textContent = message;
+        el.append(icon, msg);
+        el.addEventListener('click', function () {
+            if (type !== 'progress') {
+                el.classList.add('snackbar--closing');
+                window.setTimeout(function () { el.remove(); }, 240);
+            }
+        });
+        return el;
+    }
+
+    function showSuccess(message) {
+        var container = ensureSnackbarContainer();
+        if (!container) {
+            return;
+        }
+        var el = buildSnackbar(message, 'success');
+        container.prepend(el);
+        window.setTimeout(function () {
+            if (el.parentNode) {
+                el.classList.add('snackbar--closing');
+                window.setTimeout(function () { el.remove(); }, 240);
+            }
+        }, 4000);
+    }
+
+    function showProgress(message) {
+        var container = ensureSnackbarContainer();
+        if (!container) {
+            return { done: function () {}, close: function () {} };
+        }
+        var el = buildSnackbar(message, 'progress');
+        container.prepend(el);
+        return {
+            done: function (successMessage) {
+                el.classList.remove('snackbar--progress');
+                el.classList.add('snackbar--success');
+                var icon = el.querySelector('.snackbar__icon');
+                if (icon) {
+                    icon.innerHTML = '<i class="fa-solid fa-check" aria-hidden="true"></i>';
+                }
+                if (successMessage) {
+                    var msg = el.querySelector('.snackbar__message');
+                    if (msg) {
+                        msg.textContent = successMessage;
+                    }
+                }
+                window.setTimeout(function () {
+                    if (el.parentNode) {
+                        el.classList.add('snackbar--closing');
+                        window.setTimeout(function () { el.remove(); }, 240);
+                    }
+                }, 3500);
+            },
+            close: function () {
+                if (el.parentNode) {
+                    el.remove();
+                }
+            }
+        };
+    }
+
+    function confirm(message, onConfirm, options) {
+        var dlg = ensureConfirmDialog();
+        if (!dlg || !confirmMessageEl) {
+            if (window.confirm(message)) {
+                onConfirm();
+            }
+            return;
+        }
+        pendingConfirm = onConfirm;
+        confirmMessageEl.textContent = message;
+        var titleEl = document.getElementById('recoveryConfirmTitle');
+        if (options && options.title && titleEl) {
+            titleEl.textContent = options.title;
+        } else if (titleEl) {
+            titleEl.textContent = 'Bestätigen';
+        }
+        if (options && options.okLabel && confirmOkBtn) {
+            confirmOkBtn.textContent = options.okLabel;
+        } else if (confirmOkBtn) {
+            confirmOkBtn.textContent = 'Fortfahren';
+        }
+        if (typeof dlg.showModal === 'function') {
+            dlg.showModal();
+        } else if (window.confirm(message)) {
+            onConfirm();
+        }
+    }
+
+    return { confirm: confirm, showSuccess: showSuccess, showProgress: showProgress };
+})();
+</script>
+<?php
+}
+
+function recoveryRenderFlashSnackbarFromQuery(): void
+{
+    $key = isset($_GET['recovery_snack']) ? (string) $_GET['recovery_snack'] : '';
+    if ($key === '') {
+        return;
+    }
+    $messages = [
+        'acp_ok' => 'ACP-Notfall-Reparatur abgeschlossen. Bitte ACP testen.',
+    ];
+    if (!isset($messages[$key])) {
+        return;
+    }
+    $msg = $messages[$key];
+    ?>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    if (window.RecoveryUi && typeof RecoveryUi.showSuccess === 'function') {
+        RecoveryUi.showSuccess(<?= \json_encode($msg, \JSON_UNESCAPED_UNICODE) ?>);
+    }
+});
+</script>
+<?php
+}
+
 function recoveryFormLoadingScript(): void
 {
     static $done = false;
@@ -877,16 +1081,29 @@ function recoveryFormLoadingScript(): void
 <script>
 (function () {
     var progressTimer = null;
+    var progressSnackbar = null;
+
+    function hideOverlay() {
+        if (progressTimer) {
+            clearInterval(progressTimer);
+            progressTimer = null;
+        }
+        var stale = document.getElementById('recovery-loading-overlay');
+        if (stale) {
+            stale.remove();
+        }
+        if (progressSnackbar && typeof progressSnackbar.close === 'function') {
+            progressSnackbar.close();
+            progressSnackbar = null;
+        }
+    }
 
     function showOverlay(message, stepsText) {
         var container = document.querySelector('.container');
         if (!container) {
             return;
         }
-        var old = document.getElementById('recovery-loading-overlay');
-        if (old) {
-            old.remove();
-        }
+        hideOverlay();
         var el = document.createElement('div');
         el.id = 'recovery-loading-overlay';
         el.className = 'recovery-loading';
@@ -901,14 +1118,14 @@ function recoveryFormLoadingScript(): void
             stepsEl.textContent = stepsText;
         }
         container.insertBefore(el, container.firstChild);
-        if (progressTimer) {
-            clearInterval(progressTimer);
+        if (window.RecoveryUi && typeof RecoveryUi.showProgress === 'function') {
+            progressSnackbar = RecoveryUi.showProgress(message);
         }
         var pct = 0;
         var fill = el.querySelector('#recovery-loading-fill');
         var pctEl = el.querySelector('#recovery-loading-pct');
         progressTimer = setInterval(function () {
-            if (pct < 92) {
+            if (pct < 96) {
                 pct += pct < 50 ? 4 : (pct < 80 ? 2 : 1);
                 if (fill) {
                     fill.style.width = pct + '%';
@@ -961,7 +1178,32 @@ function recoveryFormLoadingScript(): void
                 return;
             }
             form.dataset.recoveryLoadingBound = '1';
-            form.addEventListener('submit', function () {
+            form.addEventListener('submit', function (ev) {
+                var confirmMsg = form.getAttribute('data-recovery-confirm');
+                if (confirmMsg && form.dataset.recoveryConfirmed !== '1') {
+                    ev.preventDefault();
+                    var doSubmit = function () {
+                        form.dataset.recoveryConfirmed = '1';
+                        showOverlay(
+                            form.getAttribute('data-recovery-loading') || 'Bitte warten …',
+                            form.getAttribute('data-recovery-loading-steps') || ''
+                        );
+                        if (typeof form.requestSubmit === 'function') {
+                            form.requestSubmit();
+                        } else {
+                            form.submit();
+                        }
+                    };
+                    if (window.RecoveryUi && typeof RecoveryUi.confirm === 'function') {
+                        RecoveryUi.confirm(confirmMsg, doSubmit, {
+                            title: form.getAttribute('data-recovery-confirm-title') || 'Bestätigen',
+                            okLabel: form.getAttribute('data-recovery-confirm-ok') || 'Fortfahren'
+                        });
+                    } else if (window.confirm(confirmMsg)) {
+                        doSubmit();
+                    }
+                    return;
+                }
                 showOverlay(
                     form.getAttribute('data-recovery-loading') || 'Bitte warten …',
                     form.getAttribute('data-recovery-loading-steps') || ''
@@ -971,6 +1213,7 @@ function recoveryFormLoadingScript(): void
     }
 
     function init() {
+        hideOverlay();
         bindForms();
         bindCopyButtons();
         if (window.location.search.indexOf('expert=1') !== -1) {
@@ -980,6 +1223,15 @@ function recoveryFormLoadingScript(): void
             }
         }
     }
+
+    window.addEventListener('pageshow', function (ev) {
+        if (ev.persisted) {
+            hideOverlay();
+            document.querySelectorAll('form[data-recovery-loading]').forEach(function (form) {
+                delete form.dataset.recoveryConfirmed;
+            });
+        }
+    });
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
@@ -4509,6 +4761,101 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         .alert .fa-solid, p.info .fa-solid, p.error .fa-solid, p.success .fa-solid, p.warning .fa-solid { flex-shrink: 0; }
         .mode-button .fa-solid, .recoveryModeCard .fa-solid { display: block; font-size: 28px; margin: 0 auto 10px; }
         button .fa-solid, .button .fa-solid { margin-right: 6px; }
+
+        /* WoltLab Snackbar + Dialog (ACP-ähnlich, standalone) */
+        :root {
+            --wcfContentBackground: var(--recovery-card);
+            --wcfContentBorderInner: var(--recovery-border);
+            --wcfContentText: var(--recovery-text);
+            --wcfBoxShadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+            --wcfStatusSuccessBackground: rgba(51, 153, 51, 0.2);
+            --wcfStatusSuccessBorder: #3a3;
+            --wcfStatusSuccessText: #e8ffe8;
+            --wcfStatusInfoBackground: rgba(51, 102, 153, 0.25);
+            --wcfStatusInfoBorder: #369;
+            --wcfStatusInfoText: #e8f4ff;
+            --wcfBorderRadiusContainer: 4px;
+        }
+        .snackbarContainer {
+            align-items: start;
+            bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            left: 20px;
+            position: fixed;
+            z-index: 10050;
+            pointer-events: none;
+        }
+        .snackbarContainer .snackbar { pointer-events: auto; }
+        @keyframes recoverySnackbarIn {
+            0% { opacity: 0; transform: translateX(-100%); }
+            50% { opacity: 1; transform: translateX(-50%); }
+            100% { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes recoverySnackbarOut {
+            0% { opacity: 1; transform: translateX(0); }
+            100% { opacity: 0; transform: translateX(-100%); }
+        }
+        .snackbar {
+            animation: recoverySnackbarIn 0.12s ease-in-out;
+            background-color: var(--wcfContentBackground);
+            border: 1px solid var(--wcfContentBorderInner);
+            border-radius: 4px;
+            box-shadow: var(--wcfBoxShadow);
+            color: var(--wcfContentText);
+            display: flex;
+            min-width: 220px;
+            overflow: hidden;
+            padding: 0 5px;
+            user-select: none;
+        }
+        .snackbar--closing { animation: recoverySnackbarOut 0.24s ease-in-out forwards; }
+        .snackbar--success {
+            background-color: var(--wcfStatusSuccessBackground);
+            border-color: var(--wcfStatusSuccessBorder);
+            color: var(--wcfStatusSuccessText);
+        }
+        .snackbar--progress {
+            background-color: var(--wcfStatusInfoBackground);
+            border-color: var(--wcfStatusInfoBorder);
+            color: var(--wcfStatusInfoText);
+        }
+        .snackbar__icon {
+            align-items: center;
+            display: flex;
+            justify-content: center;
+            width: 36px;
+        }
+        .snackbar__message { flex: 1 0 auto; padding: 10px 5px 10px 0; }
+        .recovery-wfl-dialog.dialog {
+            background-color: var(--recovery-card);
+            border: 1px solid var(--recovery-border);
+            color: var(--recovery-text);
+            max-width: min(500px, 92vw);
+            min-width: 0;
+            padding: 0;
+        }
+        .recovery-wfl-dialog .dialog__document { padding: 20px; }
+        .recovery-wfl-dialog .dialog__title {
+            color: var(--recovery-heading);
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0;
+        }
+        .recovery-wfl-dialog .dialog__content {
+            line-height: 1.55;
+            margin-top: 12px;
+        }
+        .recovery-wfl-dialog .dialog__control {
+            column-gap: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            margin-top: 24px;
+        }
+        .recovery-wfl-dialog .button--primary { background: #369; }
+        .recovery-wfl-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
     </style>
 </head>
 <body>
@@ -4570,7 +4917,10 @@ function recoveryRenderPageEnd(?array $assets = null): void
     <?php endif; ?>
     | <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank" rel="noopener">WoltLab Recovery</a>
 </footer>
-<?php recoveryFormLoadingScript(); ?>
+<?php
+    recoveryRenderWoltLabUiShell();
+    recoveryFormLoadingScript();
+?>
 </body>
 </html>
 <?php
@@ -4583,7 +4933,7 @@ function recoveryRenderBackLink(string $href): void
 
 function recoveryHomeUrl(string $authHash): string
 {
-    return 'plugin-recovery-tool.php?t=' . \rawurlencode($authHash);
+    return recoveryBuildHomeUrl($authHash);
 }
 
 /**
@@ -7675,11 +8025,20 @@ if (
     && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'
     && !empty($_POST['emergency_acp_fix'])
 ) {
+    recoveryEnsureSession();
     try {
         $emergencyAcpResult = recoveryEmergencyFixAcpClassNotFound($wcfDirMain, $db, WCF_N, $emergencyAcpLog);
         recoverySessionSetEmergencyFixed($authHash, $emergencyAcpResult);
+        if (\session_status() === PHP_SESSION_ACTIVE) {
+            \session_write_close();
+        }
         \header(
-            'Location: ' . recoveryBuildModeUrl(RECOVERY_MODE_SELECTION, $authHash, ['acp_fixed' => '1'])
+            'Location: ' . recoveryBuildHomeUrl($authHash, [
+                'acp_fixed' => '1',
+                'recovery_snack' => 'acp_ok',
+            ]),
+            true,
+            303
         );
         exit;
     } catch (\Throwable $e) {
@@ -7709,6 +8068,7 @@ recoveryRenderBreadcrumb($mode, $authHash);
 // ============================================================================
 
 if ($mode === RECOVERY_MODE_SELECTION) {
+    recoveryRenderFlashSnackbarFromQuery();
     $wizardStartUrl = recoveryBuildModeUrl(RECOVERY_MODE_RECOVERY_WIZARD, $authHash);
     $adminUrl = recoveryBuildModeUrl(RECOVERY_MODE_USER_MANAGEMENT, $authHash);
     $uninstallUrl = recoveryBuildModeUrl(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash);
@@ -7752,9 +8112,11 @@ if ($mode === RECOVERY_MODE_SELECTION) {
             (siehe Kurzstatus oben). Ein Klick deaktiviert die betroffenen Bootstrap-<code>register()</code>-Aufrufe,
             bereinigt DB-Listener und leert den Cache.
         </p>
-        <form method="POST" action="<?= \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_SELECTION, $authHash)) ?>"
+        <form method="POST" action="<?= \htmlspecialchars(recoveryBuildHomeUrl($authHash)) ?>"
             data-recovery-loading="Notfall-Reparatur läuft (Bootstrap, DB, Cache) …"
-            onsubmit="return confirm('Bootstrap-Register werden auskommentiert (mit Backup), DB-Listener gelöscht, Cache geleert. Fortfahren?');">
+            data-recovery-confirm="Bootstrap-Register werden auskommentiert (mit Backup), DB-Listener gelöscht, Cache geleert. Fortfahren?"
+            data-recovery-confirm-title="ACP ClassNotFound beheben"
+            data-recovery-confirm-ok="Jetzt beheben">
             <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_SELECTION, $authHash); ?>
             <input type="hidden" name="emergency_acp_fix" value="1">
             <button type="submit" class="btn-danger"><i class="fa-solid fa-bolt"></i> ACP ClassNotFound jetzt beheben</button>
@@ -9805,6 +10167,7 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
     </form>
 <?php
     }
+    }
 }
 
 // ============================================================================
@@ -9814,7 +10177,6 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
 elseif ($mode === RECOVERY_MODE_SYSTEM_CHECK) {
     $wcfDirCheck = \rtrim(WCF_DIR, '/\\') . \DIRECTORY_SEPARATOR;
     $assetsCheck = recoveryGetSetupAssets();
-    recoveryRenderBreadcrumb($mode, $authHash);
     recoveryRenderSystemCheckPage($authHash, $wcfDirCheck, $db, WCF_N, $assetsCheck);
 }
 
