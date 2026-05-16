@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.6.3
+ * @version 1.6.4
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.6.3');
+define('RECOVERY_VERSION', '1.6.4');
 define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
@@ -5547,6 +5547,29 @@ function recoveryRenderWizardRecommendationsPanel(array $rec): void
 /**
  * @param list<string> $logExcerpts
  */
+/**
+ * @param list<string> $missingClasses
+ */
+function recoveryRenderWizardMissingClassesDetails(array $missingClasses): void
+{
+    if ($missingClasses === []) {
+        return;
+    }
+    ?>
+    <details class="recovery-info-panel" style="margin-bottom:16px">
+        <summary style="cursor:pointer;font-weight:600;color:#fff">
+            Fehlende Klassen (<?= \count($missingClasses) ?>) — Details
+        </summary>
+        <?php foreach (recoveryGroupFqcnByApplicationPrefix($missingClasses) as $app => $classes): ?>
+        <p style="margin:12px 0 4px"><strong>App <code><?= \htmlspecialchars($app) ?></code></strong></p>
+        <ul style="margin:0 0 8px 20px;font-size:13px"><?php foreach ($classes as $cn): ?>
+            <li><code><?= \htmlspecialchars($cn) ?></code></li>
+        <?php endforeach; ?></ul>
+        <?php endforeach; ?>
+    </details>
+    <?php
+}
+
 function recoveryRenderLogExcerptsPanel(array $logExcerpts, string $panelId = 'wizard-log'): void
 {
     if ($logExcerpts === []) {
@@ -5554,7 +5577,7 @@ function recoveryRenderLogExcerptsPanel(array $logExcerpts, string $panelId = 'w
     }
     $text = \implode("\n", $logExcerpts);
     ?>
-    <details class="recovery-info-panel" style="margin-bottom:16px" open>
+    <details class="recovery-info-panel" style="margin-bottom:16px">
         <summary style="cursor:pointer;font-weight:700;color:#fff">Log-Auszug (WoltLab <code>log/*.txt</code>)</summary>
         <p style="margin:12px 0 8px;font-size:13px;color:#9D9D9D">
             Letzte relevante Zeilen — oft steht hier die exakte fehlende Klasse.
@@ -5574,6 +5597,13 @@ function recoveryRenderLogExcerptsPanel(array $logExcerpts, string $panelId = 'w
  */
 function recoveryBuildWizardRunInterpretation(array $result, array $plan): array
 {
+    if (!empty($result['dryRun']) || !empty($plan['dryRun'])) {
+        return [
+            'Dry-Run abgeschlossen — es wurden keine Dateien oder Datenbankeinträge geändert.',
+            'Prüfen Sie das Protokoll unten. Wenn die Vorschau passt, Dry-Run deaktivieren und erneut ausführen.',
+        ];
+    }
+
     $lines = [];
     $copied = \count($result['copiedFiles'] ?? []);
     $bootstrap = \count($result['bootstrapNeutralized'] ?? []);
@@ -5666,12 +5696,42 @@ function recoveryWizardLoadState(string $authHash): array
 function recoveryWizardSaveState(string $authHash, array $state): void
 {
     recoveryEnsureSession();
-    $_SESSION['recovery_wizard'][$authHash] = $state;
+    $_SESSION['recovery_wizard'][$authHash] = \array_merge(
+        $_SESSION['recovery_wizard'][$authHash] ?? [],
+        $state
+    );
 }
 
 /**
- * @param array{orphans?: bool, files?: bool, neutralizeBootstrap?: bool, dbEventListeners?: bool, cache?: bool, extractDir?: string|null, classes?: list<string>, scopeApplication?: string|null} $plan
- * @return array{copiedFiles: list<string>, cacheDeleted: int, bootstrapNeutralized: list<string>, dbEventListenersDeleted: int}
+ * Paket-Archiv aus Session (Paket-Kontext + Wizard-State + POST).
+ */
+function recoveryResolveWizardExtractDir(string $authHash): ?string
+{
+    $fromPost = recoveryResolveTrustedExtractDir($authHash);
+    if ($fromPost !== null) {
+        return $fromPost;
+    }
+
+    $wizard = recoveryWizardLoadState($authHash);
+    $stored = isset($wizard['extractDir']) ? (string) $wizard['extractDir'] : '';
+    if ($stored !== '' && \is_dir($stored)) {
+        $uploadBase = \realpath(__DIR__ . '/uploads');
+        $extractReal = \realpath($stored);
+        if (
+            $uploadBase !== false
+            && $extractReal !== false
+            && \str_starts_with($extractReal, $uploadBase . \DIRECTORY_SEPARATOR)
+        ) {
+            return $extractReal;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * @param array{orphans?: bool, files?: bool, neutralizeBootstrap?: bool, dbEventListeners?: bool, cache?: bool, extractDir?: string|null, classes?: list<string>, scopeApplication?: string|null, dryRun?: bool} $plan
+ * @return array{copiedFiles: list<string>, cacheDeleted: int, bootstrapNeutralized: list<string>, dbEventListenersDeleted: int, dryRun: bool}
  */
 function recoveryWizardExecutePlan(
     string $wcfDir,
@@ -5680,6 +5740,8 @@ function recoveryWizardExecutePlan(
     array $plan,
     array &$log
 ): array {
+    $dryRun = !empty($plan['dryRun']);
+    $pfx = $dryRun ? '[DRY-RUN] ' : '';
     $copiedFiles = [];
     $cacheDeleted = 0;
     $bootstrapNeutralized = [];
@@ -5688,57 +5750,91 @@ function recoveryWizardExecutePlan(
         ? (string) $plan['scopeApplication']
         : null;
 
+    if ($dryRun) {
+        $log[] = $pfx . 'Keine Änderungen am Server — nur Vorschau.';
+    }
+
     if (!empty($plan['orphans'])) {
-        $orphanResult = recoveryRepairOrphanedPackageReferences($db, $wcfN);
-        foreach ($orphanResult['log'] as $entry) {
-            $log[] = '[Paketliste] ' . $entry;
+        if ($dryRun) {
+            $log[] = $pfx . 'WÜRDE: Verwaiste Paket-Applications in der DB bereinigen.';
+        } else {
+            $orphanResult = recoveryRepairOrphanedPackageReferences($db, $wcfN);
+            foreach ($orphanResult['log'] as $entry) {
+                $log[] = '[Paketliste] ' . $entry;
+            }
         }
     }
 
     if (!empty($plan['files'])) {
         $extractDir = isset($plan['extractDir']) ? (string) $plan['extractDir'] : '';
         if ($extractDir === '' || !\is_dir($extractDir)) {
-            $log[] = '[Dateien] Kein gültiges Paket-Archiv – Schritt übersprungen.';
+            $log[] = $pfx . '[Dateien] Kein gültiges Paket-Archiv in der Session – Schritt übersprungen.';
         } else {
             $extractLog = [];
             $payload = recoveryExtractPackageInstructionTars($extractDir, $extractLog);
             foreach ($extractLog as $entry) {
-                $log[] = '[Dateien] ' . $entry;
+                $log[] = $pfx . '[Dateien] ' . $entry;
             }
             if ($payload !== null) {
                 $classes = $plan['classes'] ?? recoveryFindMissingBootstrapClasses($wcfDir);
-                $copiedFiles = recoveryRepairMissingPluginFilesFromPayload(
-                    $wcfDir,
-                    $payload,
-                    \is_array($classes) ? $classes : [],
-                    $log
-                );
+                $classes = \is_array($classes) ? $classes : [];
+                if ($dryRun) {
+                    foreach ($classes as $cn) {
+                        $log[] = $pfx . '[Dateien] WÜRDE kopieren: ' . $cn;
+                    }
+                } else {
+                    $copiedFiles = recoveryRepairMissingPluginFilesFromPayload(
+                        $wcfDir,
+                        $payload,
+                        $classes,
+                        $log
+                    );
+                }
             }
         }
     }
 
     if (!empty($plan['neutralizeBootstrap'])) {
-        $bootstrapNeutralized = recoveryNeutralizeBootstrapRegistersForMissingListeners($wcfDir, $log);
-        if ($bootstrapNeutralized === []) {
-            $log[] = '[Bootstrap] Keine Register geändert — ggf. bereits neutralisiert oder Muster nicht erkannt. '
-                . 'Notfall-Button auf der Startseite oder Log prüfen.';
+        if ($dryRun) {
+            $n = recoveryCountNeutralizableBootstrapRegisters($wcfDir);
+            $log[] = $pfx . '[Bootstrap] WÜRDE ' . $n . ' register()-Aufruf(e) auskommentieren.';
+        } else {
+            $bootstrapNeutralized = recoveryNeutralizeBootstrapRegistersForMissingListeners($wcfDir, $log);
+            if ($bootstrapNeutralized === []) {
+                $log[] = '[Bootstrap] Keine Register geändert — ggf. bereits neutralisiert oder Muster nicht erkannt.';
+            }
         }
     }
 
     if (!empty($plan['dbEventListeners'])) {
-        $dbEventListenersDeleted = recoveryPurgeOrphanedDbEventListeners($wcfDir, $db, $wcfN, $log, $scopeApp);
-        if ($dbEventListenersDeleted === 0) {
-            $log[] = '[Event-Listener DB] Keine Einträge mit fehlender Klasse gefunden.';
+        $orphaned = recoveryFindOrphanedDbEventListeners($wcfDir, $db, $wcfN, $scopeApp);
+        if ($dryRun) {
+            foreach ($orphaned as $row) {
+                $log[] = $pfx . '[Event-Listener DB] WÜRDE löschen: '
+                    . ($row['listenerClassName'] ?? '?') . ' (ID ' . (int) ($row['listenerID'] ?? 0) . ')';
+            }
+            if ($orphaned === []) {
+                $log[] = $pfx . '[Event-Listener DB] Keine Einträge zum Entfernen.';
+            }
+        } else {
+            $dbEventListenersDeleted = recoveryPurgeOrphanedDbEventListeners($wcfDir, $db, $wcfN, $log, $scopeApp);
+            if ($dbEventListenersDeleted === 0) {
+                $log[] = '[Event-Listener DB] Keine Einträge mit fehlender Klasse gefunden.';
+            }
         }
     }
 
     if (!empty($plan['cache'])) {
-        $cacheDeleted = clearCompiledTemplates();
-        $optionFbLog = [];
-        recoveryEnsureOptionConstantFallbacks($db, $wcfN, $optionFbLog);
-        $log[] = '[Cache] Gelöschte Cache-Dateien: ' . $cacheDeleted;
-        foreach ($optionFbLog as $entry) {
-            $log[] = '[Cache] ' . $entry;
+        if ($dryRun) {
+            $log[] = $pfx . '[Cache] WÜRDE kompilierte Templates löschen und options.inc.php-Fallback aktualisieren.';
+        } else {
+            $cacheDeleted = clearCompiledTemplates();
+            $optionFbLog = [];
+            recoveryEnsureOptionConstantFallbacks($db, $wcfN, $optionFbLog);
+            $log[] = '[Cache] Gelöschte Cache-Dateien: ' . $cacheDeleted;
+            foreach ($optionFbLog as $entry) {
+                $log[] = '[Cache] ' . $entry;
+            }
         }
     }
 
@@ -5747,6 +5843,7 @@ function recoveryWizardExecutePlan(
         'cacheDeleted' => $cacheDeleted,
         'bootstrapNeutralized' => $bootstrapNeutralized,
         'dbEventListenersDeleted' => $dbEventListenersDeleted,
+        'dryRun' => $dryRun,
     ];
 }
 
@@ -8353,22 +8450,20 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
             'neutralizeBootstrap' => !empty($_POST['do_neutralize_bootstrap']),
             'dbEventListeners' => !empty($_POST['do_db_event_listeners']),
             'cache' => !empty($_POST['do_cache']),
-            'extractDir' => recoveryResolveTrustedExtractDir($authHash),
+            'extractDir' => recoveryResolveWizardExtractDir($authHash),
             'scopeApplication' => $scopeForRun !== '' ? $scopeForRun : null,
+            'dryRun' => !empty($_POST['wizard_dry_run']),
             'classes' => isset($_POST['repair_classes']) && \is_array($_POST['repair_classes'])
                 ? \array_values(\array_filter(\array_map('strval', $_POST['repair_classes'])))
                 : [],
         ];
         $execLog = [];
         $result = recoveryWizardExecutePlan($wcfDir, $db, WCF_N, $plan, $execLog);
-        if ($plan['files'] && \count($result['copiedFiles'] ?? []) > 0) {
-            recoveryCleanupUploadWorkspace();
-        }
         recoveryWizardSaveState($authHash, ['lastRun' => $result, 'lastPlan' => $plan]);
         $runInterp = recoveryBuildWizardRunInterpretation($result, $plan);
 ?>
-    <div class="alert alert-success">
-        <strong>Ausführung abgeschlossen.</strong><br>
+    <div class="alert <?= !empty($result['dryRun']) ? 'alert-warning' : 'alert-success' ?>">
+        <strong><?= !empty($result['dryRun']) ? 'Dry-Run abgeschlossen (keine Änderungen).' : 'Ausführung abgeschlossen.' ?></strong><br>
         Kopierte Dateien: <?= \count($result['copiedFiles'] ?? []) ?><br>
         Bootstrap angepasst (fehlende Listener auskommentiert): <?= \count($result['bootstrapNeutralized'] ?? []) ?> Datei(en)<br>
         DB Event-Listener entfernt: <?= (int) ($result['dbEventListenersDeleted'] ?? 0) ?><br>
@@ -8456,9 +8551,13 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
             $missing = recoveryFilterFqcnByApplicationPrefix($missing, $scopeApp);
         }
         $pkgCtx = recoveryLoadPackageContext($authHash);
-        $extractDir = recoveryResolveTrustedExtractDir($authHash);
+        $extractDir = recoveryResolveWizardExtractDir($authHash);
         $sessionPackageId = (string) ($pkgCtx['packageIdentifier'] ?? $state['packageLabel'] ?? '');
+        if ($extractDir !== null) {
+            recoveryWizardSaveState($authHash, ['extractDir' => $extractDir]);
+        }
         $wizardRec = recoveryBuildWizardRecommendations($diag, $sessionPackageId !== '' ? $sessionPackageId : null);
+        $acpAlreadyFixed = recoverySessionGetEmergencyFixed($authHash) !== null;
         $recByKey = [];
         foreach ($wizardRec['steps'] as $rs) {
             if (isset($rs['key'])) {
@@ -8466,7 +8565,19 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
             }
         }
 ?>
-    <?php recoveryRenderWizardRecommendationsPanel($wizardRec); ?>
+    <?php if ($acpAlreadyFixed): ?>
+    <div class="alert alert-warning" style="margin-bottom:16px">
+        <strong>ACP läuft bereits?</strong> Dann <em>keine</em> fehlenden Plugin-Dateien wiederherstellen (Schritt 2 abwählen).
+        Stattdessen <a href="<?= \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash)) ?>" style="color:#6EC2FF">Plugin entfernen</a>.
+    </div>
+    <?php endif; ?>
+
+    <details class="recovery-info-panel" style="margin-bottom:16px">
+        <summary style="cursor:pointer;font-weight:600;color:#fff">Empfehlungen aus der Diagnose</summary>
+        <div style="margin-top:12px">
+        <?php recoveryRenderWizardRecommendationsPanel($wizardRec); ?>
+        </div>
+    </details>
 
     <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($wizardUrl) ?>"
         data-recovery-loading="Recovery-Schritte werden ausgeführt …"
@@ -8477,16 +8588,6 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         <?php if ($extractDir): ?>
         <input type="hidden" name="extract_dir" value="<?= \htmlspecialchars($extractDir) ?>">
         <?php endif; ?>
-
-        <div class="alert alert-warning" style="margin-bottom:16px">
-            <strong>ACP weiterhin kaputt nach „Dateien wiederherstellen“?</strong>
-            Dateien allein reichen oft nicht: In der Datenbank können weiterhin <strong>Event-Listener</strong>, Objekttypen,
-            Menüeinträge etc. auf Plugin-Klassen zeigen. Nutzen Sie bei Bedarf den Modus <strong>Plugin Uninstall</strong>
-            (Paket komplett aus DB + optional Dateien) oder <strong>ACP Repair</strong>.
-            Das Recovery Tool arbeitet direkt auf dem Webspace — zusätzliche FTP-Logins sind nicht nötig und werden nicht gespeichert.<br>
-            <strong>Ziel:</strong> ACP wieder nutzbar machen und Plugin anschließend hier per <strong>Plugin Uninstall</strong> vollständig entfernen —
-            oder Dateien aus dem Paket wiederherstellen, dann ggf. diese neutralisieren.
-        </div>
 
         <h2>Schritte auswählen (Reihenfolge bei Ausführung)</h2>
         <ol style="margin:0 0 16px 20px;color:#9D9D9D">
@@ -8533,12 +8634,15 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         <?php endif; ?>
 
         <?php if ($missing !== []): ?>
-        <ul style="margin:4px 0 12px 24px">
-        <?php foreach ($missing as $cn): ?>
-            <li><label><input type="checkbox" name="repair_classes[]" value="<?= \htmlspecialchars($cn) ?>" checked>
-                <code><?= \htmlspecialchars($cn) ?></code></label></li>
-        <?php endforeach; ?>
-        </ul>
+        <details style="margin:8px 0 12px 24px">
+            <summary style="cursor:pointer;color:#9D9D9D">Klassen für Schritt 2 auswählen (<?= \count($missing) ?>)</summary>
+            <ul style="margin:8px 0 0 8px">
+            <?php foreach ($missing as $cn): ?>
+                <li><label><input type="checkbox" name="repair_classes[]" value="<?= \htmlspecialchars($cn) ?>" checked>
+                    <code><?= \htmlspecialchars($cn) ?></code></label></li>
+            <?php endforeach; ?>
+            </ul>
+        </details>
         <?php endif; ?>
 
         <?php if ($extractDir): ?>
@@ -8556,8 +8660,8 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         <input type="file" name="package_file" id="wizard_package_file" accept=".tar,.tar.gz,.tgz">
         <?php else: ?>
         <div class="alert alert-warning" style="margin:12px 0">
-            Für Schritt 2: <strong>Paket-Archiv hochladen</strong> (package.xml mit files.tar / files_wcf.tar — wie vom
-            <a href="https://github.com/SoftCreatRMedia/wspackager" target="_blank" rel="noopener">wspackager</a> gebaut).
+            Für Schritt 2: <strong>Paket-Archiv erneut hochladen</strong> — Standard-WoltLab-<code>.tar.gz</code>
+            mit <code>package.xml</code> und <code>files.tar</code> (egal ob WS-Packager, Simple Plugin Manager oder manuell).
         </div>
         <label for="wizard_package_file">Paket (.tar.gz)</label>
         <input type="file" name="package_file" id="wizard_package_file" accept=".tar,.tar.gz,.tgz">
@@ -8568,6 +8672,13 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         <?php if (isset($recByKey['cache'])): ?>
         <div class="recovery-step-help"><?= $recByKey['cache']['why'] ?? '' ?></div>
         <?php endif; ?>
+
+        <p style="margin:14px 0;padding:12px;background:rgba(0,0,0,.2);border-radius:6px;border:1px solid #444">
+            <label style="cursor:pointer">
+                <input type="checkbox" name="wizard_dry_run" value="1">
+                <strong>Dry-Run:</strong> Zeigt im Protokoll, was passieren würde — ohne Änderungen am Server.
+            </label>
+        </p>
 
         <p style="margin-top:20px">
             <button type="submit" class="btn-danger"><i class="fa-solid fa-play"></i> Ausgewählte Schritte jetzt ausführen</button>
@@ -8596,6 +8707,10 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
                     $meta = recoveryParsePackageMetaFromExtractDir((string) $upload['extractDir']);
                     $packageLabel = (string) ($meta['package'] ?? $upload['packageIdentifier'] ?? '');
                     $scopeApp = (string) ($meta['applicationDirectory'] ?? '');
+                    recoveryWizardSaveState($authHash, [
+                        'extractDir' => (string) $upload['extractDir'],
+                        'packageLabel' => $packageLabel,
+                    ]);
                 }
             } elseif (!empty($_POST['package_identifier'])) {
                 $packageLabel = \trim((string) $_POST['package_identifier']);
@@ -8642,7 +8757,7 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
             <li><strong>Ausführung</strong> — nur gewählte Aktionen, mit Fortschrittsanzeige.</li>
         </ol>
         <p style="margin:12px 0 0;font-size:13px;color:#9D9D9D">
-            <strong>.tar.gz-Archiv</strong> mit <code>package.xml</code> + <code>files.tar</code> (wspackager).
+            <strong>.tar.gz-Archiv</strong> mit <code>package.xml</code> + <code>files.tar</code> (Standard-WoltLab-Paket, beliebiger Packager).
             <strong>Nur Paket-ID</strong> filtert die Diagnose, reicht aber nicht zum Kopieren von Dateien.
         </p>
     </section>
@@ -8719,9 +8834,14 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
 
     <?php
         $diagRec = recoveryBuildWizardRecommendations($diag, $packageLabel !== '' ? $packageLabel : null);
-        recoveryRenderWizardRecommendationsPanel($diagRec);
-        recoveryRenderLogExcerptsPanel($diag['logExcerpts'] ?? [], 'wizard-diag-log');
     ?>
+    <details class="recovery-info-panel" style="margin-bottom:16px">
+        <summary style="cursor:pointer;font-weight:600;color:#fff">Empfehlungen &amp; Hinweise</summary>
+        <div style="margin-top:12px">
+        <?php recoveryRenderWizardRecommendationsPanel($diagRec); ?>
+        </div>
+    </details>
+    <?php recoveryRenderLogExcerptsPanel($diag['logExcerpts'] ?? [], 'wizard-diag-log'); ?>
 
     <?php if ($diag['missingBootstrapClasses'] === []): ?>
     <div class="alert alert-success">
@@ -8729,21 +8849,23 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         (z.&nbsp;B. Cache leeren oder Paketliste bereinigen).
     </div>
     <?php else: ?>
-    <div class="alert alert-error">
-        <strong>Auf dem Server fehlen Dateien für diese Klassen</strong> (in Bootstrap registriert, <code>.class.php</code> nicht gefunden):
-        <?php foreach (recoveryGroupFqcnByApplicationPrefix($diag['missingBootstrapClasses']) as $app => $classes): ?>
-        <p style="margin:12px 0 4px"><strong>App <code><?= \htmlspecialchars($app) ?></code></strong> (<?= \count($classes) ?> Klassen)</p>
-        <ul style="margin:0 0 8px 20px"><?php foreach ($classes as $cn): ?>
-            <li><code><?= \htmlspecialchars($cn) ?></code></li>
-        <?php endforeach; ?></ul>
-        <?php endforeach; ?>
+    <div class="alert alert-error" style="margin-bottom:12px">
+        <strong><?= \count($diag['missingBootstrapClasses']) ?> fehlende Klassen</strong> im gewählten Umfang
+        (Bootstrap-Registrierung, aber keine <code>.class.php</code> auf dem Server).
     </div>
+    <?php recoveryRenderWizardMissingClassesDetails($diag['missingBootstrapClasses']); ?>
     <?php endif; ?>
 
+    <?php
+        $diagExtractDir = recoveryResolveWizardExtractDir($authHash);
+    ?>
     <form method="POST" action="<?= \htmlspecialchars($wizardUrl) ?>" data-recovery-loading="Plan &amp; Auswahl wird geladen …">
         <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_RECOVERY_WIZARD, $authHash); ?>
         <input type="hidden" name="wizard_phase" value="plan">
         <input type="hidden" name="wizard_to_plan" value="1">
+        <?php if ($diagExtractDir): ?>
+        <input type="hidden" name="extract_dir" value="<?= \htmlspecialchars($diagExtractDir) ?>">
+        <?php endif; ?>
         <button type="submit" class="button"><i class="fa-solid fa-arrow-right"></i> Weiter — Plan &amp; Auswahl</button>
     </form>
 <?php
