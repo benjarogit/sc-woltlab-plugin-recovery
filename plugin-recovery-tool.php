@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.23
+ * @version 1.5.25
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.23');
+define('RECOVERY_VERSION', '1.5.25');
 define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
@@ -4287,13 +4287,117 @@ function recoveryExtractPayloadRootForTar(string $extractDir, string $tarFile, s
 }
 
 /**
+ * Zählt EventHandler::getInstance()->register(Event::class, Listener::class)-Aufrufe in lib/bootstrap/*.php,
+ * deren Listener-.class.php auf dem Server fehlt (typischer ACP-ClassNotFound nach kaputter Installation).
+ */
+function recoveryCountNeutralizableBootstrapRegisters(string $wcfDir): int
+{
+    $n = 0;
+    $bootstrapDir = \rtrim($wcfDir, '/\\') . '/lib/bootstrap';
+    if (!\is_dir($bootstrapDir)) {
+        return 0;
+    }
+
+    $rx = '~EventHandler::getInstance\(\)->register\s*\(\s*.+?\s*,\s*((?:\\\\?[A-Za-z_][\w\\\\]*)+)\s*::class\s*\)\s*;~s';
+
+    foreach (\glob($bootstrapDir . '/*.php') ?: [] as $path) {
+        $content = @\file_get_contents($path);
+        if ($content === false || $content === '') {
+            continue;
+        }
+        if (!\preg_match_all($rx, $content, $matches, \PREG_SET_ORDER)) {
+            continue;
+        }
+        foreach ($matches as $m) {
+            $listener = \ltrim($m[1], '\\');
+            if (!\recoveryIsPluginClassFilePresent($wcfDir, $listener)) {
+                $n++;
+            }
+        }
+    }
+
+    return $n;
+}
+
+/**
+ * Kommentiert betroffene register()-Aufrufe zeilenweise mit // aus (kein Blockkommentar → keine */-Konflikte).
+ * Legt pro geänderter Datei ein Backup mit Suffix .recovery-backup-*.php an.
+ *
+ * @return list<string> absolute Pfade der geänderten Bootstrap-Dateien
+ */
+function recoveryNeutralizeBootstrapRegistersForMissingListeners(string $wcfDir, array &$log): array
+{
+    $modified = [];
+    $bootstrapDir = \rtrim($wcfDir, '/\\') . '/lib/bootstrap';
+    if (!\is_dir($bootstrapDir)) {
+        $log[] = '[Bootstrap] Kein Verzeichnis lib/bootstrap.';
+
+        return $modified;
+    }
+
+    $rx = '~EventHandler::getInstance\(\)->register\s*\(\s*.+?\s*,\s*((?:\\\\?[A-Za-z_][\w\\\\]*)+)\s*::class\s*\)\s*;~s';
+
+    foreach (\glob($bootstrapDir . '/*.php') ?: [] as $bootstrapFile) {
+        $content = @\file_get_contents($bootstrapFile);
+        if ($content === false || $content === '') {
+            continue;
+        }
+
+        $newContent = \preg_replace_callback(
+            $rx,
+            function (array $m) use ($wcfDir, &$log, $bootstrapFile): string {
+                $full = $m[0];
+                $listener = \ltrim($m[1], '\\');
+                if (\recoveryIsPluginClassFilePresent($wcfDir, $listener)) {
+                    return $full;
+                }
+                $log[] = '[Bootstrap] Deaktiviere Register für fehlende Klasse '
+                    . $listener . ' in ' . \basename((string) $bootstrapFile);
+
+                $header = '// Recovery Tool ' . RECOVERY_VERSION . ': EventHandler::register deaktiviert — .class.php fehlt: '
+                    . $listener . "\n";
+                $lines = \preg_split('/\r\n|\r|\n/', $full) ?: [];
+                $out = $header;
+                foreach ($lines as $line) {
+                    $out .= '// [recovery] ' . $line . "\n";
+                }
+
+                return \rtrim($out, "\n");
+            },
+            $content
+        );
+
+        if ($newContent === null || $newContent === $content) {
+            continue;
+        }
+
+        $bak = $bootstrapFile . '.recovery-backup-' . \date('YmdHis') . '-' . \substr(\sha1((string) \random_bytes(8)), 0, 8) . '.php';
+        if (!@\copy($bootstrapFile, $bak)) {
+            $log[] = '[Bootstrap] Backup fehlgeschlagen, überspringe ' . \basename($bootstrapFile);
+
+            continue;
+        }
+        if (@\file_put_contents($bootstrapFile, $newContent) !== false) {
+            $modified[] = $bootstrapFile;
+            $log[] = '[Bootstrap] Aktualisiert: ' . \basename($bootstrapFile) . ' (Backup: ' . \basename($bak) . ')';
+        } else {
+            $log[] = '[Bootstrap] Schreiben fehlgeschlagen: ' . \basename($bootstrapFile);
+            @\copy($bak, $bootstrapFile);
+        }
+    }
+
+    return $modified;
+}
+
+/**
  * System-Diagnose für Wizard Schritt 1.
  *
  * @return array{
  *   missingBootstrapClasses: list<string>,
  *   orphanApplicationCount: int,
  *   logExcerpts: list<string>,
- *   suggestedActions: array{orphans: bool, files: bool, cache: bool}
+ *   bootstrapNeutralizeCandidates: int,
+ *   suggestedActions: array{orphans: bool, files: bool, neutralizeBootstrap: bool, cache: bool}
  * }
  */
 function recoveryBuildSystemDiagnosis(
@@ -4319,14 +4423,17 @@ function recoveryBuildSystemDiagnosis(
     }
 
     $logExcerpts = recoveryScanWoltLabLogForRecentErrors($wcfDir, 50);
+    $neutralizeCandidates = recoveryCountNeutralizableBootstrapRegisters($wcfDir);
 
     return [
         'missingBootstrapClasses' => $missing,
         'orphanApplicationCount' => $orphanCount,
         'logExcerpts' => $logExcerpts,
+        'bootstrapNeutralizeCandidates' => $neutralizeCandidates,
         'suggestedActions' => [
             'orphans' => $orphanCount > 0,
             'files' => $missing !== [],
+            'neutralizeBootstrap' => $neutralizeCandidates > 0,
             'cache' => true,
         ],
     ];
@@ -4393,8 +4500,8 @@ function recoveryWizardSaveState(string $authHash, array $state): void
 }
 
 /**
- * @param array{orphans?: bool, files?: bool, cache?: bool, extractDir?: string|null, classes?: list<string>} $plan
- * @return array{log: list<string>, copiedFiles: list<string>, cacheDeleted: int}
+ * @param array{orphans?: bool, files?: bool, neutralizeBootstrap?: bool, cache?: bool, extractDir?: string|null, classes?: list<string>} $plan
+ * @return array{copiedFiles: list<string>, cacheDeleted: int, bootstrapNeutralized: list<string>}
  */
 function recoveryWizardExecutePlan(
     string $wcfDir,
@@ -4405,6 +4512,7 @@ function recoveryWizardExecutePlan(
 ): array {
     $copiedFiles = [];
     $cacheDeleted = 0;
+    $bootstrapNeutralized = [];
 
     if (!empty($plan['orphans'])) {
         $orphanResult = recoveryRepairOrphanedPackageReferences($db, $wcfN);
@@ -4435,6 +4543,13 @@ function recoveryWizardExecutePlan(
         }
     }
 
+    if (!empty($plan['neutralizeBootstrap'])) {
+        $bootstrapNeutralized = recoveryNeutralizeBootstrapRegistersForMissingListeners($wcfDir, $log);
+        if ($bootstrapNeutralized === []) {
+            $log[] = '[Bootstrap] Keine neutralisierbaren Register gefunden (oder alle Listener-Dateien vorhanden).';
+        }
+    }
+
     if (!empty($plan['cache'])) {
         $cacheDeleted = clearCompiledTemplates();
         $optionFbLog = [];
@@ -4446,9 +4561,9 @@ function recoveryWizardExecutePlan(
     }
 
     return [
-        'log' => $log,
         'copiedFiles' => $copiedFiles,
         'cacheDeleted' => $cacheDeleted,
+        'bootstrapNeutralized' => $bootstrapNeutralized,
     ];
 }
 
@@ -6953,6 +7068,7 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         $plan = [
             'orphans' => !empty($_POST['do_orphans']),
             'files' => !empty($_POST['do_files']),
+            'neutralizeBootstrap' => !empty($_POST['do_neutralize_bootstrap']),
             'cache' => !empty($_POST['do_cache']),
             'extractDir' => recoveryResolveTrustedExtractDir(),
             'classes' => isset($_POST['repair_classes']) && \is_array($_POST['repair_classes'])
@@ -6968,8 +7084,9 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
 ?>
     <div class="alert alert-success">
         <strong>Ausführung abgeschlossen.</strong><br>
-        Kopierte Dateien: <?= \count($result['copiedFiles']) ?><br>
-        Cache-Dateien gelöscht: <?= (int) $result['cacheDeleted'] ?>
+        Kopierte Dateien: <?= \count($result['copiedFiles'] ?? []) ?><br>
+        Bootstrap angepasst (fehlende Listener auskommentiert): <?= \count($result['bootstrapNeutralized'] ?? []) ?> Datei(en)<br>
+        Cache-Dateien gelöscht: <?= (int) ($result['cacheDeleted'] ?? 0) ?>
     </div>
     <pre class="recoveryLog" style="max-height:320px;overflow:auto;margin-top:12px"><?php
         foreach ($execLog as $line) {
@@ -7001,14 +7118,19 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         $scopeApp = isset($state['scopeApplication']) ? (string) $state['scopeApplication'] : null;
         $scopeApp = $scopeApp !== '' ? $scopeApp : null;
         $diag = $state['diagnosis'] ?? recoveryBuildSystemDiagnosis($wcfDir, $db, WCF_N, $scopeApp);
-        $suggest = $diag['suggestedActions'] ?? ['orphans' => false, 'files' => false, 'cache' => true];
+        $suggest = \array_merge([
+            'orphans' => false,
+            'files' => false,
+            'neutralizeBootstrap' => false,
+            'cache' => true,
+        ], $diag['suggestedActions'] ?? []);
         $missing = $diag['missingBootstrapClasses'] ?? recoveryFindMissingBootstrapClasses($wcfDir);
         if ($scopeApp !== null) {
             $missing = recoveryFilterFqcnByApplicationPrefix($missing, $scopeApp);
         }
         $extractDir = recoveryResolveTrustedExtractDir();
 ?>
-    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($wizardUrl) ?>" data-recovery-loading="Recovery-Schritte werden ausgeführt (Dateien, Datenbank, Cache) …">
+    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($wizardUrl) ?>" data-recovery-loading="Recovery wird ausgeführt (Paketliste, Dateien, Bootstrap, Cache) …">
         <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_RECOVERY_WIZARD, $authHash); ?>
         <input type="hidden" name="wizard_phase" value="run">
         <input type="hidden" name="wizard_execute" value="1">
@@ -7021,13 +7143,16 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
             Dateien allein reichen oft nicht: In der Datenbank können weiterhin <strong>Event-Listener</strong>, Objekttypen,
             Menüeinträge etc. auf Plugin-Klassen zeigen. Nutzen Sie bei Bedarf den Modus <strong>Plugin Uninstall</strong>
             (Paket komplett aus DB + optional Dateien) oder <strong>ACP Repair</strong>.
-            Das Recovery Tool arbeitet direkt auf dem Webspace — zusätzliche FTP-Logins sind nicht nötig und werden nicht gespeichert.
+            Das Recovery Tool arbeitet direkt auf dem Webspace — zusätzliche FTP-Logins sind nicht nötig und werden nicht gespeichert.<br>
+            <strong>Ziel:</strong> ACP wieder nutzbar machen und Plugin anschließend hier per <strong>Plugin Uninstall</strong> vollständig entfernen —
+            oder Dateien aus dem Paket wiederherstellen, dann ggf. diese neutralisieren.
         </div>
 
         <h2>Schritte auswählen (Reihenfolge bei Ausführung)</h2>
         <ol style="margin:0 0 16px 20px;color:#9D9D9D">
             <li>Paketliste bereinigen (verwaiste DB-Einträge)</li>
             <li>Fehlende Plugin-Dateien aus Archiv</li>
+            <li>Bootstrap: fehlende PSR-14-<code>EventHandler::register</code>-Aufrufe auskommentieren (ACP-Notfall)</li>
             <li>Cache leeren + Option-Konstanten-Fallback</li>
         </ol>
 
@@ -7036,6 +7161,14 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
 
         <p><label><input type="checkbox" name="do_files" value="1" <?= !empty($suggest['files']) ? 'checked' : '' ?>>
             <strong>2. Plugin-Dateien wiederherstellen</strong> (<?= \count($missing) ?> fehlende Klassen)</label></p>
+
+        <?php
+            $neutralCand = (int) ($diag['bootstrapNeutralizeCandidates'] ?? recoveryCountNeutralizableBootstrapRegisters($wcfDir));
+        ?>
+        <p><label><input type="checkbox" name="do_neutralize_bootstrap" value="1" <?= !empty($suggest['neutralizeBootstrap']) ? 'checked' : '' ?>>
+            <strong>3. Bootstrap neutralisieren</strong> — betrifft <strong><?= $neutralCand ?></strong> PSR-14-<code>register()</code>-Aufruf(e) mit fehlender Listener-Datei
+            (zeilenweise auskommentiert; Backup <code>*.recovery-backup-*.php</code> neben der Bootstrap-Datei).
+            <em>Hilft z.&nbsp;B. wenn der ACP mit ClassNotFound beim Dashboard startet, bis Sie das Plugin deinstallieren.</em></label></p>
 
         <?php if ($missing !== []): ?>
         <ul style="margin:4px 0 12px 24px">
@@ -7058,7 +7191,7 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         <?php endif; ?>
 
         <p><label><input type="checkbox" name="do_cache" value="1" checked>
-            <strong>3. Cache leeren</strong> + options.inc.php-Fallback (empfohlen)</label></p>
+            <strong>4. Cache leeren</strong> + options.inc.php-Fallback (empfohlen)</label></p>
 
         <p style="margin-top:20px">
             <button type="submit" class="btn-danger"><i class="fa-solid fa-play"></i> Ausgewählte Schritte jetzt ausführen</button>
@@ -7190,7 +7323,7 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
     <table class="table" style="width:100%;margin-bottom:16px">
         <tr><th>Fehlende Bootstrap-Klassen auf dem Server</th><td><?= \count($diag['missingBootstrapClasses']) ?></td></tr>
         <tr><th>Verwaiste Applications (DB)</th><td><?= (int) $diag['orphanApplicationCount'] ?></td></tr>
-        <tr><th>Log-Hinweise (letzte Datei)</th><td><?= \count($diag['logExcerpts']) ?> Treffer</td></tr>
+        <tr><th>PSR-14 Bootstrap-Register (fehlende Listener)</th><td><?= (int) ($diag['bootstrapNeutralizeCandidates'] ?? recoveryCountNeutralizableBootstrapRegisters($wcfDir)) ?> betroffen</td></tr>
     </table>
 
     <?php if ($diag['missingBootstrapClasses'] === []): ?>
