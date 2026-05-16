@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.18
+ * @version 1.5.19
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.18');
+define('RECOVERY_VERSION', '1.5.19');
 define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
@@ -4039,6 +4039,22 @@ function recoveryFindMissingBootstrapClasses(string $wcfDir): array
 }
 
 /**
+ * @param list<string> $fqcnList
+ * @return array<string, list<string>> App-Präfix (z. B. shrinkr) → Klassen
+ */
+function recoveryGroupFqcnByApplicationPrefix(array $fqcnList): array
+{
+    $groups = [];
+    foreach ($fqcnList as $cn) {
+        $app = \explode('\\', $cn, 2)[0] ?? 'unbekannt';
+        $groups[$app][] = $cn;
+    }
+    \ksort($groups);
+
+    return $groups;
+}
+
+/**
  * Kopiert fehlende Klassen + Bootstrap aus Paket-Payload ins Installationsverzeichnis.
  *
  * @param array{package: string, applicationDirectory: string, appRoot: string|null, wcfRoot: string|null} $payload
@@ -6974,25 +6990,34 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         recoveryWizardSaveState($authHash, ['diagnosis' => $diag]);
 ?>
     <div class="alert alert-info">
-        <strong>Schritt 1 — automatische Diagnose</strong> (Live-Installation, Log unter <code>log/</code>, Bootstrap-Scan).
-        Angelehnt an die Paket-Struktur aus <code>package.xml</code> (wie
-        <a href="https://github.com/SoftCreatRMedia/wspackager" target="_blank" rel="noopener">wspackager</a> /
-        <a href="https://github.com/benjarogit/simple-woltlab-plugin-manager" target="_blank" rel="noopener">simple-woltlab-plugin-manager</a>).
+        <strong>Schritt 1 — Diagnose Ihrer Live-Installation</strong><br>
+        Es wird <strong>kein Paket-Archiv</strong> benötigt. Das Tool liest <code>lib/bootstrap/*.php</code> auf dem Server
+        und prüft, ob die dort registrierten Klassen als <code>.class.php</code> vorhanden sind.
+        Fehlende Dateien (z.&nbsp;B. nach partiellem Löschen von Plugin-Ordnern) werden hier angezeigt.<br>
+        <strong>Schritt 2:</strong> Paket-Archiv hochladen, um fehlende Dateien wiederherzustellen.
     </div>
 
-    <h2>Ergebnis</h2>
+    <h2>Ergebnis (aktueller Server-Stand)</h2>
     <table class="table" style="width:100%;margin-bottom:16px">
-        <tr><th>Fehlende Bootstrap-Klassen</th><td><?= \count($diag['missingBootstrapClasses']) ?></td></tr>
+        <tr><th>Fehlende Bootstrap-Klassen auf dem Server</th><td><?= \count($diag['missingBootstrapClasses']) ?></td></tr>
         <tr><th>Verwaiste Applications (DB)</th><td><?= (int) $diag['orphanApplicationCount'] ?></td></tr>
         <tr><th>Log-Hinweise (letzte Datei)</th><td><?= \count($diag['logExcerpts']) ?> Treffer</td></tr>
     </table>
 
-    <?php if ($diag['missingBootstrapClasses'] !== []): ?>
+    <?php if ($diag['missingBootstrapClasses'] === []): ?>
+    <div class="alert alert-success">
+        Keine fehlenden Bootstrap-Klassen auf dem Server gefunden. Sie können trotzdem mit Schritt 2 fortfahren
+        (z.&nbsp;B. Cache leeren oder Paketliste bereinigen).
+    </div>
+    <?php else: ?>
     <div class="alert alert-error">
-        <strong>Fehlende Klassen:</strong>
-        <ul style="margin:8px 0 0 20px"><?php foreach ($diag['missingBootstrapClasses'] as $cn): ?>
+        <strong>Auf dem Server fehlen Dateien für diese Klassen</strong> (in Bootstrap registriert, <code>.class.php</code> nicht gefunden):
+        <?php foreach (recoveryGroupFqcnByApplicationPrefix($diag['missingBootstrapClasses']) as $app => $classes): ?>
+        <p style="margin:12px 0 4px"><strong>App <code><?= \htmlspecialchars($app) ?></code></strong> (<?= \count($classes) ?> Klassen)</p>
+        <ul style="margin:0 0 8px 20px"><?php foreach ($classes as $cn): ?>
             <li><code><?= \htmlspecialchars($cn) ?></code></li>
         <?php endforeach; ?></ul>
+        <?php endforeach; ?>
     </div>
     <?php endif; ?>
 
