@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.16
+ * @version 1.5.17
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,8 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.16');
+define('RECOVERY_VERSION', '1.5.17');
+define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
 if (\PHP_VERSION_ID < 80100) {
@@ -38,9 +39,52 @@ if (\PHP_VERSION_ID < 80100) {
 
 // #region agent log
 /**
- * NDJSON-Debug: optional RECOVERY_AGENT_LOG_PATH, sonst beschreibbares Verzeichnis.
- * Viele Webroots sind nicht beschreibbar → Fallback {@see sys_get_temp_dir()} (sonst „keine Logs“).
+ * NDJSON-Debug: optional RECOVERY_AGENT_LOG_PATH, sonst WoltLab log/ (recovery-tool-YYYY-MM-DD.ndjson).
+ * Vor WCF-Auflösung: __DIR__/log/, danach sys_get_temp_dir().
  */
+function recoveryAgentDebugLogBasename(): string
+{
+    return RECOVERY_DEBUG_LOG_PREFIX . \date('Y-m-d') . '.ndjson';
+}
+
+function recoveryEnsureLogDirectory(string $dir): bool
+{
+    $dir = \rtrim(\str_replace('\\', '/', $dir), '/') . '/';
+    if ($dir === '/') {
+        return false;
+    }
+    if (\is_dir($dir)) {
+        return @\is_writable($dir);
+    }
+
+    return @\mkdir($dir, 0775, true) || \is_dir($dir);
+}
+
+/**
+ * WCF-Hauptverzeichnis nur für Log-Pfad (ohne Exception, ohne Bootstrap).
+ */
+function recoveryResolveWcfDirForLogging(): ?string
+{
+    static $cached = false;
+    static $result = null;
+    if ($cached) {
+        return $result;
+    }
+    $cached = true;
+
+    if (\defined('WCF_DIR')) {
+        return $result = \rtrim((string) \constant('WCF_DIR'), '/\\') . '/';
+    }
+
+    foreach ([__DIR__, \dirname(__DIR__), \dirname(__DIR__, 2)] as $dir) {
+        if (\is_file($dir . '/global.php') && \is_file($dir . '/config.inc.php')) {
+            return $result = \rtrim($dir, '/') . '/';
+        }
+    }
+
+    return $result = null;
+}
+
 function recoveryAgentDebugLogPath(): string
 {
     static $resolved = null;
@@ -53,14 +97,24 @@ function recoveryAgentDebugLogPath(): string
         return $resolved = $fromEnv;
     }
 
-    $beside = __DIR__ . '/plugin-recovery-agent-debug.ndjson';
-    if (@\is_writable(__DIR__)) {
-        return $resolved = $beside;
+    $basename = recoveryAgentDebugLogBasename();
+
+    $wcfDir = recoveryResolveWcfDirForLogging();
+    if ($wcfDir !== null) {
+        $logDir = \rtrim($wcfDir, '/\\') . '/log/';
+        if (recoveryEnsureLogDirectory($logDir)) {
+            return $resolved = $logDir . $basename;
+        }
+    }
+
+    $besideLogDir = __DIR__ . '/log/';
+    if (recoveryEnsureLogDirectory($besideLogDir)) {
+        return $resolved = $besideLogDir . $basename;
     }
 
     $tmp = \rtrim((string) \sys_get_temp_dir(), \DIRECTORY_SEPARATOR)
-        . \DIRECTORY_SEPARATOR . 'plugin_recovery_agent_54d5f7_'
-        . \substr(\sha1(__DIR__), 0, 16) . '.ndjson';
+        . \DIRECTORY_SEPARATOR . RECOVERY_DEBUG_LOG_PREFIX
+        . \substr(\sha1(__DIR__), 0, 16) . '_' . \date('Y-m-d') . '.ndjson';
 
     return $resolved = $tmp;
 }
@@ -137,12 +191,25 @@ recoveryAgentDebugLog('H1', 'tool:boot', 'php_version_gate_passed', [
 ]);
 @\error_log('[wfl-recovery-agent] ndjson_path=' . recoveryAgentDebugLogPath());
 \set_exception_handler(static function (\Throwable $e): void {
+    recoveryAgentDebugLog('H-EXCEPTION', 'tool:uncaught', 'uncaught_exception', [
+        'class' => \get_class($e),
+        'message' => $e->getMessage(),
+        'file' => \basename($e->getFile()),
+        'line' => $e->getLine(),
+    ]);
     @\error_log('[wfl-recovery-agent] uncaught ' . \get_class($e) . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+    $logHint = 'log/' . recoveryAgentDebugLogBasename();
     if (!\headers_sent()) {
         \http_response_code(500);
-        \header('Content-Type: text/plain; charset=utf-8');
-        echo "plugin-recovery-tool: uncaught exception (Host-error_log nach „wfl-recovery-agent“ durchsuchen).\n";
+        \header('Content-Type: text/html; charset=utf-8');
+        echo '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Recovery Tool – Fehler</title></head><body>';
+        echo '<h1>Recovery Tool – interner Fehler</h1>';
+        echo '<p>Es ist ein unerwarteter Fehler aufgetreten. Details stehen in der Debug-Logdatei im WoltLab-Verzeichnis:</p>';
+        echo '<p><code>' . \htmlspecialchars($logHint, \ENT_QUOTES, 'UTF-8') . '</code></p>';
+        echo '<p>Zusätzlich: Host-<code>error_log</code> nach „wfl-recovery-agent“ durchsuchen.</p>';
+        echo '</body></html>';
     }
+    exit(1);
 });
 // #endregion
 
@@ -1276,7 +1343,7 @@ function recoveryLeadingPrefixSegmentLowerFromConstant(string $constant): ?strin
 }
 
 /**
- * Liest aus App-Unterverzeichnissen …/lib/** /*.php Namespace-Zeilen (Plugin-neutral).
+ * Liest aus App-Unterverzeichnissen …/lib (rekursiv, PHP-Dateien) Namespace-Zeilen (Plugin-neutral).
  *
  * @return list<string>
  */
@@ -4320,10 +4387,48 @@ function recoveryRenderWizardPhaseSteps(int $activeIndex, array $labels): void
 }
 
 /**
+ * Entfernt angelegte Recovery-NDJSON-Debug-Logs (WCF log/, Tool log/, Legacy neben Tool).
+ */
+function recoveryCleanupRecoveryDebugLogs(): void
+{
+    $globPatterns = [
+        __DIR__ . '/log/recovery-tool-*.ndjson',
+        __DIR__ . '/log/plugin-recovery-*.ndjson',
+    ];
+
+    $wcfDir = recoveryResolveWcfDirForLogging();
+    if ($wcfDir !== null) {
+        $wcfLogDir = \rtrim($wcfDir, '/\\') . '/log/';
+        $globPatterns[] = $wcfLogDir . 'recovery-tool-*.ndjson';
+        $globPatterns[] = $wcfLogDir . 'plugin-recovery-*.ndjson';
+    }
+
+    foreach ($globPatterns as $pattern) {
+        foreach (\glob($pattern) ?: [] as $file) {
+            if (\is_file($file)) {
+                @\unlink($file);
+            }
+        }
+    }
+
+    $legacyBeside = __DIR__ . '/plugin-recovery-agent-debug.ndjson';
+    if (\is_file($legacyBeside)) {
+        @\unlink($legacyBeside);
+    }
+
+    $besideLogDir = __DIR__ . '/log/';
+    if (\is_dir($besideLogDir) && (\glob($besideLogDir . '*') ?: []) === []) {
+        @\rmdir($besideLogDir);
+    }
+}
+
+/**
  * Löscht Recovery-Hilfsdateien (nicht plugin-recovery-tool.php – das erfolgt per Shutdown).
  */
 function cleanupRecoveryAuxiliaryFiles(): void
 {
+    recoveryCleanupRecoveryDebugLogs();
+
     $files = [
         __DIR__ . '/plugin-recovery.php',
         __DIR__ . '/universal-recovery.php',
