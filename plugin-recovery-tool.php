@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.6.0
+ * @version 1.6.1
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.6.0');
+define('RECOVERY_VERSION', '1.6.1');
 define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
@@ -3668,6 +3668,38 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         .recovery-loading-pct {
             font-size: 12px; color: #6EC2FF; margin-top: 8px; font-variant-numeric: tabular-nums;
         }
+        .recovery-rec-panel {
+            border-radius: 6px; padding: 18px 20px; margin-bottom: 20px;
+            border: 1px solid #444; background: rgba(0, 0, 0, .18);
+        }
+        .recovery-rec-panel--critical { border-color: #c33; background: rgba(204, 51, 51, .12); }
+        .recovery-rec-panel--warning { border-color: #c93; background: rgba(204, 153, 51, .1); }
+        .recovery-rec-panel--ok { border-color: #3a3; background: rgba(51, 153, 51, .1); }
+        .recovery-rec-panel h2 { margin: 0 0 10px; font-size: 17px; color: #fff; }
+        .recovery-rec-panel .recovery-rec-summary {
+            margin: 0 0 16px; font-size: 14px; line-height: 1.6; color: #d0d0d0;
+        }
+        .recovery-rec-steps { list-style: none; margin: 0; padding: 0; }
+        .recovery-rec-step {
+            padding: 12px 14px; margin-bottom: 10px; border-radius: 4px;
+            background: rgba(0, 0, 0, .22); border-left: 4px solid #555;
+        }
+        .recovery-rec-step--required { border-left-color: #fc6; }
+        .recovery-rec-step--optional { border-left-color: #369; }
+        .recovery-rec-step strong { color: #fff; display: block; margin-bottom: 4px; }
+        .recovery-rec-step p { margin: 0; font-size: 13px; line-height: 1.55; color: #b0b0b0; }
+        .recovery-rec-badge {
+            display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: .04em; padding: 2px 8px; border-radius: 3px; margin-right: 8px;
+        }
+        .recovery-rec-badge--required { background: #c93; color: #1a1a1a; }
+        .recovery-rec-badge--recommended { background: #369; color: #fff; }
+        .recovery-rec-badge--optional { background: #555; color: #eee; }
+        .recovery-next-list { margin: 12px 0 0 20px; color: #c0c0c0; line-height: 1.6; }
+        .recovery-step-help {
+            margin: 6px 0 0 28px; padding: 10px 12px; font-size: 13px; line-height: 1.5;
+            color: #9D9D9D; background: rgba(0,0,0,.15); border-radius: 4px; border-left: 3px solid #369;
+        }
 
         /* Font Awesome Icon-Abstände */
         .fa-solid, .fas { margin-right: 6px; }
@@ -4915,6 +4947,264 @@ function recoveryBuildSystemDiagnosis(
             'cache' => true,
         ],
     ];
+}
+
+/**
+ * Verständliche Empfehlungen aus der Diagnose (für Wizard Schritt Diagnose & Plan).
+ *
+ * @return array{
+ *   severity: string,
+ *   headline: string,
+ *   summary: string,
+ *   steps: list<array{key: string, title: string, why: string, recommended: bool, required: bool, count: int}>,
+ *   afterAcp: list<string>,
+ *   logHint: string|null
+ * }
+ */
+function recoveryBuildWizardRecommendations(array $diag, ?string $packageLabel = null): array
+{
+    $missing = \count($diag['missingBootstrapClasses'] ?? []);
+    $neutral = (int) ($diag['bootstrapNeutralizeCandidates'] ?? 0);
+    $orphDb = \count($diag['orphanedDbEventListeners'] ?? []);
+    $orphans = (int) ($diag['orphanApplicationCount'] ?? 0);
+    $logExcerpts = $diag['logExcerpts'] ?? [];
+
+    $logClassNotFound = false;
+    $logClassName = null;
+    foreach ($logExcerpts as $line) {
+        if (\str_contains((string) $line, 'ClassNotFound') || \str_contains((string) $line, 'Unable to find class')) {
+            $logClassNotFound = true;
+            if (\preg_match("/class '([^']+)'/i", (string) $line, $m)) {
+                $logClassName = $m[1];
+            }
+            break;
+        }
+    }
+
+    $severity = 'ok';
+    if ($neutral > 0 || $orphDb > 0 || $missing > 0 || $logClassNotFound) {
+        $severity = 'critical';
+    } elseif ($orphans > 0) {
+        $severity = 'warning';
+    }
+
+    $pkgHint = $packageLabel !== null && $packageLabel !== ''
+        ? ' für <code>' . \htmlspecialchars($packageLabel, ENT_QUOTES, 'UTF-8') . '</code>'
+        : '';
+
+    $headline = match ($severity) {
+        'critical' => 'Das ACP ist voraussichtlich wegen Plugin-Resten blockiert',
+        'warning' => 'Kein schwerer Dateifehler — DB-Bereinigung empfohlen',
+        default => 'Keine kritischen Fehler im gewählten Umfang',
+    };
+
+    $summary = match ($severity) {
+        'critical' => 'Typisch: Beim Aufruf von <code>/acp/</code> bricht das Dashboard ab, weil PHP eine Plugin-Klasse laden '
+            . 'soll, die fehlt oder nicht ladbar ist. Zuerst den ACP wieder startfähig machen (Bootstrap/DB/Cache), '
+            . 'danach das Plugin sauber deinstallieren.',
+        'warning' => 'Auf dem Server wurden vor allem verwaiste Datenbankeinträge gefunden. '
+            . 'Das kann die Paketliste oder Deinstallation stören.',
+        default => 'Im geprüften Umfang wurden keine fehlenden Klassen oder kaputten Listener gefunden. '
+            . 'Ein Cache-Leeren kann trotzdem helfen, wenn der ACP aus anderen Gründen hängt.',
+    };
+
+    $steps = [];
+
+    if ($orphans > 0) {
+        $steps[] = [
+            'key' => 'orphans',
+            'title' => '1. Paketliste bereinigen',
+            'why' => $orphans . ' Application(s) in der DB ohne gültiges Paket — kann die ACP-Paketliste oder Deinstallation blockieren.',
+            'recommended' => true,
+            'required' => false,
+            'count' => $orphans,
+        ];
+    }
+
+    if ($missing > 0) {
+        $steps[] = [
+            'key' => 'files',
+            'title' => '2. Fehlende Plugin-Dateien aus dem Paket-Archiv kopieren',
+            'why' => $missing . ' Klasse(n) sind in Bootstrap registriert, die .class.php fehlt auf dem Server'
+                . $pkgHint . '. Dafür wird das hochgeladene .tar.gz benötigt.',
+            'recommended' => true,
+            'required' => $missing > 0,
+            'count' => $missing,
+        ];
+    }
+
+    if ($neutral > 0) {
+        $steps[] = [
+            'key' => 'neutralizeBootstrap',
+            'title' => '3. Bootstrap neutralisieren (ACP-Notfall)',
+            'why' => $neutral . ' PSR-14-<code>EventHandler::register()</code>-Zeile(n) verweisen auf nicht ladbare Klassen '
+                . 'in <code>lib/bootstrap/*.php</code>. Diese werden auskommentiert (Backup neben der Datei). '
+                . 'Das beheht oft <code>ClassNotFoundException</code> beim ACP-Dashboard.',
+            'recommended' => true,
+            'required' => true,
+            'count' => $neutral,
+        ];
+    }
+
+    if ($orphDb > 0) {
+        $steps[] = [
+            'key' => 'dbEventListeners',
+            'title' => '4. DB Event-Listener entfernen',
+            'why' => $orphDb . ' Eintrag/Einträge in <code>wcf*_event_listener</code> zeigen auf fehlende Klassen '
+                . '(Listener nur in der Datenbank, nicht in Bootstrap).',
+            'recommended' => true,
+            'required' => $orphDb > 0 && $neutral === 0,
+            'count' => $orphDb,
+        ];
+    }
+
+    if ($logClassNotFound && $neutral === 0 && $orphDb === 0 && $missing === 0) {
+        $steps[] = [
+            'key' => 'hint',
+            'title' => 'Hinweis: Log meldet ClassNotFound, Diagnose zeigt 0',
+            'why' => 'Mögliche Ursachen: Diagnose nur für ein Paket gefiltert, Klasse ist ladbar aber defekt, '
+                . 'oder Fehler kommt aus gecachten Daten. Versuchen Sie „gesamten Server prüfen“ in Schritt 1 '
+                . 'oder Experten-Modus „Plugin-Dateien reparieren“.'
+                . ($logClassName ? ' Log-Klasse: <code>' . \htmlspecialchars($logClassName, ENT_QUOTES, 'UTF-8') . '</code>.' : ''),
+            'recommended' => true,
+            'required' => false,
+            'count' => 1,
+        ];
+    }
+
+    $steps[] = [
+        'key' => 'cache',
+        'title' => (empty($steps) ? '1' : (string) (\count($steps) + 1)) . '. Cache leeren',
+        'why' => 'Entfernt kompilierte Templates und aktualisiert <code>options.inc.php</code>-Fallbacks. '
+            . 'Nach Änderungen an Dateien oder DB immer ausführen.',
+        'recommended' => true,
+        'required' => false,
+        'count' => 0,
+    ];
+
+    $afterAcp = [
+        'ACP im Browser öffnen: <code>/acp/</code> — prüfen ob das Dashboard lädt.',
+        'Wenn der ACP läuft: Modus <strong>Plugin Uninstall</strong> (Startseite oder Experten) für vollständige Entfernung.',
+        'Recovery Tool und Auth-Datei vom Server löschen, wenn alles erledigt ist.',
+    ];
+
+    $logHint = $logClassNotFound
+        ? 'Im WoltLab-Log wurde kürzlich eine ClassNotFound-Meldung gefunden.'
+        : null;
+
+    return [
+        'severity' => $severity,
+        'headline' => $headline,
+        'summary' => $summary,
+        'steps' => $steps,
+        'afterAcp' => $afterAcp,
+        'logHint' => $logHint,
+    ];
+}
+
+function recoveryRenderWizardRecommendationsPanel(array $rec): void
+{
+    $cls = 'recovery-rec-panel recovery-rec-panel--' . \htmlspecialchars($rec['severity'] ?? 'ok');
+    ?>
+    <section class="<?= $cls ?>" aria-labelledby="recovery-rec-heading">
+        <h2 id="recovery-rec-heading"><i class="fa-solid fa-lightbulb"></i> <?= \htmlspecialchars($rec['headline'] ?? '') ?></h2>
+        <p class="recovery-rec-summary"><?= $rec['summary'] ?? '' ?></p>
+        <?php if (!empty($rec['logHint'])): ?>
+        <p class="recovery-rec-summary" style="margin-top:-8px;color:#fc6"><i class="fa-solid fa-triangle-exclamation"></i> <?= \htmlspecialchars($rec['logHint']) ?></p>
+        <?php endif; ?>
+        <?php if (!empty($rec['steps'])): ?>
+        <p style="margin:0 0 10px;font-weight:600;color:#fff;font-size:14px">Empfohlene Reihenfolge im nächsten Schritt:</p>
+        <ul class="recovery-rec-steps">
+        <?php foreach ($rec['steps'] as $step): ?>
+            <li class="recovery-rec-step <?= !empty($step['required']) ? 'recovery-rec-step--required' : 'recovery-rec-step--optional' ?>">
+                <?php if (!empty($step['required'])): ?>
+                <span class="recovery-rec-badge recovery-rec-badge--required">Wichtig</span>
+                <?php elseif (!empty($step['recommended'])): ?>
+                <span class="recovery-rec-badge recovery-rec-badge--recommended">Empfohlen</span>
+                <?php else: ?>
+                <span class="recovery-rec-badge recovery-rec-badge--optional">Optional</span>
+                <?php endif; ?>
+                <strong><?= $step['title'] ?? '' ?></strong>
+                <p><?= $step['why'] ?? '' ?></p>
+            </li>
+        <?php endforeach; ?>
+        </ul>
+        <?php endif; ?>
+        <?php if (!empty($rec['afterAcp'])): ?>
+        <p style="margin:16px 0 6px;font-weight:600;color:#fff;font-size:14px">Danach (wenn der ACP wieder lädt):</p>
+        <ol class="recovery-next-list">
+        <?php foreach ($rec['afterAcp'] as $item): ?>
+            <li><?= $item ?></li>
+        <?php endforeach; ?>
+        </ol>
+        <?php endif; ?>
+    </section>
+    <?php
+}
+
+/**
+ * @param list<string> $logExcerpts
+ */
+function recoveryRenderLogExcerptsPanel(array $logExcerpts, string $panelId = 'wizard-log'): void
+{
+    if ($logExcerpts === []) {
+        return;
+    }
+    $text = \implode("\n", $logExcerpts);
+    ?>
+    <details class="recovery-info-panel" style="margin-bottom:16px" open>
+        <summary style="cursor:pointer;font-weight:700;color:#fff">Log-Auszug (WoltLab <code>log/*.txt</code>)</summary>
+        <p style="margin:12px 0 8px;font-size:13px;color:#9D9D9D">
+            Letzte relevante Zeilen — oft steht hier die exakte fehlende Klasse.
+        </p>
+        <button type="button" class="recovery-copy-btn" data-recovery-copy="<?= \htmlspecialchars($panelId) ?>" style="margin-bottom:10px">
+            <i class="fa-solid fa-copy"></i> Gesamten Log-Auszug kopieren
+        </button>
+        <pre class="recoveryLog" id="<?= \htmlspecialchars($panelId) ?>"><?= \htmlspecialchars($text) ?></pre>
+    </details>
+    <?php
+}
+
+/**
+ * @param array<string, mixed> $result
+ * @param array<string, mixed> $plan
+ * @return list<string>
+ */
+function recoveryBuildWizardRunInterpretation(array $result, array $plan): array
+{
+    $lines = [];
+    $copied = \count($result['copiedFiles'] ?? []);
+    $bootstrap = \count($result['bootstrapNeutralized'] ?? []);
+    $dbEv = (int) ($result['dbEventListenersDeleted'] ?? 0);
+    $cache = (int) ($result['cacheDeleted'] ?? 0);
+
+    if (!empty($plan['neutralizeBootstrap']) && $bootstrap === 0) {
+        $lines[] = 'Bootstrap neutralisieren: Keine Änderung — entweder waren alle Listener bereits in Ordnung oder keine register()-Zeile betroffen.';
+    } elseif ($bootstrap > 0) {
+        $lines[] = 'Bootstrap: ' . $bootstrap . ' Datei(en) angepasst — ACP sollte nicht mehr an diesen fehlenden Listenern scheitern.';
+    }
+
+    if (!empty($plan['dbEventListeners']) && $dbEv === 0) {
+        $lines[] = 'DB Event-Listener: Keine Einträge entfernt — Tabelle enthält (im Filter) keine Listener mit fehlender Klasse.';
+    } elseif ($dbEv > 0) {
+        $lines[] = 'DB: ' . $dbEv . ' Event-Listener gelöscht — Dashboard-Listener aus der Datenbank entfernt.';
+    }
+
+    if (!empty($plan['files']) && $copied === 0) {
+        $lines[] = 'Dateien: Nichts kopiert — Paket-Archiv fehlt in der Session oder Klassen nicht im Archiv gefunden.';
+    } elseif ($copied > 0) {
+        $lines[] = 'Dateien: ' . $copied . ' Datei(en) wiederhergestellt.';
+    }
+
+    if ($cache > 0) {
+        $lines[] = 'Cache: ' . $cache . ' Dateien gelöscht — bitte ACP jetzt testen.';
+    }
+
+    if ($lines === []) {
+        $lines[] = 'Es wurden keine reparierenden Schritte ausgeführt oder alle Schritte ohne Wirkung.';
+    }
+
+    return $lines;
 }
 
 /**
@@ -7606,7 +7896,8 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         if ($plan['files'] && \count($result['copiedFiles'] ?? []) > 0) {
             recoveryCleanupUploadWorkspace();
         }
-        recoveryWizardSaveState($authHash, ['lastRun' => $result]);
+        recoveryWizardSaveState($authHash, ['lastRun' => $result, 'lastPlan' => $plan]);
+        $runInterp = recoveryBuildWizardRunInterpretation($result, $plan);
 ?>
     <div class="alert alert-success">
         <strong>Ausführung abgeschlossen.</strong><br>
@@ -7615,7 +7906,24 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         DB Event-Listener entfernt: <?= (int) ($result['dbEventListenersDeleted'] ?? 0) ?><br>
         Cache-Dateien gelöscht: <?= (int) ($result['cacheDeleted'] ?? 0) ?>
     </div>
-    <pre class="recoveryLog" style="max-height:320px;overflow:auto;margin-top:12px"><?php
+    <section class="recovery-rec-panel recovery-rec-panel--ok" style="margin-top:16px">
+        <h2><i class="fa-solid fa-circle-check"></i> Was bedeutet das?</h2>
+        <ul class="recovery-next-list">
+        <?php foreach ($runInterp as $line): ?>
+            <li><?= \htmlspecialchars($line) ?></li>
+        <?php endforeach; ?>
+        </ul>
+        <p style="margin:14px 0 0;font-size:14px;color:#d0d0d0">
+            <strong>Nächster Schritt:</strong> ACP testen. Wenn die Seite lädt, Plugin über
+            <a href="<?= \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash)) ?>" style="color:#6EC2FF">Plugin Uninstall</a>
+            vollständig entfernen.
+        </p>
+    </section>
+    <p style="margin:12px 0 6px;font-weight:600;color:#fff">Technisches Protokoll</p>
+    <button type="button" class="recovery-copy-btn" data-recovery-copy="wizard-exec-log" style="margin-bottom:8px">
+        <i class="fa-solid fa-copy"></i> Protokoll kopieren
+    </button>
+    <pre class="recoveryLog" id="wizard-exec-log" style="max-height:320px;overflow:auto;margin-top:4px"><?php
         foreach ($execLog as $line) {
             echo \htmlspecialchars($line) . "\n";
         }
@@ -7627,10 +7935,32 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
 <?php
     } elseif ($phase === 'done') {
         $state = recoveryWizardLoadState($authHash);
+        $lastRun = $state['lastRun'] ?? [];
+        $lastPlan = $state['lastPlan'] ?? [];
 ?>
     <div class="alert alert-info">
-        <strong>Wizard abgeschlossen.</strong> Einzelne Modi (ACP Repair, Cache Clear, …) bleiben weiterhin manuell nutzbar.
+        <strong>Wizard abgeschlossen.</strong> Prüfen Sie den ACP. Bei Erfolg das defekte Plugin deinstallieren und das Recovery Tool entfernen.
     </div>
+    <?php if ($lastRun !== []): ?>
+    <section class="recovery-info-panel">
+        <h2>Letzte Ausführung — Kurzüberblick</h2>
+        <table class="table" style="width:100%">
+            <tr><th>Kopierte Dateien</th><td><?= \count($lastRun['copiedFiles'] ?? []) ?></td></tr>
+            <tr><th>Bootstrap-Dateien angepasst</th><td><?= \count($lastRun['bootstrapNeutralized'] ?? []) ?></td></tr>
+            <tr><th>DB Event-Listener entfernt</th><td><?= (int) ($lastRun['dbEventListenersDeleted'] ?? 0) ?></td></tr>
+            <tr><th>Cache-Dateien gelöscht</th><td><?= (int) ($lastRun['cacheDeleted'] ?? 0) ?></td></tr>
+        </table>
+    </section>
+    <?php endif; ?>
+    <section class="recovery-rec-panel recovery-rec-panel--ok">
+        <h2><i class="fa-solid fa-list-check"></i> Checkliste</h2>
+        <ol class="recovery-next-list">
+            <li><a href="<?= \htmlspecialchars($recoveryBaseUrl . 'acp/') ?>" style="color:#6EC2FF">ACP öffnen</a> — lädt das Dashboard ohne Fehler?</li>
+            <li>Ja → <a href="<?= \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash)) ?>" style="color:#6EC2FF">Plugin Uninstall</a> für vollständige Entfernung</li>
+            <li>Nein → Wizard <a href="<?= \htmlspecialchars($wizardUrl . '&wizard_phase=package') ?>" style="color:#6EC2FF">von vorn</a> oder Experten-Modi auf der <a href="<?= \htmlspecialchars(recoveryHomeUrl($authHash)) ?>" style="color:#6EC2FF">Startseite</a></li>
+            <li>Fertig → Recovery Tool vom Server löschen (Sicherheit)</li>
+        </ol>
+    </section>
     <p><a href="<?= \htmlspecialchars($recoveryBaseUrl . 'acp/') ?>" class="button"><i class="fa-solid fa-gauge-high"></i> Zum ACP</a></p>
     <p style="margin-top:12px"><a href="<?= \htmlspecialchars($wizardUrl . '&wizard_phase=package') ?>">Wizard von vorn beginnen</a></p>
 <?php
@@ -7660,7 +7990,16 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         $pkgCtx = recoveryLoadPackageContext($authHash);
         $extractDir = recoveryResolveTrustedExtractDir($authHash);
         $sessionPackageId = (string) ($pkgCtx['packageIdentifier'] ?? $state['packageLabel'] ?? '');
+        $wizardRec = recoveryBuildWizardRecommendations($diag, $sessionPackageId !== '' ? $sessionPackageId : null);
+        $recByKey = [];
+        foreach ($wizardRec['steps'] as $rs) {
+            if (isset($rs['key'])) {
+                $recByKey[(string) $rs['key']] = $rs;
+            }
+        }
 ?>
+    <?php recoveryRenderWizardRecommendationsPanel($wizardRec); ?>
+
     <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($wizardUrl) ?>"
         data-recovery-loading="Recovery-Schritte werden ausgeführt …"
         data-recovery-loading-steps="Reihenfolge: Paketliste → Dateien → Bootstrap → DB-Listener → Cache. Bitte nicht abbrechen.">
@@ -7692,9 +8031,15 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
 
         <p><label><input type="checkbox" name="do_orphans" value="1" <?= !empty($suggest['orphans']) ? 'checked' : '' ?>>
             <strong>1. Paketliste reparieren</strong> (<?= (int) ($diag['orphanApplicationCount'] ?? 0) ?> verwaiste Applications)</label></p>
+        <?php if (isset($recByKey['orphans'])): ?>
+        <div class="recovery-step-help"><?= $recByKey['orphans']['why'] ?? '' ?></div>
+        <?php endif; ?>
 
         <p><label><input type="checkbox" name="do_files" value="1" <?= !empty($suggest['files']) ? 'checked' : '' ?>>
             <strong>2. Plugin-Dateien wiederherstellen</strong> (<?= \count($missing) ?> fehlende Klassen)</label></p>
+        <?php if (isset($recByKey['files'])): ?>
+        <div class="recovery-step-help"><?= $recByKey['files']['why'] ?? '' ?></div>
+        <?php endif; ?>
 
         <?php
             $neutralCand = (int) ($diag['bootstrapNeutralizeCandidates'] ?? recoveryCountNeutralizableBootstrapRegisters($wcfDir));
@@ -7703,6 +8048,9 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
             <strong>3. Bootstrap neutralisieren</strong> — betrifft <strong><?= $neutralCand ?></strong> PSR-14-<code>register()</code>-Aufruf(e) mit fehlender Listener-Datei
             (zeilenweise auskommentiert; Backup <code>*.recovery-backup-*.php</code> neben der Bootstrap-Datei).
             <em>Hilft, wenn die Klasse nur in <code>lib/bootstrap</code> registriert ist.</em></label></p>
+        <?php if (isset($recByKey['neutralizeBootstrap'])): ?>
+        <div class="recovery-step-help"><?= $recByKey['neutralizeBootstrap']['why'] ?? '' ?></div>
+        <?php endif; ?>
 
         <?php
             $orphDb = $diag['orphanedDbEventListeners']
@@ -7712,6 +8060,9 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
             <strong>4. DB Event-Listener bereinigen</strong> — <strong><?= \count($orphDb) ?></strong> Eintrag/Einträge in
             <code>wcf<?= (int) WCF_N ?>_event_listener</code> zeigen auf fehlende Klassen
             <em>(laut Log z.&nbsp;B. <code>BoxCollectingShrinkrDashboardListener</code> — das behebt den ACP-Dashboard-Fehler).</em></label></p>
+        <?php if (isset($recByKey['dbEventListeners'])): ?>
+        <div class="recovery-step-help"><?= $recByKey['dbEventListeners']['why'] ?? '' ?></div>
+        <?php endif; ?>
 
         <?php if ($missing !== []): ?>
         <ul style="margin:4px 0 12px 24px">
@@ -7746,6 +8097,9 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
 
         <p><label><input type="checkbox" name="do_cache" value="1" checked>
             <strong>5. Cache leeren</strong> + options.inc.php-Fallback (empfohlen)</label></p>
+        <?php if (isset($recByKey['cache'])): ?>
+        <div class="recovery-step-help"><?= $recByKey['cache']['why'] ?? '' ?></div>
+        <?php endif; ?>
 
         <p style="margin-top:20px">
             <button type="submit" class="btn-danger"><i class="fa-solid fa-play"></i> Ausgewählte Schritte jetzt ausführen</button>
@@ -7809,13 +8163,21 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
     if ($phase === 'package') {
 ?>
     <div class="alert alert-info">
-        <strong>Schritt 1 — Paket festlegen (empfohlen)</strong><br>
-        Laden Sie das <strong>Paket-Archiv</strong> des defekten Plugins hoch (z.&nbsp;B. <code>.tar.gz</code> mit
-        <code>package.xml</code> und <code>files.tar</code>). Dann kann die Diagnose gezielt für dieses Plugin laufen
-        und die Reparatur nutzt alle Paketdaten.<br>
-        Alternativ nur die <strong>Paket-ID</strong> (z.&nbsp;B. <code>de.example.meinplugin</code>) — dann wird nach App-Name gefiltert,
-        ohne Archiv-Inhalt.
+        <strong>Schritt 1 — Paket festlegen</strong><br>
+        Damit Diagnose und Dateiwiederherstellung gezielt für Ihr Plugin laufen.
     </div>
+    <section class="recovery-info-panel">
+        <h2>Was passiert danach?</h2>
+        <ol class="recovery-next-list">
+            <li><strong>Diagnose</strong> — Bootstrap, Datenbank und Log auf fehlende Klassen prüfen.</li>
+            <li><strong>Plan</strong> — empfohlene Schritte mit Erklärung; Sie setzen die Häkchen.</li>
+            <li><strong>Ausführung</strong> — nur gewählte Aktionen, mit Fortschrittsanzeige.</li>
+        </ol>
+        <p style="margin:12px 0 0;font-size:13px;color:#9D9D9D">
+            <strong>.tar.gz-Archiv</strong> mit <code>package.xml</code> + <code>files.tar</code> (wspackager).
+            <strong>Nur Paket-ID</strong> filtert die Diagnose, reicht aber nicht zum Kopieren von Dateien.
+        </p>
+    </section>
 
     <?php if ($wizardUploadError !== null): ?>
     <div class="alert alert-error"><?= \htmlspecialchars($wizardUploadError) ?></div>
@@ -7887,6 +8249,12 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         <tr><th>DB Event-Listener (fehlende Klasse)</th><td><?= \count($diag['orphanedDbEventListeners'] ?? recoveryFindOrphanedDbEventListeners($wcfDir, $db, WCF_N, $scopeApp !== '' ? $scopeApp : null)) ?> betroffen</td></tr>
     </table>
 
+    <?php
+        $diagRec = recoveryBuildWizardRecommendations($diag, $packageLabel !== '' ? $packageLabel : null);
+        recoveryRenderWizardRecommendationsPanel($diagRec);
+        recoveryRenderLogExcerptsPanel($diag['logExcerpts'] ?? [], 'wizard-diag-log');
+    ?>
+
     <?php if ($diag['missingBootstrapClasses'] === []): ?>
     <div class="alert alert-success">
         Keine fehlenden Bootstrap-Klassen (im gewählten Umfang) gefunden. Sie können trotzdem fortfahren
@@ -7902,13 +8270,6 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         <?php endforeach; ?></ul>
         <?php endforeach; ?>
     </div>
-    <?php endif; ?>
-
-    <?php if ($diag['logExcerpts'] !== []): ?>
-    <details><summary>Log-Auszug</summary>
-    <pre class="recoveryLog"><?php foreach ($diag['logExcerpts'] as $line) {
-        echo \htmlspecialchars($line) . "\n";
-    } ?></pre></details>
     <?php endif; ?>
 
     <form method="POST" action="<?= \htmlspecialchars($wizardUrl) ?>" data-recovery-loading="Plan &amp; Auswahl wird geladen …">
