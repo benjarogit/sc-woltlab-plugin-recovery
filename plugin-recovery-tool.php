@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.26
+ * @version 1.5.27
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.26');
+define('RECOVERY_VERSION', '1.5.27');
 define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
@@ -738,7 +738,7 @@ function recoveryResolvePackageInputFromRequest(string $authHash = ''): array
     if ($raw !== null && $raw !== '') {
         try {
             $identifier = recoveryValidatePackageIdentifier($raw);
-            $extractDir = recoveryResolveTrustedExtractDir();
+            $extractDir = recoveryResolveTrustedExtractDir($authHash);
             if ($authHash !== '') {
                 recoveryStorePackageContext($authHash, $identifier, $extractDir);
             }
@@ -754,7 +754,7 @@ function recoveryResolvePackageInputFromRequest(string $authHash = ''): array
         if ($ctx && !empty($ctx['packageIdentifier'])) {
             return [
                 'packageIdentifier' => $ctx['packageIdentifier'],
-                'extractDir' => $ctx['extractDir'] ?? recoveryResolveTrustedExtractDir(),
+                'extractDir' => $ctx['extractDir'] ?? recoveryResolveTrustedExtractDir($authHash),
             ];
         }
     }
@@ -1001,24 +1001,30 @@ function recoveryMaybeRedirectUninstallAnalyse(string $authHash): void
     exit;
 }
 
-function recoveryResolveTrustedExtractDir(): ?string
+function recoveryResolveTrustedExtractDir(?string $authHash = null): ?string
 {
     $postedExtract = $_POST['extract_dir'] ?? $_GET['extract_dir'] ?? null;
-    if (!$postedExtract) {
-        return null;
+    if ($postedExtract) {
+        $uploadBase = \realpath(__DIR__ . '/uploads');
+        $extractReal = \realpath((string) $postedExtract);
+        if (
+            $uploadBase !== false
+            && $extractReal !== false
+            && \str_starts_with($extractReal, $uploadBase . \DIRECTORY_SEPARATOR)
+            && \is_dir($extractReal)
+        ) {
+            return $extractReal;
+        }
     }
 
-    $uploadBase = \realpath(__DIR__ . '/uploads');
-    $extractReal = \realpath((string) $postedExtract);
-    if (
-        $uploadBase === false
-        || $extractReal === false
-        || !\str_starts_with($extractReal, $uploadBase . \DIRECTORY_SEPARATOR)
-    ) {
-        return null;
+    if ($authHash !== null && $authHash !== '') {
+        $ctx = recoveryLoadPackageContext($authHash);
+        if (!empty($ctx['extractDir']) && \is_dir((string) $ctx['extractDir'])) {
+            return (string) $ctx['extractDir'];
+        }
     }
 
-    return $extractReal;
+    return null;
 }
 
 /**
@@ -4054,6 +4060,84 @@ function recoveryIsPluginClassFilePresent(string $wcfDir, string $className): bo
 }
 
 /**
+ * Event-Listener in der DB, deren listenerClassName keine .class.php auf dem Server hat
+ * (typisch: ACP ClassNotFound in EventHandler::getPsr14Listeners).
+ *
+ * @return list<array{listenerID: int, listenerClassName: string}>
+ */
+function recoveryFindOrphanedDbEventListeners(
+    string $wcfDir,
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    ?string $scopeApplicationDirectory = null
+): array {
+    $orphaned = [];
+    try {
+        $sql = "SELECT listenerID, listenerClassName FROM wcf{$wcfN}_event_listener";
+        $statement = $db->prepareStatement($sql);
+        $statement->execute();
+        while ($row = $statement->fetchArray()) {
+            $class = \trim((string) ($row['listenerClassName'] ?? ''));
+            if ($class === '') {
+                continue;
+            }
+            if ($scopeApplicationDirectory !== null && $scopeApplicationDirectory !== '') {
+                $prefix = \str_replace('/', '\\', $scopeApplicationDirectory) . '\\';
+                if (!\str_starts_with(\str_replace('/', '\\', $class), $prefix)) {
+                    continue;
+                }
+            }
+            if (!\recoveryIsPluginClassFilePresent($wcfDir, $class)) {
+                $orphaned[] = [
+                    'listenerID' => (int) ($row['listenerID'] ?? 0),
+                    'listenerClassName' => $class,
+                ];
+            }
+        }
+    } catch (\Throwable $ignored) {
+    }
+
+    return $orphaned;
+}
+
+/**
+ * @return int Anzahl gelöschter Zeilen
+ */
+function recoveryPurgeOrphanedDbEventListeners(
+    string $wcfDir,
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    array &$log,
+    ?string $scopeApplicationDirectory = null
+): int {
+    $orphaned = \recoveryFindOrphanedDbEventListeners($wcfDir, $db, $wcfN, $scopeApplicationDirectory);
+    if ($orphaned === []) {
+        return 0;
+    }
+
+    $deleted = 0;
+    foreach ($orphaned as $row) {
+        $listenerId = (int) ($row['listenerID'] ?? 0);
+        if ($listenerId <= 0) {
+            continue;
+        }
+        try {
+            $sql = "DELETE FROM wcf{$wcfN}_event_listener WHERE listenerID = ?";
+            $statement = $db->prepareStatement($sql);
+            $statement->execute([$listenerId]);
+            $deleted++;
+            $log[] = '[Event-Listener DB] Entfernt: ' . ($row['listenerClassName'] ?? '?')
+                . ' (listenerID ' . $listenerId . ')';
+        } catch (\Throwable $e) {
+            $log[] = '[Event-Listener DB] Löschen fehlgeschlagen (listenerID ' . $listenerId . '): '
+                . $e->getMessage();
+        }
+    }
+
+    return $deleted;
+}
+
+/**
  * Klassen, die in Bootstrap registriert sind, deren .class.php auf dem Server fehlt.
  *
  * @return list<string>
@@ -4397,7 +4481,8 @@ function recoveryNeutralizeBootstrapRegistersForMissingListeners(string $wcfDir,
  *   orphanApplicationCount: int,
  *   logExcerpts: list<string>,
  *   bootstrapNeutralizeCandidates: int,
- *   suggestedActions: array{orphans: bool, files: bool, neutralizeBootstrap: bool, cache: bool}
+ *   orphanedDbEventListeners: list<array{listenerID: int, listenerClassName: string}>,
+ *   suggestedActions: array{orphans: bool, files: bool, neutralizeBootstrap: bool, dbEventListeners: bool, cache: bool}
  * }
  */
 function recoveryBuildSystemDiagnosis(
@@ -4410,6 +4495,7 @@ function recoveryBuildSystemDiagnosis(
     if ($scopeApplicationDirectory !== null && $scopeApplicationDirectory !== '') {
         $missing = recoveryFilterFqcnByApplicationPrefix($missing, $scopeApplicationDirectory);
     }
+    $orphanedDbListeners = recoveryFindOrphanedDbEventListeners($wcfDir, $db, $wcfN, $scopeApplicationDirectory);
     $orphanCount = 0;
     try {
         $sql = "SELECT COUNT(*) AS c FROM wcf{$wcfN}_application a
@@ -4430,10 +4516,12 @@ function recoveryBuildSystemDiagnosis(
         'orphanApplicationCount' => $orphanCount,
         'logExcerpts' => $logExcerpts,
         'bootstrapNeutralizeCandidates' => $neutralizeCandidates,
+        'orphanedDbEventListeners' => $orphanedDbListeners,
         'suggestedActions' => [
             'orphans' => $orphanCount > 0,
             'files' => $missing !== [],
             'neutralizeBootstrap' => $neutralizeCandidates > 0,
+            'dbEventListeners' => $orphanedDbListeners !== [],
             'cache' => true,
         ],
     ];
@@ -4500,8 +4588,8 @@ function recoveryWizardSaveState(string $authHash, array $state): void
 }
 
 /**
- * @param array{orphans?: bool, files?: bool, neutralizeBootstrap?: bool, cache?: bool, extractDir?: string|null, classes?: list<string>} $plan
- * @return array{copiedFiles: list<string>, cacheDeleted: int, bootstrapNeutralized: list<string>}
+ * @param array{orphans?: bool, files?: bool, neutralizeBootstrap?: bool, dbEventListeners?: bool, cache?: bool, extractDir?: string|null, classes?: list<string>, scopeApplication?: string|null} $plan
+ * @return array{copiedFiles: list<string>, cacheDeleted: int, bootstrapNeutralized: list<string>, dbEventListenersDeleted: int}
  */
 function recoveryWizardExecutePlan(
     string $wcfDir,
@@ -4513,6 +4601,10 @@ function recoveryWizardExecutePlan(
     $copiedFiles = [];
     $cacheDeleted = 0;
     $bootstrapNeutralized = [];
+    $dbEventListenersDeleted = 0;
+    $scopeApp = isset($plan['scopeApplication']) && (string) $plan['scopeApplication'] !== ''
+        ? (string) $plan['scopeApplication']
+        : null;
 
     if (!empty($plan['orphans'])) {
         $orphanResult = recoveryRepairOrphanedPackageReferences($db, $wcfN);
@@ -4550,6 +4642,13 @@ function recoveryWizardExecutePlan(
         }
     }
 
+    if (!empty($plan['dbEventListeners'])) {
+        $dbEventListenersDeleted = recoveryPurgeOrphanedDbEventListeners($wcfDir, $db, $wcfN, $log, $scopeApp);
+        if ($dbEventListenersDeleted === 0) {
+            $log[] = '[Event-Listener DB] Keine Einträge mit fehlender Klasse gefunden.';
+        }
+    }
+
     if (!empty($plan['cache'])) {
         $cacheDeleted = clearCompiledTemplates();
         $optionFbLog = [];
@@ -4564,6 +4663,7 @@ function recoveryWizardExecutePlan(
         'copiedFiles' => $copiedFiles,
         'cacheDeleted' => $cacheDeleted,
         'bootstrapNeutralized' => $bootstrapNeutralized,
+        'dbEventListenersDeleted' => $dbEventListenersDeleted,
     ];
 }
 
@@ -6914,7 +7014,7 @@ elseif ($mode === RECOVERY_MODE_PACKAGE_FILE_REPAIR) {
 
     if (isset($_POST['confirm_file_repair'])) {
         $repairLog = [];
-        $extractDir = recoveryResolveTrustedExtractDir();
+        $extractDir = recoveryResolveTrustedExtractDir($authHash);
         if ($extractDir === null) {
             echo '<div class="alert alert-error"><strong>Kein gültiges Paket-Archiv in der Session.</strong> Bitte erneut hochladen.</div>';
         } else {
@@ -7065,19 +7165,29 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
 
 <?php
     if ($phase === 'run' && isset($_POST['wizard_execute'])) {
+        if (recoveryHasUploadedPackageFile()) {
+            $upload = recoveryHandlePackageUpload($_FILES['package_file']);
+            if ($upload['ok'] && !empty($upload['extractDir'])) {
+                recoveryStorePackageContext($authHash, (string) $upload['packageIdentifier'], $upload['extractDir']);
+            }
+        }
+        $wizardState = recoveryWizardLoadState($authHash);
+        $scopeForRun = isset($wizardState['scopeApplication']) ? (string) $wizardState['scopeApplication'] : '';
         $plan = [
             'orphans' => !empty($_POST['do_orphans']),
             'files' => !empty($_POST['do_files']),
             'neutralizeBootstrap' => !empty($_POST['do_neutralize_bootstrap']),
+            'dbEventListeners' => !empty($_POST['do_db_event_listeners']),
             'cache' => !empty($_POST['do_cache']),
-            'extractDir' => recoveryResolveTrustedExtractDir(),
+            'extractDir' => recoveryResolveTrustedExtractDir($authHash),
+            'scopeApplication' => $scopeForRun !== '' ? $scopeForRun : null,
             'classes' => isset($_POST['repair_classes']) && \is_array($_POST['repair_classes'])
                 ? \array_values(\array_filter(\array_map('strval', $_POST['repair_classes'])))
                 : [],
         ];
         $execLog = [];
         $result = recoveryWizardExecutePlan($wcfDir, $db, WCF_N, $plan, $execLog);
-        if ($plan['files']) {
+        if ($plan['files'] && \count($result['copiedFiles'] ?? []) > 0) {
             recoveryCleanupUploadWorkspace();
         }
         recoveryWizardSaveState($authHash, ['lastRun' => $result]);
@@ -7086,6 +7196,7 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         <strong>Ausführung abgeschlossen.</strong><br>
         Kopierte Dateien: <?= \count($result['copiedFiles'] ?? []) ?><br>
         Bootstrap angepasst (fehlende Listener auskommentiert): <?= \count($result['bootstrapNeutralized'] ?? []) ?> Datei(en)<br>
+        DB Event-Listener entfernt: <?= (int) ($result['dbEventListenersDeleted'] ?? 0) ?><br>
         Cache-Dateien gelöscht: <?= (int) ($result['cacheDeleted'] ?? 0) ?>
     </div>
     <pre class="recoveryLog" style="max-height:320px;overflow:auto;margin-top:12px"><?php
@@ -7122,13 +7233,16 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
             'orphans' => false,
             'files' => false,
             'neutralizeBootstrap' => false,
+            'dbEventListeners' => false,
             'cache' => true,
         ], $diag['suggestedActions'] ?? []);
         $missing = $diag['missingBootstrapClasses'] ?? recoveryFindMissingBootstrapClasses($wcfDir);
         if ($scopeApp !== null) {
             $missing = recoveryFilterFqcnByApplicationPrefix($missing, $scopeApp);
         }
-        $extractDir = recoveryResolveTrustedExtractDir();
+        $pkgCtx = recoveryLoadPackageContext($authHash);
+        $extractDir = recoveryResolveTrustedExtractDir($authHash);
+        $sessionPackageId = (string) ($pkgCtx['packageIdentifier'] ?? $state['packageLabel'] ?? '');
 ?>
     <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($wizardUrl) ?>" data-recovery-loading="Recovery wird ausgeführt (Paketliste, Dateien, Bootstrap, Cache) …">
         <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_RECOVERY_WIZARD, $authHash); ?>
@@ -7153,6 +7267,7 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
             <li>Paketliste bereinigen (verwaiste DB-Einträge)</li>
             <li>Fehlende Plugin-Dateien aus Archiv</li>
             <li>Bootstrap: fehlende PSR-14-<code>EventHandler::register</code>-Aufrufe auskommentieren (ACP-Notfall)</li>
+            <li>DB: Event-Listener mit fehlender Klasse entfernen (ACP-Dashboard)</li>
             <li>Cache leeren + Option-Konstanten-Fallback</li>
         </ol>
 
@@ -7168,7 +7283,16 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         <p><label><input type="checkbox" name="do_neutralize_bootstrap" value="1" <?= !empty($suggest['neutralizeBootstrap']) ? 'checked' : '' ?>>
             <strong>3. Bootstrap neutralisieren</strong> — betrifft <strong><?= $neutralCand ?></strong> PSR-14-<code>register()</code>-Aufruf(e) mit fehlender Listener-Datei
             (zeilenweise auskommentiert; Backup <code>*.recovery-backup-*.php</code> neben der Bootstrap-Datei).
-            <em>Hilft z.&nbsp;B. wenn der ACP mit ClassNotFound beim Dashboard startet, bis Sie das Plugin deinstallieren.</em></label></p>
+            <em>Hilft, wenn die Klasse nur in <code>lib/bootstrap</code> registriert ist.</em></label></p>
+
+        <?php
+            $orphDb = $diag['orphanedDbEventListeners']
+                ?? recoveryFindOrphanedDbEventListeners($wcfDir, $db, WCF_N, $scopeApp);
+        ?>
+        <p><label><input type="checkbox" name="do_db_event_listeners" value="1" <?= !empty($suggest['dbEventListeners']) ? 'checked' : '' ?>>
+            <strong>4. DB Event-Listener bereinigen</strong> — <strong><?= \count($orphDb) ?></strong> Eintrag/Einträge in
+            <code>wcf<?= (int) WCF_N ?>_event_listener</code> zeigen auf fehlende Klassen
+            <em>(laut Log z.&nbsp;B. <code>BoxCollectingShrinkrDashboardListener</code> — das behebt den ACP-Dashboard-Fehler).</em></label></p>
 
         <?php if ($missing !== []): ?>
         <ul style="margin:4px 0 12px 24px">
@@ -7179,19 +7303,30 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         </ul>
         <?php endif; ?>
 
-        <?php if (!$extractDir): ?>
+        <?php if ($extractDir): ?>
+        <p class="alert alert-success" style="margin:12px 0">
+            <strong>Paket-Archiv aus Schritt 1 aktiv</strong><?php if ($sessionPackageId !== ''): ?>
+            — <code><?= \htmlspecialchars($sessionPackageId) ?></code><?php endif; ?>
+            (Upload muss nicht erneut gewählt werden.)
+        </p>
+        <?php elseif ($sessionPackageId !== ''): ?>
+        <p class="alert alert-info" style="margin:12px 0">
+            Paket-ID gespeichert: <code><?= \htmlspecialchars($sessionPackageId) ?></code>.
+            Für <strong>Schritt 2 (Dateien)</strong> bitte das Archiv unten nachreichen.
+        </p>
+        <label for="wizard_package_file">Paket-Archiv (.tar.gz)</label>
+        <input type="file" name="package_file" id="wizard_package_file" accept=".tar,.tar.gz,.tgz">
+        <?php else: ?>
         <div class="alert alert-warning" style="margin:12px 0">
             Für Schritt 2: <strong>Paket-Archiv hochladen</strong> (package.xml mit files.tar / files_wcf.tar — wie vom
             <a href="https://github.com/SoftCreatRMedia/wspackager" target="_blank" rel="noopener">wspackager</a> gebaut).
         </div>
         <label for="wizard_package_file">Paket (.tar.gz)</label>
         <input type="file" name="package_file" id="wizard_package_file" accept=".tar,.tar.gz,.tgz">
-        <?php else: ?>
-        <p class="alert alert-success" style="margin:12px 0">Paket in Session: <code><?= \htmlspecialchars($extractDir) ?></code></p>
         <?php endif; ?>
 
         <p><label><input type="checkbox" name="do_cache" value="1" checked>
-            <strong>4. Cache leeren</strong> + options.inc.php-Fallback (empfohlen)</label></p>
+            <strong>5. Cache leeren</strong> + options.inc.php-Fallback (empfohlen)</label></p>
 
         <p style="margin-top:20px">
             <button type="submit" class="btn-danger"><i class="fa-solid fa-play"></i> Ausgewählte Schritte jetzt ausführen</button>
@@ -7324,6 +7459,7 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         <tr><th>Fehlende Bootstrap-Klassen auf dem Server</th><td><?= \count($diag['missingBootstrapClasses']) ?></td></tr>
         <tr><th>Verwaiste Applications (DB)</th><td><?= (int) $diag['orphanApplicationCount'] ?></td></tr>
         <tr><th>PSR-14 Bootstrap-Register (fehlende Listener)</th><td><?= (int) ($diag['bootstrapNeutralizeCandidates'] ?? recoveryCountNeutralizableBootstrapRegisters($wcfDir)) ?> betroffen</td></tr>
+        <tr><th>DB Event-Listener (fehlende Klasse)</th><td><?= \count($diag['orphanedDbEventListeners'] ?? recoveryFindOrphanedDbEventListeners($wcfDir, $db, WCF_N, $scopeApp !== '' ? $scopeApp : null)) ?> betroffen</td></tr>
     </table>
 
     <?php if ($diag['missingBootstrapClasses'] === []): ?>
