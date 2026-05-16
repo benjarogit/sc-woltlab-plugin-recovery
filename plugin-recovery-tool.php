@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.7.1
+ * @version 1.8.0
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,10 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.7.1');
+define('RECOVERY_VERSION', '1.8.0');
+define('RECOVERY_BEER_CSS', 'https://cdn.jsdelivr.net/npm/beercss@4.0.21/dist/cdn/beer.min.css');
+define('RECOVERY_BEER_JS', 'https://cdn.jsdelivr.net/npm/beercss@4.0.21/dist/cdn/beer.min.js');
+define('RECOVERY_BEER_COLORS_JS', 'https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.4/dist/cdn/material-dynamic-colors.min.js');
 define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
@@ -222,6 +225,8 @@ define('RECOVERY_MODE_PACKAGE_LIST_REPAIR', 5);
 define('RECOVERY_MODE_PACKAGE_FILE_REPAIR', 6);
 define('RECOVERY_MODE_RECOVERY_WIZARD', 7);
 define('RECOVERY_MODE_SYSTEM_CHECK', 8);
+define('RECOVERY_MODE_BACKUP_GUIDE', 9);
+define('RECOVERY_MODE_DIRECTORY_STRUCTURE', 10);
 
 /** Stack-Traces nur bei true oder ?debug=1 (mit gültigem Auth-Token). */
 define('RECOVERY_ENABLE_DEBUG', false);
@@ -3575,6 +3580,206 @@ function recoveryRenderSystemCheckPage(
 }
 
 /**
+ * @return array{mysqldump: string, tar: string, dbName: string, dbHost: string, dbUser: string, wcfDir: string}
+ */
+function recoveryBuildBackupCommandHints(string $wcfDir): array
+{
+    $dbHost = 'localhost';
+    $dbUser = '';
+    $dbName = '';
+    $dbPort = 3306;
+
+    if (\defined('WCF_DIR') && \is_readable(WCF_DIR . 'config.inc.php')) {
+        $dbPassword = '';
+        $defaultDriverOptions = [];
+        require WCF_DIR . 'config.inc.php';
+    }
+
+    $wcfDirQuoted = \escapeshellarg(\rtrim($wcfDir, '/\\'));
+    $dump = 'mysqldump -h ' . \escapeshellarg($dbHost)
+        . ' -P ' . (int) $dbPort
+        . ' -u ' . \escapeshellarg($dbUser)
+        . ' -p --single-transaction --skip-lock-tables '
+        . \escapeshellarg($dbName)
+        . ' > backup-' . \date('Y-m-d') . '.sql';
+
+    $tar = 'tar cf backup-' . \date('Y-m-d') . '.tar -C ' . $wcfDirQuoted . ' .';
+
+    return [
+        'mysqldump' => $dump,
+        'tar' => $tar,
+        'dbName' => $dbName,
+        'dbHost' => $dbHost,
+        'dbUser' => $dbUser,
+        'wcfDir' => \rtrim($wcfDir, '/\\'),
+    ];
+}
+
+function recoveryRenderBackupGuidePage(string $authHash, string $wcfDir): void
+{
+    $hints = recoveryBuildBackupCommandHints($wcfDir);
+    $manualUrl = 'https://manual.woltlab.com/de/backup/';
+    ?>
+    <header class="recovery-beer-header">
+        <h1>Datensicherung</h1>
+        <p>Empfehlungen aus dem <a href="<?= \htmlspecialchars($manualUrl) ?>" target="_blank" rel="noopener">WoltLab-Handbuch</a> — vor Plugin-Entfernung oder SQL-Rollback immer Backup.</p>
+    </header>
+
+    <article class="border round medium-padding margin-bottom-medium">
+        <h2 class="medium">Checkliste</h2>
+        <ul class="recovery-next-list">
+            <li>Datenbank <strong>und</strong> Dateisystem sichern — gleicher Zeitpunkt.</li>
+            <li>Backups regelmäßig prüfen (vollständig, wiederherstellbar).</li>
+            <li>Vor Updates oder Recovery-Schritten mit Datenverlust: neues Backup.</li>
+            <li>Bei Hoster-Backups: zusätzlich eigene Sicherung anlegen.</li>
+        </ul>
+    </article>
+
+    <article class="border round medium-padding margin-bottom-medium">
+        <h2 class="medium">SSH — Datenbank</h2>
+        <p><small>Passwort wird interaktiv abgefragt (<code>-p</code>). Werte aus <code>config.inc.php</code>.</small></p>
+        <pre class="recovery-code-block" id="recovery-cmd-mysqldump"><?= \htmlspecialchars($hints['mysqldump']) ?></pre>
+        <button type="button" class="secondary" data-recovery-copy-target="recovery-cmd-mysqldump">
+            <i class="fa-solid fa-copy"></i> Befehl kopieren
+        </button>
+    </article>
+
+    <article class="border round medium-padding margin-bottom-medium">
+        <h2 class="medium">SSH — Dateisystem</h2>
+        <p><small>Tarball des WoltLab-Hauptverzeichnisses (<code><?= \htmlspecialchars($hints['wcfDir']) ?></code>).</small></p>
+        <pre class="recovery-code-block" id="recovery-cmd-tar"><?= \htmlspecialchars($hints['tar']) ?></pre>
+        <button type="button" class="secondary" data-recovery-copy-target="recovery-cmd-tar">
+            <i class="fa-solid fa-copy"></i> Befehl kopieren
+        </button>
+    </article>
+
+    <article class="border round medium-padding margin-bottom-medium">
+        <h2 class="medium">Ohne SSH</h2>
+        <p>FTP/SFTP: alle Installationsdateien herunterladen (Binärmodus). Datenbank z.&nbsp;B. über phpMyAdmin oder Hoster-Panel exportieren.</p>
+    </article>
+
+    <nav class="row right-align">
+        <a href="<?= \htmlspecialchars(recoveryHomeUrl($authHash)) ?>" class="button">Zurück zum Start</a>
+    </nav>
+    <?php
+}
+
+/**
+ * @return list<array{packageID: int, package: string, packageDir: string, domainName: string, domainPath: string, isTainted: int, dirExists: bool, dirPath: string, issues: list<string>}>
+ */
+function recoveryFetchApplicationDirectoryReport(
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    string $wcfDir
+): array {
+    $rows = [];
+    $wcfDir = \rtrim($wcfDir, '/\\') . '/';
+
+    try {
+        $sql = "SELECT p.packageID, p.package, p.packageDir, a.domainName, a.domainPath, a.isTainted
+                FROM wcf{$wcfN}_application a
+                INNER JOIN wcf{$wcfN}_package p ON a.packageID = p.packageID
+                ORDER BY p.package";
+        $statement = $db->prepareStatement($sql);
+        $statement->execute();
+        while ($row = $statement->fetchArray()) {
+            $packageDir = \trim((string) ($row['packageDir'] ?? ''), '/');
+            $dirPath = $packageDir === '' ? $wcfDir : $wcfDir . $packageDir . '/';
+            $real = \realpath($dirPath);
+            $wcfReal = \realpath($wcfDir);
+            $dirExists = $real !== false && \is_dir($real);
+            $issues = [];
+            if (!$dirExists) {
+                $issues[] = 'Verzeichnis fehlt auf dem Server';
+            } elseif ($wcfReal !== false && $real !== false && !\str_starts_with($real, $wcfReal)) {
+                $issues[] = 'Pfad liegt nicht unter WCF_DIR';
+            }
+            if ((int) ($row['isTainted'] ?? 0) === 1) {
+                $issues[] = 'Application ist als tainted markiert';
+            }
+            $domainPath = (string) ($row['domainPath'] ?? '/');
+            if ($domainPath !== '/' && !\str_starts_with($domainPath, '/')) {
+                $issues[] = 'domainPath sollte mit / beginnen';
+            }
+            $rows[] = [
+                'packageID' => (int) ($row['packageID'] ?? 0),
+                'package' => (string) ($row['package'] ?? ''),
+                'packageDir' => $packageDir,
+                'domainName' => (string) ($row['domainName'] ?? ''),
+                'domainPath' => $domainPath,
+                'isTainted' => (int) ($row['isTainted'] ?? 0),
+                'dirExists' => $dirExists,
+                'dirPath' => $dirExists ? $real : $dirPath,
+                'issues' => $issues,
+            ];
+        }
+    } catch (\Throwable $ignored) {
+    }
+
+    return $rows;
+}
+
+function recoveryRenderDirectoryStructurePage(
+    string $authHash,
+    string $wcfDir,
+    \wcf\system\database\Database $db,
+    int $wcfN
+): void {
+    $apps = recoveryFetchApplicationDirectoryReport($db, $wcfN, $wcfDir);
+    $manualUrl = 'https://manual.woltlab.com/de/customize-directory-structure/';
+    ?>
+    <header class="recovery-beer-header">
+        <h1>Verzeichnisstruktur &amp; Applications</h1>
+        <p>
+            Übersicht aus <code>wcf<?= (int) $wcfN ?>_application</code> und <code>package</code>.
+            Änderungen nur mit Admin-Kenntnissen —
+            <a href="<?= \htmlspecialchars($manualUrl) ?>" target="_blank" rel="noopener">Handbuch: Verzeichnisstruktur ändern</a>.
+        </p>
+    </header>
+
+    <article class="border round medium-padding margin-bottom-medium">
+        <h2 class="medium">Hinweis</h2>
+        <p>Domain-Änderungen erkennt WoltLab oft automatisch beim ersten ACP-Aufruf. Struktur-Umzüge (Core nach <code>/core/</code>, App ins Root) erfordern Dateiverschiebung, DB-Anpassung und Cache-Leerung — siehe Handbuch.</p>
+    </article>
+
+    <?php if ($apps === []): ?>
+    <article class="border round medium-padding">
+        <p><em>Keine Applications in der Datenbank gefunden.</em></p>
+    </article>
+    <?php else: ?>
+    <div class="responsive medium-margin">
+        <table class="border">
+            <thead>
+                <tr>
+                    <th>Package</th>
+                    <th>packageDir</th>
+                    <th>domainPath</th>
+                    <th>Ordner</th>
+                    <th>Hinweise</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php foreach ($apps as $app): ?>
+                <tr>
+                    <td><code><?= \htmlspecialchars($app['package']) ?></code></td>
+                    <td><code><?= \htmlspecialchars($app['packageDir'] ?: '/') ?></code></td>
+                    <td><code><?= \htmlspecialchars($app['domainPath']) ?></code></td>
+                    <td><?= $app['dirExists'] ? '<span class="green-text">OK</span>' : '<span class="red-text">fehlt</span>' ?></td>
+                    <td><small><?= $app['issues'] !== [] ? \htmlspecialchars(\implode('; ', $app['issues'])) : '—' ?></small></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php endif; ?>
+
+    <nav class="row right-align margin-top-large">
+        <a href="<?= \htmlspecialchars(recoveryHomeUrl($authHash)) ?>" class="button">Zurück zum Start</a>
+    </nav>
+    <?php
+}
+
+/**
  * Generische Vollbereinigung für jedes Plugin (ohne WoltLab-Paket-Deinstaller).
  *
  * @param array<string, mixed>|null $resources
@@ -4311,16 +4516,16 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
     <meta name="robots" content="noindex">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= \htmlspecialchars($documentTitle) ?></title>
+    <link rel="stylesheet" href="<?= \htmlspecialchars(RECOVERY_BEER_CSS) ?>">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;display=swap">
     <script>
     (function () {
         var k = 'recoveryTheme', t = localStorage.getItem(k) || 'dark';
         document.documentElement.setAttribute('data-recovery-theme', t);
+        document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
     })();
     </script>
     <link rel="stylesheet" href="<?= \htmlspecialchars($faHref) ?>"<?= $faIntegrity ?>>
-    <?php if ($assets['WCFSetup.css'] !== ''): ?>
-    <link rel="stylesheet" href="<?= \htmlspecialchars($assets['WCFSetup.css']) ?>">
-    <?php endif; ?>
     <style>
         :root, html[data-recovery-theme="dark"] {
             --recovery-bg: #2D2D2D;
@@ -4366,17 +4571,26 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: var(--recovery-bg);
-            color: var(--recovery-text);
-            padding: 50px 20px;
             line-height: 1.5;
         }
+        .recovery-shell {
+            max-width: 1024px;
+            margin: 0 auto;
+            padding: 24px 16px 48px;
+        }
+        .recovery-beer-header { margin-bottom: 24px; }
+        .recovery-beer-header h1 { margin: 0 0 8px; font-weight: 400; }
+        .recovery-beer-header p { margin: 0; opacity: 0.85; }
+        .recovery-code-block {
+            display: block; overflow-x: auto; padding: 12px 14px; margin: 12px 0;
+            font-size: 13px; border-radius: 8px; white-space: pre-wrap; word-break: break-all;
+        }
+        .margin-bottom-medium { margin-bottom: 20px; }
+        .margin-top-large { margin-top: 28px; }
         .container {
             max-width: 980px;
             margin: 0 auto;
-            background: var(--recovery-card);
-            padding: 40px;
-            border-radius: 3px;
+            padding: 0;
         }
         .recovery-theme-bar {
             display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
@@ -4859,13 +5073,14 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
     </style>
 </head>
 <body>
-<div class="container">
-<div class="recovery-theme-bar" role="group" aria-label="Darstellung">
-    <span>Theme:</span>
-    <button type="button" class="recovery-theme-btn" data-recovery-set-theme="light" title="Hell">Hell</button>
-    <button type="button" class="recovery-theme-btn" data-recovery-set-theme="dark" title="Dunkel">Dunkel</button>
-    <button type="button" class="recovery-theme-btn" data-recovery-set-theme="system" title="System">System</button>
+<main class="responsive recovery-shell">
+<div class="recovery-theme-bar row middle-align small-space" role="group" aria-label="Darstellung">
+    <span class="small">Theme</span>
+    <button type="button" class="chip tiny" data-recovery-set-theme="light">Hell</button>
+    <button type="button" class="chip tiny" data-recovery-set-theme="dark">Dunkel</button>
+    <button type="button" class="chip tiny" data-recovery-set-theme="system">System</button>
 </div>
+<div class="container">
 <script>
 (function () {
     var key = 'recoveryTheme';
@@ -4875,10 +5090,17 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         }
         return theme === 'light' ? 'light' : 'dark';
     }
+    function beerTheme(resolved) {
+        document.documentElement.setAttribute('data-theme', resolved === 'light' ? 'light' : 'dark');
+    }
     function apply(theme) {
+        var resolved = theme === 'system'
+            ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+            : (theme === 'light' ? 'light' : 'dark');
         document.documentElement.setAttribute('data-recovery-theme', theme);
+        beerTheme(resolved);
         document.querySelectorAll('[data-recovery-set-theme]').forEach(function (btn) {
-            btn.classList.toggle('is-active', btn.getAttribute('data-recovery-set-theme') === theme);
+            btn.classList.toggle('active', btn.getAttribute('data-recovery-set-theme') === theme);
         });
     }
     var stored = localStorage.getItem(key) || 'dark';
@@ -4895,6 +5117,17 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
             if (localStorage.getItem(key) === 'system') { apply('system'); }
         });
     }
+    document.querySelectorAll('[data-recovery-copy-target]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var id = btn.getAttribute('data-recovery-copy-target');
+            var el = id ? document.getElementById(id) : null;
+            if (!el) { return; }
+            navigator.clipboard.writeText(el.textContent || '').then(function () {
+                btn.classList.add('copied');
+                setTimeout(function () { btn.classList.remove('copied'); }, 1500);
+            });
+        });
+    });
 })();
 </script>
 <?php
@@ -4910,17 +5143,21 @@ function recoveryRenderPageEnd(?array $assets = null): void
     }
     ?>
 </div>
-<footer>
+<footer class="center-align small-margin">
     <a href="https://github.com/benjarogit/sc-woltlab-plugin-recovery" target="_blank" rel="noopener"><i class="fa-solid fa-screwdriver-wrench"></i> Plugin Recovery Tool</a> &copy; <?= \date('Y') ?> Sunny C.
     <?php if ($baseUrl !== ''): ?>
     | <a href="<?= \htmlspecialchars($baseUrl) ?>">Installation</a>
     <?php endif; ?>
     | <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank" rel="noopener">WoltLab Recovery</a>
+    | <a href="https://www.beercss.com/" target="_blank" rel="noopener">Beer CSS</a>
 </footer>
+</main>
 <?php
     recoveryRenderWoltLabUiShell();
     recoveryFormLoadingScript();
 ?>
+<script type="module" src="<?= \htmlspecialchars(RECOVERY_BEER_JS) ?>"></script>
+<script type="module" src="<?= \htmlspecialchars(RECOVERY_BEER_COLORS_JS) ?>"></script>
 </body>
 </html>
 <?php
@@ -5127,6 +5364,8 @@ function recoveryRenderBreadcrumb(int $mode, string $authHash): void
         RECOVERY_MODE_PACKAGE_LIST_REPAIR => 'Paketliste',
         RECOVERY_MODE_PACKAGE_FILE_REPAIR => 'Dateien reparieren',
         RECOVERY_MODE_SYSTEM_CHECK => 'System-Check',
+        RECOVERY_MODE_BACKUP_GUIDE => 'Datensicherung',
+        RECOVERY_MODE_DIRECTORY_STRUCTURE => 'Verzeichnisstruktur',
     ];
 
     if (isset($labels[$mode])) {
@@ -5181,6 +5420,16 @@ function recoveryRenderExpertModesGrid(string $authHash): void
             <strong>System-Check</strong>
             <span>PHP, Rechte, DB, Assets</span>
         </a>
+        <a href="<?= \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_BACKUP_GUIDE, $authHash)) ?>" class="mode-button">
+            <i class="fa-solid fa-database"></i>
+            <strong>Datensicherung</strong>
+            <span>Backup-Befehle &amp; Checkliste</span>
+        </a>
+        <a href="<?= \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_DIRECTORY_STRUCTURE, $authHash)) ?>" class="mode-button">
+            <i class="fa-solid fa-folder-tree"></i>
+            <strong>Verzeichnisstruktur</strong>
+            <span>Applications &amp; Pfade prüfen</span>
+        </a>
     </div>
     <?php
 }
@@ -5201,6 +5450,10 @@ function recoveryRenderGlobalNav(int $mode, string $authHash, string $baseUrl): 
     }
     echo '<a href="' . \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_SYSTEM_CHECK, $authHash)) . '" class="recovery-nav-link">'
         . '<i class="fa-solid fa-stethoscope"></i> System-Check</a>';
+    echo '<a href="' . \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_BACKUP_GUIDE, $authHash)) . '" class="recovery-nav-link">'
+        . '<i class="fa-solid fa-database"></i> Backup</a>';
+    echo '<a href="' . \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_DIRECTORY_STRUCTURE, $authHash)) . '" class="recovery-nav-link">'
+        . '<i class="fa-solid fa-folder-tree"></i> Pfade</a>';
     echo '</nav>';
 }
 
@@ -8521,6 +8774,12 @@ elseif ($mode === RECOVERY_MODE_PLUGIN_UNINSTALL) {
                     echo '<input type="hidden" name="uninstall_step" value="1">';
 
                     // Dry-Run Toggle
+                    echo '<article class="border round medium-padding margin-bottom-medium" style="border-color:var(--error,#c62828)">';
+                    echo '<p style="margin:0"><strong><i class="fa-solid fa-database"></i> Vor dem Entfernen:</strong> ';
+                    echo '<a href="' . \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_BACKUP_GUIDE, $authHash)) . '">Datensicherung</a> ';
+                    echo 'anlegen (DB + Dateien) — siehe <a href="https://manual.woltlab.com/de/backup/" target="_blank" rel="noopener">WoltLab-Handbuch</a>.</p>';
+                    echo '</article>';
+
                     echo '<div class="alert alert-warning" style="margin-bottom:20px">';
                     echo '<label style="cursor:pointer"><input type="checkbox" name="dry_run" id="recoveryDryRunToggle" value="1" style="margin-right:6px">';
                     echo '<strong>Dry-Run-Modus:</strong> Zeigt was gelöscht WÜRDE, ohne tatsächliche Änderungen vorzunehmen</label>';
@@ -10178,6 +10437,27 @@ elseif ($mode === RECOVERY_MODE_SYSTEM_CHECK) {
     $wcfDirCheck = \rtrim(WCF_DIR, '/\\') . \DIRECTORY_SEPARATOR;
     $assetsCheck = recoveryGetSetupAssets();
     recoveryRenderSystemCheckPage($authHash, $wcfDirCheck, $db, WCF_N, $assetsCheck);
+}
+
+// ============================================================================
+// MODUS 9: DATENSICHERUNG (Handbuch)
+// ============================================================================
+
+elseif ($mode === RECOVERY_MODE_BACKUP_GUIDE) {
+    recoveryRenderBackupGuidePage($authHash, \rtrim(WCF_DIR, '/\\') . \DIRECTORY_SEPARATOR);
+}
+
+// ============================================================================
+// MODUS 10: VERZEICHNISSTRUKTUR (Handbuch)
+// ============================================================================
+
+elseif ($mode === RECOVERY_MODE_DIRECTORY_STRUCTURE) {
+    recoveryRenderDirectoryStructurePage(
+        $authHash,
+        \rtrim(WCF_DIR, '/\\') . \DIRECTORY_SEPARATOR,
+        $db,
+        WCF_N
+    );
 }
 
 }
