@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.15
+ * @version 1.5.16
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.15');
+define('RECOVERY_VERSION', '1.5.16');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
 if (\PHP_VERSION_ID < 80100) {
@@ -153,6 +153,7 @@ define('RECOVERY_MODE_USER_MANAGEMENT', 3);
 define('RECOVERY_MODE_CACHE_CLEAR', 4);
 define('RECOVERY_MODE_PACKAGE_LIST_REPAIR', 5);
 define('RECOVERY_MODE_PACKAGE_FILE_REPAIR', 6);
+define('RECOVERY_MODE_RECOVERY_WIZARD', 7);
 
 /** Stack-Traces nur bei true oder ?debug=1 (mit gültigem Auth-Token). */
 define('RECOVERY_ENABLE_DEBUG', false);
@@ -3839,42 +3840,32 @@ function recoveryExtractPackageInstructionTars(string $extractDir, array &$log):
         'wcfRoot' => null,
     ];
 
-    $filesTar = findFileInExtractDir($extractDir, '', 'files.tar', ['files.tar']);
-    if ($filesTar && \is_file($filesTar)) {
-        $dest = $extractDir . '/_recovery_payload_app';
-        if (!\is_dir($dest) && !@\mkdir($dest, 0755, true)) {
-            $log[] = 'Entpack-Ziel für files.tar nicht anlegbar.';
+    $instructions = recoveryDiscoverFileInstructionTarsFromPackageXml($extractDir);
+    foreach ($instructions as $instr) {
+        $tarName = (string) $instr['tar'];
+        $target = (string) $instr['target'];
+        $tarPath = findFileInExtractDir($extractDir, '', $tarName, [$tarName]);
+        if (!$tarPath || !\is_file($tarPath)) {
+            $log[] = $tarName . ' im Archiv nicht gefunden (package.xml-Instruction).';
 
-            return null;
+            continue;
         }
-        if (extractArchive($filesTar, $dest)) {
-            $payload['appRoot'] = $dest;
-            $log[] = 'files.tar entpackt.';
+        $subdir = ($target === 'wcf') ? '_recovery_payload_wcf' : '_recovery_payload_app';
+        $root = recoveryExtractPayloadRootForTar($extractDir, $tarPath, $subdir, $log);
+        if ($root === null) {
+            continue;
+        }
+        if ($target === 'wcf') {
+            $payload['wcfRoot'] = $root;
+            $log[] = $tarName . ' → WCF-Root entpackt.';
         } else {
-            $log[] = 'files.tar konnte nicht entpackt werden.';
-        }
-    } else {
-        $log[] = 'files.tar im Archiv nicht gefunden.';
-    }
-
-    $wcfTar = findFileInExtractDir($extractDir, '', 'files_wcf.tar', ['files_wcf.tar']);
-    if ($wcfTar && \is_file($wcfTar)) {
-        $destWcf = $extractDir . '/_recovery_payload_wcf';
-        if (!\is_dir($destWcf) && !@\mkdir($destWcf, 0755, true)) {
-            $log[] = 'Entpack-Ziel für files_wcf.tar nicht anlegbar.';
-
-            return null;
-        }
-        if (extractArchive($wcfTar, $destWcf)) {
-            $payload['wcfRoot'] = $destWcf;
-            $log[] = 'files_wcf.tar entpackt.';
-        } else {
-            $log[] = 'files_wcf.tar konnte nicht entpackt werden.';
+            $payload['appRoot'] = $root;
+            $log[] = $tarName . ' → App-Root entpackt.';
         }
     }
 
     if ($payload['appRoot'] === null && $payload['wcfRoot'] === null) {
-        $log[] = 'Weder files.tar noch files_wcf.tar nutzbar.';
+        $log[] = 'Keine nutzbaren file-Instructions aus package.xml.';
 
         return null;
     }
@@ -4064,6 +4055,268 @@ function recoveryRepairMissingPluginFilesFromPayload(
     }
 
     return $copied;
+}
+
+// ============================================================================
+// RECOVERY-WIZARD (Diagnose → Plan → Ausführung, halbautomatisch)
+// ============================================================================
+
+/**
+ * Ermittelt file-Instructions aus package.xml (angelehnt an wspackager / build.sh parse_package_instructions).
+ *
+ * @return list<array{tar: string, target: string}>
+ */
+function recoveryDiscoverFileInstructionTarsFromPackageXml(string $extractDir): array
+{
+    $packageXml = findFileInExtractDir($extractDir, '', 'package.xml');
+    if (!$packageXml) {
+        return [['tar' => 'files.tar', 'target' => 'app'], ['tar' => 'files_wcf.tar', 'target' => 'wcf']];
+    }
+
+    $parsed = parsePackageXml($packageXml);
+    $found = [];
+    $hasDefaultAppFile = false;
+
+    if (\is_array($parsed) && !empty($parsed['instructions'])) {
+        foreach ($parsed['instructions'] as $instr) {
+            $type = (string) ($instr['type'] ?? '');
+            if ($type !== 'file') {
+                continue;
+            }
+            $path = \trim((string) ($instr['path'] ?? ''));
+            $app = \trim((string) ($instr['application'] ?? ''));
+            if ($path === '') {
+                if ($app === 'wcf') {
+                    $found['files_wcf.tar'] = 'wcf';
+                } else {
+                    $hasDefaultAppFile = true;
+                }
+                continue;
+            }
+            if (!\preg_match('/\.(tar|tar\.gz|tgz)$/i', $path)) {
+                continue;
+            }
+            $target = ($app === 'wcf') ? 'wcf' : 'app';
+            $found[$path] = $target;
+        }
+    }
+
+    if ($hasDefaultAppFile || $found === []) {
+        $found['files.tar'] = 'app';
+    }
+    if (!isset($found['files_wcf.tar'])) {
+        $wcfTar = findFileInExtractDir($extractDir, '', 'files_wcf.tar', ['files_wcf.tar']);
+        if ($wcfTar) {
+            $found['files_wcf.tar'] = 'wcf';
+        }
+    }
+
+    $out = [];
+    foreach ($found as $tar => $target) {
+        $out[] = ['tar' => $tar, 'target' => $target];
+    }
+
+    return $out;
+}
+
+/**
+ * @param list<array{tar: string, target: string}> $instructions
+ */
+function recoveryExtractPayloadRootForTar(string $extractDir, string $tarFile, string $destSubdir, array &$log): ?string
+{
+    $dest = $extractDir . '/' . $destSubdir;
+    if (!\is_dir($dest) && !@\mkdir($dest, 0755, true)) {
+        $log[] = 'Entpack-Ziel nicht anlegbar: ' . $destSubdir;
+
+        return null;
+    }
+    if (!extractArchive($tarFile, $dest)) {
+        $log[] = 'Archiv konnte nicht entpackt werden: ' . \basename($tarFile);
+
+        return null;
+    }
+
+    return $dest;
+}
+
+/**
+ * System-Diagnose für Wizard Schritt 1.
+ *
+ * @return array{
+ *   missingBootstrapClasses: list<string>,
+ *   orphanApplicationCount: int,
+ *   logExcerpts: list<string>,
+ *   suggestedActions: array{orphans: bool, files: bool, cache: bool}
+ * }
+ */
+function recoveryBuildSystemDiagnosis(string $wcfDir, \wcf\system\database\Database $db, int $wcfN): array
+{
+    $missing = recoveryFindMissingBootstrapClasses($wcfDir);
+    $orphanCount = 0;
+    try {
+        $sql = "SELECT COUNT(*) AS c FROM wcf{$wcfN}_application a
+                LEFT JOIN wcf{$wcfN}_package p ON a.packageID = p.packageID
+                WHERE p.packageID IS NULL";
+        $statement = $db->prepareStatement($sql);
+        $statement->execute();
+        $row = $statement->fetchArray();
+        $orphanCount = (int) ($row['c'] ?? 0);
+    } catch (\Throwable $ignored) {
+    }
+
+    $logExcerpts = recoveryScanWoltLabLogForRecentErrors($wcfDir, 50);
+
+    return [
+        'missingBootstrapClasses' => $missing,
+        'orphanApplicationCount' => $orphanCount,
+        'logExcerpts' => $logExcerpts,
+        'suggestedActions' => [
+            'orphans' => $orphanCount > 0,
+            'files' => $missing !== [],
+            'cache' => true,
+        ],
+    ];
+}
+
+/**
+ * @return list<string>
+ */
+function recoveryScanWoltLabLogForRecentErrors(string $wcfDir, int $maxLines = 40): array
+{
+    $logDir = \rtrim($wcfDir, '/\\') . '/log';
+    if (!\is_dir($logDir)) {
+        return [];
+    }
+
+    $files = \glob($logDir . '/*.txt') ?: [];
+    if ($files === []) {
+        return [];
+    }
+
+    \usort($files, static function ($a, $b): int {
+        return (\filemtime((string) $b) ?: 0) <=> (\filemtime((string) $a) ?: 0);
+    });
+
+    $content = @\file_get_contents($files[0]);
+    if ($content === false || $content === '') {
+        return [];
+    }
+
+    $lines = \preg_split('/\r\n|\r|\n/', $content) ?: [];
+    $hits = [];
+    $needles = ['ClassNotFoundException', 'Undefined constant', 'Fatal error', 'Error Message:'];
+
+    foreach (\array_slice($lines, -500) as $line) {
+        $line = \trim((string) $line);
+        if ($line === '') {
+            continue;
+        }
+        foreach ($needles as $needle) {
+            if (\str_contains($line, $needle)) {
+                $hits[] = $line;
+                break;
+            }
+        }
+        if (\count($hits) >= $maxLines) {
+            break;
+        }
+    }
+
+    return \array_slice($hits, -$maxLines);
+}
+
+function recoveryWizardLoadState(string $authHash): array
+{
+    recoveryEnsureSession();
+
+    return $_SESSION['recovery_wizard'][$authHash] ?? [];
+}
+
+function recoveryWizardSaveState(string $authHash, array $state): void
+{
+    recoveryEnsureSession();
+    $_SESSION['recovery_wizard'][$authHash] = $state;
+}
+
+/**
+ * @param array{orphans?: bool, files?: bool, cache?: bool, extractDir?: string|null, classes?: list<string>} $plan
+ * @return array{log: list<string>, copiedFiles: list<string>, cacheDeleted: int}
+ */
+function recoveryWizardExecutePlan(
+    string $wcfDir,
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    array $plan,
+    array &$log
+): array {
+    $copiedFiles = [];
+    $cacheDeleted = 0;
+
+    if (!empty($plan['orphans'])) {
+        $orphanResult = recoveryRepairOrphanedPackageReferences($db, $wcfN);
+        foreach ($orphanResult['log'] as $entry) {
+            $log[] = '[Paketliste] ' . $entry;
+        }
+    }
+
+    if (!empty($plan['files'])) {
+        $extractDir = isset($plan['extractDir']) ? (string) $plan['extractDir'] : '';
+        if ($extractDir === '' || !\is_dir($extractDir)) {
+            $log[] = '[Dateien] Kein gültiges Paket-Archiv – Schritt übersprungen.';
+        } else {
+            $extractLog = [];
+            $payload = recoveryExtractPackageInstructionTars($extractDir, $extractLog);
+            foreach ($extractLog as $entry) {
+                $log[] = '[Dateien] ' . $entry;
+            }
+            if ($payload !== null) {
+                $classes = $plan['classes'] ?? recoveryFindMissingBootstrapClasses($wcfDir);
+                $copiedFiles = recoveryRepairMissingPluginFilesFromPayload(
+                    $wcfDir,
+                    $payload,
+                    \is_array($classes) ? $classes : [],
+                    $log
+                );
+            }
+        }
+    }
+
+    if (!empty($plan['cache'])) {
+        $cacheDeleted = clearCompiledTemplates();
+        $optionFbLog = [];
+        recoveryEnsureOptionConstantFallbacks($db, $wcfN, $optionFbLog);
+        $log[] = '[Cache] Gelöschte Cache-Dateien: ' . $cacheDeleted;
+        foreach ($optionFbLog as $entry) {
+            $log[] = '[Cache] ' . $entry;
+        }
+    }
+
+    return [
+        'log' => $log,
+        'copiedFiles' => $copiedFiles,
+        'cacheDeleted' => $cacheDeleted,
+    ];
+}
+
+/**
+ * @param list<string> $labels
+ */
+function recoveryRenderWizardPhaseSteps(int $activeIndex, array $labels): void
+{
+    echo '<div class="wizardSteps" style="margin-bottom:24px">';
+    foreach ($labels as $i => $label) {
+        $cls = 'wizardStep';
+        if ($i < $activeIndex) {
+            $cls .= ' completed';
+        } elseif ($i === $activeIndex) {
+            $cls .= ' active';
+        }
+        echo '<div class="' . $cls . '">';
+        echo '<div class="wizardStepNumber">' . ($i + 1) . '</div>';
+        echo '<div class="wizardStepLabel">' . \htmlspecialchars($label) . '</div>';
+        echo '</div>';
+    }
+    echo '</div>';
 }
 
 /**
@@ -5039,6 +5292,11 @@ if ($mode === RECOVERY_MODE_SELECTION) {
             <i class="fa-solid fa-file-circle-plus"></i>
             <strong>Plugin-Dateien reparieren</strong>
             <span>Fehlende Klassen aus Bootstrap erkennen, aus Paket wiederherstellen, Cache leeren</span>
+        </a>
+        <a href="?mode=<?= RECOVERY_MODE_RECOVERY_WIZARD ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button" style="border-color:#369">
+            <i class="fa-solid fa-route"></i>
+            <strong>Recovery-Wizard</strong>
+            <span>Halbautomatisch: Diagnose → Plan wählen → in logischer Reihenfolge ausführen</span>
         </a>
     </div>
 
@@ -6474,6 +6732,176 @@ elseif ($mode === RECOVERY_MODE_PACKAGE_FILE_REPAIR) {
         <p style="margin-top:16px">
             <button type="submit" class="button"><i class="fa-solid fa-magnifying-glass"></i> Paket analysieren &amp; Vorschau</button>
         </p>
+    </form>
+<?php
+    }
+}
+
+// ============================================================================
+// MODUS 7: RECOVERY-WIZARD (halbautomatisch)
+// ============================================================================
+
+elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
+    $wizardUrl = recoveryBuildModeUrl(RECOVERY_MODE_RECOVERY_WIZARD, $authHash);
+    $wcfDir = \rtrim(WCF_DIR, '/\\') . \DIRECTORY_SEPARATOR;
+    $phaseLabels = ['Diagnose', 'Plan &amp; Auswahl', 'Ausführung', 'Fertig'];
+    $phase = (string) ($_POST['wizard_phase'] ?? $_GET['wizard_phase'] ?? 'diagnose');
+    $phaseIndex = match ($phase) {
+        'plan' => 1,
+        'run' => 2,
+        'done' => 3,
+        default => 0,
+    };
+
+    recoveryRenderWizardPhaseSteps($phaseIndex, ['Diagnose', 'Plan', 'Ausführung', 'Fertig']);
+?>
+    <h1>Recovery-Wizard</h1>
+    <p class="subtitle">Geführte Reparatur in sinnvoller Reihenfolge — Sie entscheiden pro Schritt, was ausgeführt wird</p>
+
+<?php
+    if ($phase === 'run' && isset($_POST['wizard_execute'])) {
+        $plan = [
+            'orphans' => !empty($_POST['do_orphans']),
+            'files' => !empty($_POST['do_files']),
+            'cache' => !empty($_POST['do_cache']),
+            'extractDir' => recoveryResolveTrustedExtractDir(),
+            'classes' => isset($_POST['repair_classes']) && \is_array($_POST['repair_classes'])
+                ? \array_values(\array_filter(\array_map('strval', $_POST['repair_classes'])))
+                : [],
+        ];
+        $execLog = [];
+        $result = recoveryWizardExecutePlan($wcfDir, $db, WCF_N, $plan, $execLog);
+        if ($plan['files']) {
+            recoveryCleanupUploadWorkspace();
+        }
+        recoveryWizardSaveState($authHash, ['lastRun' => $result]);
+?>
+    <div class="alert alert-success">
+        <strong>Ausführung abgeschlossen.</strong><br>
+        Kopierte Dateien: <?= \count($result['copiedFiles']) ?><br>
+        Cache-Dateien gelöscht: <?= (int) $result['cacheDeleted'] ?>
+    </div>
+    <pre class="recoveryLog" style="max-height:320px;overflow:auto;margin-top:12px"><?php
+        foreach ($execLog as $line) {
+            echo \htmlspecialchars($line) . "\n";
+        }
+    ?></pre>
+    <p style="margin-top:16px">
+        <a href="<?= \htmlspecialchars($wizardUrl . '&wizard_phase=done') ?>" class="button">Weiter zur Zusammenfassung</a>
+        <a href="<?= \htmlspecialchars($recoveryBaseUrl . 'acp/') ?>" class="button" style="margin-left:8px">ACP testen</a>
+    </p>
+<?php
+    } elseif ($phase === 'done') {
+        $state = recoveryWizardLoadState($authHash);
+?>
+    <div class="alert alert-info">
+        <strong>Wizard abgeschlossen.</strong> Einzelne Modi (ACP Repair, Cache Clear, …) bleiben weiterhin manuell nutzbar.
+    </div>
+    <p><a href="<?= \htmlspecialchars($recoveryBaseUrl . 'acp/') ?>" class="button"><i class="fa-solid fa-gauge-high"></i> Zum ACP</a></p>
+    <p style="margin-top:12px"><a href="<?= \htmlspecialchars($wizardUrl . '&wizard_phase=diagnose') ?>">Wizard von vorn beginnen</a></p>
+<?php
+    } elseif ($phase === 'plan' || isset($_POST['wizard_to_plan'])) {
+        if (recoveryHasUploadedPackageFile()) {
+            $upload = recoveryHandlePackageUpload($_FILES['package_file']);
+            if ($upload['ok'] && !empty($upload['extractDir'])) {
+                recoveryStorePackageContext($authHash, (string) $upload['packageIdentifier'], $upload['extractDir']);
+            }
+        }
+        $state = recoveryWizardLoadState($authHash);
+        $diag = $state['diagnosis'] ?? recoveryBuildSystemDiagnosis($wcfDir, $db, WCF_N);
+        $suggest = $diag['suggestedActions'] ?? ['orphans' => false, 'files' => false, 'cache' => true];
+        $missing = $diag['missingBootstrapClasses'] ?? recoveryFindMissingBootstrapClasses($wcfDir);
+        $extractDir = recoveryResolveTrustedExtractDir();
+?>
+    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($wizardUrl) ?>">
+        <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_RECOVERY_WIZARD, $authHash); ?>
+        <input type="hidden" name="wizard_phase" value="run">
+        <input type="hidden" name="wizard_execute" value="1">
+        <?php if ($extractDir): ?>
+        <input type="hidden" name="extract_dir" value="<?= \htmlspecialchars($extractDir) ?>">
+        <?php endif; ?>
+
+        <h2>Schritte auswählen (Reihenfolge bei Ausführung)</h2>
+        <ol style="margin:0 0 16px 20px;color:#9D9D9D">
+            <li>Paketliste bereinigen (verwaiste DB-Einträge)</li>
+            <li>Fehlende Plugin-Dateien aus Archiv</li>
+            <li>Cache leeren + Option-Konstanten-Fallback</li>
+        </ol>
+
+        <p><label><input type="checkbox" name="do_orphans" value="1" <?= !empty($suggest['orphans']) ? 'checked' : '' ?>>
+            <strong>1. Paketliste reparieren</strong> (<?= (int) ($diag['orphanApplicationCount'] ?? 0) ?> verwaiste Applications)</label></p>
+
+        <p><label><input type="checkbox" name="do_files" value="1" <?= !empty($suggest['files']) ? 'checked' : '' ?>>
+            <strong>2. Plugin-Dateien wiederherstellen</strong> (<?= \count($missing) ?> fehlende Klassen)</label></p>
+
+        <?php if ($missing !== []): ?>
+        <ul style="margin:4px 0 12px 24px">
+        <?php foreach ($missing as $cn): ?>
+            <li><label><input type="checkbox" name="repair_classes[]" value="<?= \htmlspecialchars($cn) ?>" checked>
+                <code><?= \htmlspecialchars($cn) ?></code></label></li>
+        <?php endforeach; ?>
+        </ul>
+        <?php endif; ?>
+
+        <?php if (!$extractDir): ?>
+        <div class="alert alert-warning" style="margin:12px 0">
+            Für Schritt 2: <strong>Paket-Archiv hochladen</strong> (package.xml mit files.tar / files_wcf.tar — wie vom
+            <a href="https://github.com/SoftCreatRMedia/wspackager" target="_blank" rel="noopener">wspackager</a> gebaut).
+        </div>
+        <label for="wizard_package_file">Paket (.tar.gz)</label>
+        <input type="file" name="package_file" id="wizard_package_file" accept=".tar,.tar.gz,.tgz">
+        <?php else: ?>
+        <p class="alert alert-success" style="margin:12px 0">Paket in Session: <code><?= \htmlspecialchars($extractDir) ?></code></p>
+        <?php endif; ?>
+
+        <p><label><input type="checkbox" name="do_cache" value="1" checked>
+            <strong>3. Cache leeren</strong> + options.inc.php-Fallback (empfohlen)</label></p>
+
+        <p style="margin-top:20px">
+            <button type="submit" class="btn-danger"><i class="fa-solid fa-play"></i> Ausgewählte Schritte jetzt ausführen</button>
+            <a href="<?= \htmlspecialchars($wizardUrl . '&wizard_phase=diagnose') ?>" class="back-link" style="margin-left:12px">Zurück zur Diagnose</a>
+        </p>
+    </form>
+<?php
+    } else {
+        $diag = recoveryBuildSystemDiagnosis($wcfDir, $db, WCF_N);
+        recoveryWizardSaveState($authHash, ['diagnosis' => $diag]);
+?>
+    <div class="alert alert-info">
+        <strong>Schritt 1 — automatische Diagnose</strong> (Live-Installation, Log unter <code>log/</code>, Bootstrap-Scan).
+        Angelehnt an die Paket-Struktur aus <code>package.xml</code> (wie
+        <a href="https://github.com/SoftCreatRMedia/wspackager" target="_blank" rel="noopener">wspackager</a> /
+        <a href="https://github.com/benjarogit/simple-woltlab-plugin-manager" target="_blank" rel="noopener">simple-woltlab-plugin-manager</a>).
+    </div>
+
+    <h2>Ergebnis</h2>
+    <table class="table" style="width:100%;margin-bottom:16px">
+        <tr><th>Fehlende Bootstrap-Klassen</th><td><?= \count($diag['missingBootstrapClasses']) ?></td></tr>
+        <tr><th>Verwaiste Applications (DB)</th><td><?= (int) $diag['orphanApplicationCount'] ?></td></tr>
+        <tr><th>Log-Hinweise (letzte Datei)</th><td><?= \count($diag['logExcerpts']) ?> Treffer</td></tr>
+    </table>
+
+    <?php if ($diag['missingBootstrapClasses'] !== []): ?>
+    <div class="alert alert-error">
+        <strong>Fehlende Klassen:</strong>
+        <ul style="margin:8px 0 0 20px"><?php foreach ($diag['missingBootstrapClasses'] as $cn): ?>
+            <li><code><?= \htmlspecialchars($cn) ?></code></li>
+        <?php endforeach; ?></ul>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($diag['logExcerpts'] !== []): ?>
+    <details><summary>Log-Auszug</summary>
+    <pre class="recoveryLog"><?php foreach ($diag['logExcerpts'] as $line) {
+        echo \htmlspecialchars($line) . "\n";
+    } ?></pre></details>
+    <?php endif; ?>
+
+    <form method="POST" action="<?= \htmlspecialchars($wizardUrl) ?>">
+        <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_RECOVERY_WIZARD, $authHash); ?>
+        <input type="hidden" name="wizard_phase" value="plan">
+        <input type="hidden" name="wizard_to_plan" value="1">
+        <button type="submit" class="button"><i class="fa-solid fa-arrow-right"></i> Weiter — Plan &amp; Auswahl</button>
     </form>
 <?php
     }
