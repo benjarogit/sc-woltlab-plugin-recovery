@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.14
+ * @version 1.5.15
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.14');
+define('RECOVERY_VERSION', '1.5.15');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
 if (\PHP_VERSION_ID < 80100) {
@@ -152,6 +152,7 @@ define('RECOVERY_MODE_PLUGIN_UNINSTALL', 2);
 define('RECOVERY_MODE_USER_MANAGEMENT', 3);
 define('RECOVERY_MODE_CACHE_CLEAR', 4);
 define('RECOVERY_MODE_PACKAGE_LIST_REPAIR', 5);
+define('RECOVERY_MODE_PACKAGE_FILE_REPAIR', 6);
 
 /** Stack-Traces nur bei true oder ?debug=1 (mit gültigem Auth-Token). */
 define('RECOVERY_ENABLE_DEBUG', false);
@@ -3774,6 +3775,297 @@ function clearCompiledTemplates(): int
     return $deletedTotal;
 }
 
+// ============================================================================
+// PLUGIN-DATEIEN REPARIEREN (fehlende Klassen aus Bootstrap + Paket-Archiv)
+// ============================================================================
+
+/**
+ * @return array{package: string, applicationDirectory: string}|null
+ */
+function recoveryParsePackageMetaFromExtractDir(string $extractDir): ?array
+{
+    $packageXml = findFileInExtractDir($extractDir, '', 'package.xml');
+    if (!$packageXml) {
+        return null;
+    }
+
+    $xml = @\simplexml_load_file($packageXml);
+    if ($xml === false) {
+        return null;
+    }
+
+    $package = \trim((string) ($xml['name'] ?? ''));
+    $applicationDirectory = '';
+    if (isset($xml->packageinformation->applicationdirectory)) {
+        $applicationDirectory = \trim((string) $xml->packageinformation->applicationdirectory);
+    }
+
+    if ($applicationDirectory === '' && $package !== '') {
+        $parts = \explode('.', $package);
+        $guess = (string) \end($parts);
+        if (recoveryValidateAppDirectoryName($guess)) {
+            $applicationDirectory = $guess;
+        }
+    }
+
+    if ($package === '') {
+        return null;
+    }
+
+    return [
+        'package' => $package,
+        'applicationDirectory' => $applicationDirectory,
+    ];
+}
+
+/**
+ * Entpackt files.tar / files_wcf.tar aus einem Plugin-Archiv in Unterordner.
+ *
+ * @return array{package: string, applicationDirectory: string, appRoot: string|null, wcfRoot: string|null}|null
+ */
+function recoveryExtractPackageInstructionTars(string $extractDir, array &$log): ?array
+{
+    $meta = recoveryParsePackageMetaFromExtractDir($extractDir);
+    if ($meta === null) {
+        $log[] = 'package.xml konnte nicht gelesen werden.';
+
+        return null;
+    }
+
+    $payload = [
+        'package' => $meta['package'],
+        'applicationDirectory' => $meta['applicationDirectory'],
+        'appRoot' => null,
+        'wcfRoot' => null,
+    ];
+
+    $filesTar = findFileInExtractDir($extractDir, '', 'files.tar', ['files.tar']);
+    if ($filesTar && \is_file($filesTar)) {
+        $dest = $extractDir . '/_recovery_payload_app';
+        if (!\is_dir($dest) && !@\mkdir($dest, 0755, true)) {
+            $log[] = 'Entpack-Ziel für files.tar nicht anlegbar.';
+
+            return null;
+        }
+        if (extractArchive($filesTar, $dest)) {
+            $payload['appRoot'] = $dest;
+            $log[] = 'files.tar entpackt.';
+        } else {
+            $log[] = 'files.tar konnte nicht entpackt werden.';
+        }
+    } else {
+        $log[] = 'files.tar im Archiv nicht gefunden.';
+    }
+
+    $wcfTar = findFileInExtractDir($extractDir, '', 'files_wcf.tar', ['files_wcf.tar']);
+    if ($wcfTar && \is_file($wcfTar)) {
+        $destWcf = $extractDir . '/_recovery_payload_wcf';
+        if (!\is_dir($destWcf) && !@\mkdir($destWcf, 0755, true)) {
+            $log[] = 'Entpack-Ziel für files_wcf.tar nicht anlegbar.';
+
+            return null;
+        }
+        if (extractArchive($wcfTar, $destWcf)) {
+            $payload['wcfRoot'] = $destWcf;
+            $log[] = 'files_wcf.tar entpackt.';
+        } else {
+            $log[] = 'files_wcf.tar konnte nicht entpackt werden.';
+        }
+    }
+
+    if ($payload['appRoot'] === null && $payload['wcfRoot'] === null) {
+        $log[] = 'Weder files.tar noch files_wcf.tar nutzbar.';
+
+        return null;
+    }
+
+    return $payload;
+}
+
+/**
+ * WoltLab-Klassenname → lib/…/*.class.php (erstes Segment = App, z. B. shrinkr).
+ *
+ * @return array{application: string, relative: string}|null
+ */
+function recoveryClassNameToLibRelativePath(string $className): ?array
+{
+    $className = \ltrim($className, '\\');
+    if (!\preg_match('/^[a-z][a-z0-9_\\\\]*\\\\[A-Za-z][A-Za-z0-9_]+$/', $className)) {
+        return null;
+    }
+
+    $parts = \explode('\\', $className);
+    $application = (string) \array_shift($parts);
+    $shortClass = (string) \array_pop($parts);
+    $middle = $parts !== [] ? \implode('/', $parts) . '/' : '';
+
+    return [
+        'application' => $application,
+        'relative' => 'lib/' . $middle . $shortClass . '.class.php',
+    ];
+}
+
+/**
+ * @return list<string> FQCN aus lib/bootstrap/*.php (::class-Referenzen)
+ */
+function recoveryCollectBootstrapReferencedClasses(string $wcfDir): array
+{
+    $bootstrapDir = \rtrim($wcfDir, '/\\') . '/lib/bootstrap';
+    if (!\is_dir($bootstrapDir)) {
+        return [];
+    }
+
+    $classes = [];
+    foreach (\glob($bootstrapDir . '/*.php') ?: [] as $bootstrapFile) {
+        $content = @\file_get_contents($bootstrapFile);
+        if ($content === false || $content === '') {
+            continue;
+        }
+        if (!\preg_match_all(
+            '/\\\\?([a-z][a-z0-9_\\\\]*\\\\[A-Za-z][A-Za-z0-9_]+)::class/',
+            $content,
+            $matches
+        )) {
+            continue;
+        }
+        foreach ($matches[1] as $raw) {
+            $cn = \ltrim(\str_replace('\\\\', '\\', (string) $raw), '\\');
+            if ($cn !== '') {
+                $classes[$cn] = true;
+            }
+        }
+    }
+
+    $list = \array_keys($classes);
+    \sort($list);
+
+    return $list;
+}
+
+function recoveryIsPluginClassFilePresent(string $wcfDir, string $className): bool
+{
+    $map = recoveryClassNameToLibRelativePath($className);
+    if ($map === null) {
+        return true;
+    }
+
+    $wcfRoot = \rtrim($wcfDir, '/\\') . \DIRECTORY_SEPARATOR;
+    if ($map['application'] === 'wcf') {
+        $path = $wcfRoot . \str_replace('/', \DIRECTORY_SEPARATOR, $map['relative']);
+    } else {
+        if (!recoveryValidateAppDirectoryName($map['application'])) {
+            return true;
+        }
+        $path = $wcfRoot . $map['application'] . \DIRECTORY_SEPARATOR
+            . \str_replace('/', \DIRECTORY_SEPARATOR, $map['relative']);
+    }
+
+    return \is_file($path);
+}
+
+/**
+ * Klassen, die in Bootstrap registriert sind, deren .class.php auf dem Server fehlt.
+ *
+ * @return list<string>
+ */
+function recoveryFindMissingBootstrapClasses(string $wcfDir): array
+{
+    $missing = [];
+    foreach (recoveryCollectBootstrapReferencedClasses($wcfDir) as $class) {
+        if (!recoveryIsPluginClassFilePresent($wcfDir, $class)) {
+            $missing[] = $class;
+        }
+    }
+
+    return $missing;
+}
+
+/**
+ * Kopiert fehlende Klassen + Bootstrap aus Paket-Payload ins Installationsverzeichnis.
+ *
+ * @param array{package: string, applicationDirectory: string, appRoot: string|null, wcfRoot: string|null} $payload
+ * @param list<string> $missingClasses
+ * @return list<string> relative Pfade der kopierten Dateien
+ */
+function recoveryRepairMissingPluginFilesFromPayload(
+    string $wcfDir,
+    array $payload,
+    array $missingClasses,
+    array &$log
+): array {
+    $copied = [];
+    $wcfRoot = \rtrim($wcfDir, '/\\') . \DIRECTORY_SEPARATOR;
+    $expectedApp = (string) ($payload['applicationDirectory'] ?? '');
+
+    foreach ($missingClasses as $class) {
+        $map = recoveryClassNameToLibRelativePath($class);
+        if ($map === null) {
+            continue;
+        }
+
+        if ($map['application'] === 'wcf') {
+            $srcRoot = $payload['wcfRoot'] ?? null;
+            $destRoot = $wcfRoot;
+        } else {
+            if ($expectedApp !== '' && $map['application'] !== $expectedApp) {
+                $log[] = 'Übersprungen (andere App): ' . $class;
+
+                continue;
+            }
+            $srcRoot = $payload['appRoot'] ?? null;
+            $destRoot = $wcfRoot . $map['application'] . \DIRECTORY_SEPARATOR;
+        }
+
+        if ($srcRoot === null) {
+            $log[] = 'Kein Paket-Root für: ' . $class;
+
+            continue;
+        }
+
+        $rel = \str_replace('\\', '/', $map['relative']);
+        $src = \rtrim($srcRoot, '/\\') . '/' . $rel;
+        $dest = \rtrim($destRoot, '/\\') . \DIRECTORY_SEPARATOR . \str_replace('/', \DIRECTORY_SEPARATOR, $rel);
+
+        if (!\is_file($src)) {
+            $log[] = 'Im Paket nicht gefunden: ' . $rel;
+
+            continue;
+        }
+
+        $destDir = \dirname($dest);
+        if (!\is_dir($destDir) && !@\mkdir($destDir, 0755, true)) {
+            $log[] = 'Zielverzeichnis nicht anlegbar: ' . $destDir;
+
+            continue;
+        }
+
+        if (@\copy($src, $dest)) {
+            $copied[] = $rel;
+            $log[] = 'Kopiert: ' . $map['application'] . '/' . $rel;
+        } else {
+            $log[] = 'Kopieren fehlgeschlagen: ' . $dest;
+        }
+    }
+
+    $packageId = (string) ($payload['package'] ?? '');
+    if ($packageId !== '' && !empty($payload['wcfRoot'])) {
+        $bootstrapName = $packageId . '.php';
+        $srcBootstrap = \rtrim((string) $payload['wcfRoot'], '/\\') . '/lib/bootstrap/' . $bootstrapName;
+        $destBootstrap = $wcfRoot . 'lib/bootstrap/' . $bootstrapName;
+        if (\is_file($srcBootstrap)) {
+            $bootstrapDir = \dirname($destBootstrap);
+            if (!\is_dir($bootstrapDir) && !@\mkdir($bootstrapDir, 0755, true)) {
+                $log[] = 'lib/bootstrap/ nicht anlegbar.';
+            } elseif (@\copy($srcBootstrap, $destBootstrap)) {
+                $copied[] = 'lib/bootstrap/' . $bootstrapName;
+                $log[] = 'Bootstrap synchronisiert: lib/bootstrap/' . $bootstrapName;
+            }
+        }
+    }
+
+    return $copied;
+}
+
 /**
  * Löscht Recovery-Hilfsdateien (nicht plugin-recovery-tool.php – das erfolgt per Shutdown).
  */
@@ -4742,6 +5034,11 @@ if ($mode === RECOVERY_MODE_SELECTION) {
             <i class="fa-solid fa-list-check"></i>
             <strong>Paketliste reparieren</strong>
             <span>Entfernt verwaiste Queue-/Application-Einträge (ACP-Paketliste)</span>
+        </a>
+        <a href="?mode=<?= RECOVERY_MODE_PACKAGE_FILE_REPAIR ?>&amp;t=<?= htmlspecialchars($authHash) ?>" class="mode-button">
+            <i class="fa-solid fa-file-circle-plus"></i>
+            <strong>Plugin-Dateien reparieren</strong>
+            <span>Fehlende Klassen aus Bootstrap erkennen, aus Paket wiederherstellen, Cache leeren</span>
         </a>
     </div>
 
@@ -6032,6 +6329,153 @@ elseif ($mode === RECOVERY_MODE_PACKAGE_LIST_REPAIR) {
                 . \htmlspecialchars(recoveryFormatUserError($e)) . '</div>';
             recoveryRenderExceptionDetails($e);
         }
+    }
+}
+
+// ============================================================================
+// MODUS 6: PLUGIN-DATEIEN REPARIEREN
+// ============================================================================
+
+elseif ($mode === RECOVERY_MODE_PACKAGE_FILE_REPAIR) {
+    $fileRepairUrl = recoveryBuildModeUrl(RECOVERY_MODE_PACKAGE_FILE_REPAIR, $authHash);
+    $wcfDir = \rtrim(WCF_DIR, '/\\') . \DIRECTORY_SEPARATOR;
+    $liveMissing = recoveryFindMissingBootstrapClasses($wcfDir);
+?>
+    <h1>Plugin-Dateien reparieren</h1>
+    <p class="subtitle">Fehlende PHP-Klassen (Bootstrap-Registrierung) aus hochgeladenem Paket wiederherstellen</p>
+
+<?php
+    recoveryFormLoadingScript();
+    if (recoveryWasPostTruncated()) {
+        recoveryRenderPostTruncatedWarning();
+    }
+
+    if (isset($_POST['confirm_file_repair'])) {
+        $repairLog = [];
+        $extractDir = recoveryResolveTrustedExtractDir();
+        if ($extractDir === null) {
+            echo '<div class="alert alert-error"><strong>Kein gültiges Paket-Archiv in der Session.</strong> Bitte erneut hochladen.</div>';
+        } else {
+            $payload = recoveryExtractPackageInstructionTars($extractDir, $repairLog);
+            if ($payload === null) {
+                echo '<div class="alert alert-error"><strong>Paket konnte nicht ausgewertet werden.</strong><br>';
+                foreach ($repairLog as $line) {
+                    echo \htmlspecialchars($line) . '<br>';
+                }
+                echo '</div>';
+            } else {
+                $toRestore = $liveMissing;
+                if (isset($_POST['repair_classes']) && \is_array($_POST['repair_classes'])) {
+                    $toRestore = [];
+                    foreach ($_POST['repair_classes'] as $cn) {
+                        $cn = \trim((string) $cn);
+                        if ($cn !== '') {
+                            $toRestore[] = $cn;
+                        }
+                    }
+                }
+                $copied = recoveryRepairMissingPluginFilesFromPayload($wcfDir, $payload, $toRestore, $repairLog);
+                $deletedFiles = clearCompiledTemplates();
+                $optionFbLog = [];
+                recoveryEnsureOptionConstantFallbacks($db, WCF_N, $optionFbLog);
+                recoveryCleanupUploadWorkspace();
+
+                echo '<div class="alert alert-success">';
+                echo '<strong>Reparatur abgeschlossen.</strong><br>';
+                echo 'Kopierte Dateien: ' . \count($copied) . '<br>';
+                echo 'Cache-Dateien gelöscht: ' . (int) $deletedFiles . '<br><br>';
+                foreach ($repairLog as $line) {
+                    echo '• ' . \htmlspecialchars($line) . '<br>';
+                }
+                foreach ($optionFbLog as $fbEntry) {
+                    echo \htmlspecialchars($fbEntry) . '<br>';
+                }
+                echo '<br><strong>Bitte ACP erneut testen.</strong>';
+                echo '</div>';
+            }
+        }
+    } elseif (isset($_POST['analyze_file_repair']) || recoveryHasUploadedPackageFile()) {
+        $packageInput = recoveryResolvePackageInputFromRequest($authHash);
+        if (isset($packageInput['error'])) {
+            echo '<div class="alert alert-error">' . \htmlspecialchars($packageInput['error']) . '</div>';
+        } elseif (empty($packageInput['extractDir'])) {
+            echo '<div class="alert alert-error">Kein Entpack-Verzeichnis.</div>';
+        } else {
+            $analyzeLog = [];
+            $payload = recoveryExtractPackageInstructionTars($packageInput['extractDir'], $analyzeLog);
+            if ($payload === null) {
+                echo '<div class="alert alert-error"><strong>Paket konnte nicht ausgewertet werden.</strong><br>';
+                foreach ($analyzeLog as $line) {
+                    echo \htmlspecialchars($line) . '<br>';
+                }
+                echo '</div>';
+            } else {
+            $missingNow = recoveryFindMissingBootstrapClasses($wcfDir);
+?>
+    <div class="alert alert-info">
+        <strong>Analyse</strong> für Paket <code><?= \htmlspecialchars((string) ($payload['package'] ?? $packageInput['packageIdentifier'] ?? '')) ?></code>
+        (App: <code><?= \htmlspecialchars((string) ($payload['applicationDirectory'] ?? '')) ?></code>)<br>
+        <?php foreach ($analyzeLog as $line) {
+            echo \htmlspecialchars($line) . '<br>';
+        } ?>
+    </div>
+
+    <form method="POST" action="<?= \htmlspecialchars($fileRepairUrl) ?>">
+        <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_PACKAGE_FILE_REPAIR, $authHash); ?>
+        <input type="hidden" name="extract_dir" value="<?= \htmlspecialchars((string) $packageInput['extractDir']) ?>">
+        <input type="hidden" name="confirm_file_repair" value="1">
+
+        <h2>Fehlende Klassen auf dem Server</h2>
+        <?php if ($missingNow === []): ?>
+        <p>Keine fehlenden Bootstrap-Klassen erkannt. Sie können trotzdem Bootstrap aus dem Paket synchronisieren.</p>
+        <?php else: ?>
+        <ul>
+        <?php foreach ($missingNow as $cn): ?>
+            <li><label><input type="checkbox" name="repair_classes[]" value="<?= \htmlspecialchars($cn) ?>" checked>
+                <code><?= \htmlspecialchars($cn) ?></code></label></li>
+        <?php endforeach; ?>
+        </ul>
+        <?php endif; ?>
+
+        <button type="submit" class="btn-danger"><i class="fa-solid fa-screwdriver-wrench"></i> Dateien jetzt wiederherstellen + Cache leeren</button>
+    </form>
+<?php
+        }
+    } else {
+?>
+    <div class="alert alert-warning">
+        <strong>Typisches Symptom:</strong> ACP zeigt <code>ClassNotFoundException</code> für eine Klasse, die im Bootstrap
+        (<code>lib/bootstrap/de.*.php</code>) registriert ist, deren <code>.class.php</code> auf dem Server fehlt
+        (z.&nbsp;B. nach partiellem Löschen von <code>shrinkr/lib/</code>).<br><br>
+        Das Tool liest <code>lib/bootstrap/*.php</code>, findet fehlende Klassen und kopiert sie aus Ihrem
+        <strong>Paket-Archiv</strong> (<code>files.tar</code> / <code>files_wcf.tar</code>), leert danach den Cache und räumt Uploads auf.
+    </div>
+
+    <?php if ($liveMissing !== []): ?>
+    <div class="alert alert-error">
+        <strong>Aktuell fehlend (Live-Scan):</strong>
+        <ul style="margin:8px 0 0 20px">
+        <?php foreach ($liveMissing as $cn): ?>
+            <li><code><?= \htmlspecialchars($cn) ?></code></li>
+        <?php endforeach; ?>
+        </ul>
+    </div>
+    <?php else: ?>
+    <div class="alert alert-success">Live-Scan: keine fehlenden Bootstrap-Klassen gefunden (ACP-Fehler kann andere Ursache haben).</div>
+    <?php endif; ?>
+
+    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($fileRepairUrl) ?>">
+        <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_PACKAGE_FILE_REPAIR, $authHash); ?>
+        <input type="hidden" name="analyze_file_repair" value="1">
+        <label for="package_file">Paket-Archiv (.tar.gz) — z.&nbsp;B. de.sunnyc.wsc.shrinkr_v1.0.17.tar.gz</label>
+        <input type="file" name="package_file" id="package_file" accept=".tar,.tar.gz,.tgz" required>
+        <p style="margin-top:8px"><small>Optional Paket-ID:</small></p>
+        <input type="text" name="package_identifier" placeholder="de.sunnyc.wsc.shrinkr" style="max-width:420px">
+        <p style="margin-top:16px">
+            <button type="submit" class="button"><i class="fa-solid fa-magnifying-glass"></i> Paket analysieren &amp; Vorschau</button>
+        </p>
+    </form>
+<?php
     }
 }
 
