@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.19
+ * @version 1.5.20
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.19');
+define('RECOVERY_VERSION', '1.5.20');
 define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
@@ -4055,6 +4055,38 @@ function recoveryGroupFqcnByApplicationPrefix(array $fqcnList): array
 }
 
 /**
+ * @param list<string> $fqcnList
+ * @return list<string>
+ */
+function recoveryFilterFqcnByApplicationPrefix(array $fqcnList, string $applicationDirectory): array
+{
+    $applicationDirectory = \trim($applicationDirectory);
+    if ($applicationDirectory === '') {
+        return $fqcnList;
+    }
+
+    $needle = \strtolower($applicationDirectory) . '\\';
+
+    return \array_values(\array_filter(
+        $fqcnList,
+        static fn (string $cn): bool => \str_starts_with(\strtolower($cn), $needle)
+    ));
+}
+
+function recoveryGuessApplicationFromPackageIdentifier(string $packageIdentifier): string
+{
+    $packageIdentifier = \trim($packageIdentifier);
+    if ($packageIdentifier === '') {
+        return '';
+    }
+
+    $parts = \explode('.', $packageIdentifier);
+    $guess = (string) \end($parts);
+
+    return recoveryValidateAppDirectoryName($guess) ? $guess : '';
+}
+
+/**
  * Kopiert fehlende Klassen + Bootstrap aus Paket-Payload ins Installationsverzeichnis.
  *
  * @param array{package: string, applicationDirectory: string, appRoot: string|null, wcfRoot: string|null} $payload
@@ -4232,9 +4264,16 @@ function recoveryExtractPayloadRootForTar(string $extractDir, string $tarFile, s
  *   suggestedActions: array{orphans: bool, files: bool, cache: bool}
  * }
  */
-function recoveryBuildSystemDiagnosis(string $wcfDir, \wcf\system\database\Database $db, int $wcfN): array
-{
+function recoveryBuildSystemDiagnosis(
+    string $wcfDir,
+    \wcf\system\database\Database $db,
+    int $wcfN,
+    ?string $scopeApplicationDirectory = null
+): array {
     $missing = recoveryFindMissingBootstrapClasses($wcfDir);
+    if ($scopeApplicationDirectory !== null && $scopeApplicationDirectory !== '') {
+        $missing = recoveryFilterFqcnByApplicationPrefix($missing, $scopeApplicationDirectory);
+    }
     $orphanCount = 0;
     try {
         $sql = "SELECT COUNT(*) AS c FROM wcf{$wcfN}_application a
@@ -6866,16 +6905,16 @@ elseif ($mode === RECOVERY_MODE_PACKAGE_FILE_REPAIR) {
 elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
     $wizardUrl = recoveryBuildModeUrl(RECOVERY_MODE_RECOVERY_WIZARD, $authHash);
     $wcfDir = \rtrim(WCF_DIR, '/\\') . \DIRECTORY_SEPARATOR;
-    $phaseLabels = ['Diagnose', 'Plan &amp; Auswahl', 'Ausführung', 'Fertig'];
-    $phase = (string) ($_POST['wizard_phase'] ?? $_GET['wizard_phase'] ?? 'diagnose');
+    $phase = (string) ($_POST['wizard_phase'] ?? $_GET['wizard_phase'] ?? 'package');
     $phaseIndex = match ($phase) {
-        'plan' => 1,
-        'run' => 2,
+        'diagnose' => 1,
+        'plan' => 2,
+        'run' => 3,
         'done' => 3,
         default => 0,
     };
 
-    recoveryRenderWizardPhaseSteps($phaseIndex, ['Diagnose', 'Plan', 'Ausführung', 'Fertig']);
+    recoveryRenderWizardPhaseSteps($phaseIndex, ['Paket', 'Diagnose', 'Plan', 'Ausführung']);
 ?>
     <h1>Recovery-Wizard</h1>
     <p class="subtitle">Geführte Reparatur in sinnvoller Reihenfolge — Sie entscheiden pro Schritt, was ausgeführt wird</p>
@@ -6920,7 +6959,7 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         <strong>Wizard abgeschlossen.</strong> Einzelne Modi (ACP Repair, Cache Clear, …) bleiben weiterhin manuell nutzbar.
     </div>
     <p><a href="<?= \htmlspecialchars($recoveryBaseUrl . 'acp/') ?>" class="button"><i class="fa-solid fa-gauge-high"></i> Zum ACP</a></p>
-    <p style="margin-top:12px"><a href="<?= \htmlspecialchars($wizardUrl . '&wizard_phase=diagnose') ?>">Wizard von vorn beginnen</a></p>
+    <p style="margin-top:12px"><a href="<?= \htmlspecialchars($wizardUrl . '&wizard_phase=package') ?>">Wizard von vorn beginnen</a></p>
 <?php
     } elseif ($phase === 'plan' || isset($_POST['wizard_to_plan'])) {
         if (recoveryHasUploadedPackageFile()) {
@@ -6930,9 +6969,14 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
             }
         }
         $state = recoveryWizardLoadState($authHash);
-        $diag = $state['diagnosis'] ?? recoveryBuildSystemDiagnosis($wcfDir, $db, WCF_N);
+        $scopeApp = isset($state['scopeApplication']) ? (string) $state['scopeApplication'] : null;
+        $scopeApp = $scopeApp !== '' ? $scopeApp : null;
+        $diag = $state['diagnosis'] ?? recoveryBuildSystemDiagnosis($wcfDir, $db, WCF_N, $scopeApp);
         $suggest = $diag['suggestedActions'] ?? ['orphans' => false, 'files' => false, 'cache' => true];
         $missing = $diag['missingBootstrapClasses'] ?? recoveryFindMissingBootstrapClasses($wcfDir);
+        if ($scopeApp !== null) {
+            $missing = recoveryFilterFqcnByApplicationPrefix($missing, $scopeApp);
+        }
         $extractDir = recoveryResolveTrustedExtractDir();
 ?>
     <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($wizardUrl) ?>">
@@ -6982,19 +7026,127 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         <p style="margin-top:20px">
             <button type="submit" class="btn-danger"><i class="fa-solid fa-play"></i> Ausgewählte Schritte jetzt ausführen</button>
             <a href="<?= \htmlspecialchars($wizardUrl . '&wizard_phase=diagnose') ?>" class="back-link" style="margin-left:12px">Zurück zur Diagnose</a>
+            <a href="<?= \htmlspecialchars($wizardUrl . '&wizard_phase=package') ?>" class="back-link" style="margin-left:12px">Paket ändern</a>
         </p>
     </form>
 <?php
-    } else {
-        $diag = recoveryBuildSystemDiagnosis($wcfDir, $db, WCF_N);
-        recoveryWizardSaveState($authHash, ['diagnosis' => $diag]);
+    }
+
+    $wizardUploadError = null;
+    if (isset($_POST['wizard_to_diagnose'])) {
+        $phase = 'diagnose';
+        $scopeApp = null;
+        $packageLabel = '';
+        $fullServerScan = !empty($_POST['wizard_full_scan']);
+
+        if (!$fullServerScan) {
+            if (recoveryHasUploadedPackageFile()) {
+                $upload = recoveryHandlePackageUpload($_FILES['package_file']);
+                if (!$upload['ok']) {
+                    $wizardUploadError = (string) ($upload['error'] ?? 'Upload fehlgeschlagen.');
+                    $phase = 'package';
+                } elseif (!empty($upload['extractDir'])) {
+                    recoveryStorePackageContext($authHash, (string) $upload['packageIdentifier'], $upload['extractDir']);
+                    $meta = recoveryParsePackageMetaFromExtractDir((string) $upload['extractDir']);
+                    $packageLabel = (string) ($meta['package'] ?? $upload['packageIdentifier'] ?? '');
+                    $scopeApp = (string) ($meta['applicationDirectory'] ?? '');
+                }
+            } elseif (!empty($_POST['package_identifier'])) {
+                $packageLabel = \trim((string) $_POST['package_identifier']);
+                if (\preg_match(RECOVERY_PACKAGE_ID_PATTERN, $packageLabel)) {
+                    recoveryStorePackageContext($authHash, $packageLabel, null);
+                    $scopeApp = recoveryGuessApplicationFromPackageIdentifier($packageLabel);
+                } else {
+                    $wizardUploadError = 'Ungültige Paket-ID.';
+                    $phase = 'package';
+                }
+            } else {
+                $wizardUploadError = 'Bitte Paket-Archiv hochladen, Paket-ID eingeben oder „gesamten Server prüfen“ wählen.';
+                $phase = 'package';
+            }
+        }
+
+        if ($phase === 'diagnose') {
+            $diag = recoveryBuildSystemDiagnosis(
+                $wcfDir,
+                $db,
+                WCF_N,
+                $fullServerScan ? null : ($scopeApp !== '' && $scopeApp !== null ? $scopeApp : null)
+            );
+            recoveryWizardSaveState($authHash, [
+                'diagnosis' => $diag,
+                'scopeApplication' => $fullServerScan ? null : ($scopeApp !== '' ? $scopeApp : null),
+                'packageLabel' => $packageLabel,
+                'fullServerScan' => $fullServerScan,
+            ]);
+        }
+    }
+
+    if ($phase === 'package') {
 ?>
     <div class="alert alert-info">
-        <strong>Schritt 1 — Diagnose Ihrer Live-Installation</strong><br>
-        Es wird <strong>kein Paket-Archiv</strong> benötigt. Das Tool liest <code>lib/bootstrap/*.php</code> auf dem Server
-        und prüft, ob die dort registrierten Klassen als <code>.class.php</code> vorhanden sind.
-        Fehlende Dateien (z.&nbsp;B. nach partiellem Löschen von Plugin-Ordnern) werden hier angezeigt.<br>
-        <strong>Schritt 2:</strong> Paket-Archiv hochladen, um fehlende Dateien wiederherzustellen.
+        <strong>Schritt 1 — Paket festlegen (empfohlen)</strong><br>
+        Laden Sie das <strong>Paket-Archiv</strong> des defekten Plugins hoch (z.&nbsp;B. <code>.tar.gz</code> mit
+        <code>package.xml</code> und <code>files.tar</code>). Dann kann die Diagnose gezielt für dieses Plugin laufen
+        und die Reparatur nutzt alle Paketdaten.<br>
+        Alternativ nur die <strong>Paket-ID</strong> (z.&nbsp;B. <code>de.example.meinplugin</code>) — dann wird nach App-Name gefiltert,
+        ohne Archiv-Inhalt.
+    </div>
+
+    <?php if ($wizardUploadError !== null): ?>
+    <div class="alert alert-error"><?= \htmlspecialchars($wizardUploadError) ?></div>
+    <?php endif; ?>
+
+    <form method="POST" enctype="multipart/form-data" action="<?= \htmlspecialchars($wizardUrl) ?>">
+        <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_RECOVERY_WIZARD, $authHash); ?>
+        <input type="hidden" name="wizard_phase" value="diagnose">
+        <input type="hidden" name="wizard_to_diagnose" value="1">
+
+        <label for="wizard_package_file"><strong>Paket-Archiv</strong> (.tar, .tar.gz, .tgz) — empfohlen</label>
+        <input type="file" name="package_file" id="wizard_package_file" accept=".tar,.tar.gz,.tgz">
+
+        <p style="margin-top:16px"><label for="wizard_package_identifier">oder nur Paket-ID</label></p>
+        <input type="text" name="package_identifier" id="wizard_package_identifier" placeholder="de.vendor.meinplugin" style="max-width:420px">
+
+        <p style="margin-top:20px">
+            <button type="submit" class="button"><i class="fa-solid fa-arrow-right"></i> Weiter zur Diagnose</button>
+        </p>
+    </form>
+
+    <form method="POST" action="<?= \htmlspecialchars($wizardUrl) ?>" style="margin-top:12px">
+        <?php recoveryRenderFormModeHiddenFields(RECOVERY_MODE_RECOVERY_WIZARD, $authHash); ?>
+        <input type="hidden" name="wizard_phase" value="diagnose">
+        <input type="hidden" name="wizard_to_diagnose" value="1">
+        <input type="hidden" name="wizard_full_scan" value="1">
+        <button type="submit" class="back-link" style="background:none;border:none;color:#6EC2FF;cursor:pointer;padding:0">
+            Ohne Paket — gesamten Server prüfen (alle Plugins)
+        </button>
+    </form>
+<?php
+    } elseif ($phase === 'diagnose') {
+        $state = recoveryWizardLoadState($authHash);
+        if (empty($state['diagnosis'])) {
+?>
+    <div class="alert alert-warning">Noch keine Diagnose. Bitte zuerst Schritt 1 (Paket) ausführen.</div>
+    <p><a href="<?= \htmlspecialchars($wizardUrl . '&wizard_phase=package') ?>" class="button">Zu Schritt 1 — Paket</a></p>
+<?php
+        } else {
+        $diag = $state['diagnosis'];
+        $fullServerScan = !empty($state['fullServerScan']);
+        $packageLabel = (string) ($state['packageLabel'] ?? '');
+        $scopeApp = (string) ($state['scopeApplication'] ?? '');
+?>
+    <div class="alert alert-info">
+        <strong>Schritt 2 — Diagnose</strong><br>
+        <?php if ($fullServerScan): ?>
+        Es wird der <strong>gesamte Server</strong> geprüft (alle Bootstrap-Registrierungen auf diesem System).
+        <?php elseif ($packageLabel !== ''): ?>
+        Gefiltert für Paket <code><?= \htmlspecialchars($packageLabel) ?></code><?php if ($scopeApp !== ''): ?>
+        — App <code><?= \htmlspecialchars($scopeApp) ?></code><?php endif; ?>.
+        Das Tool zeigt nur fehlende Klassen, deren Namespace zu dieser App passt (nicht „erraten“, sondern gefiltert).
+        <?php else: ?>
+        Live-Scan: Bootstrap-Einträge vs. vorhandene <code>.class.php</code> auf dem Server.
+        <?php endif; ?>
     </div>
 
     <h2>Ergebnis (aktueller Server-Stand)</h2>
@@ -7006,7 +7158,7 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
 
     <?php if ($diag['missingBootstrapClasses'] === []): ?>
     <div class="alert alert-success">
-        Keine fehlenden Bootstrap-Klassen auf dem Server gefunden. Sie können trotzdem mit Schritt 2 fortfahren
+        Keine fehlenden Bootstrap-Klassen (im gewählten Umfang) gefunden. Sie können trotzdem fortfahren
         (z.&nbsp;B. Cache leeren oder Paketliste bereinigen).
     </div>
     <?php else: ?>
