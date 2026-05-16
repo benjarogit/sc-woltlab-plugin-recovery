@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.27
+ * @version 1.5.28
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.27');
+define('RECOVERY_VERSION', '1.5.28');
 define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
@@ -4038,25 +4038,80 @@ function recoveryCollectBootstrapReferencedClasses(string $wcfDir): array
     return $list;
 }
 
+function recoveryIsPluginClassLoadable(string $className): bool
+{
+    $className = \ltrim($className, '\\');
+    if ($className === '') {
+        return false;
+    }
+
+    try {
+        return \class_exists($className, true);
+    } catch (\Throwable $ignored) {
+        return false;
+    }
+}
+
 function recoveryIsPluginClassFilePresent(string $wcfDir, string $className): bool
 {
+    $className = \ltrim($className, '\\');
     $map = recoveryClassNameToLibRelativePath($className);
-    if ($map === null) {
-        return true;
-    }
 
-    $wcfRoot = \rtrim($wcfDir, '/\\') . \DIRECTORY_SEPARATOR;
-    if ($map['application'] === 'wcf') {
-        $path = $wcfRoot . \str_replace('/', \DIRECTORY_SEPARATOR, $map['relative']);
-    } else {
-        if (!recoveryValidateAppDirectoryName($map['application'])) {
-            return true;
+    if ($map !== null) {
+        $wcfRoot = \rtrim($wcfDir, '/\\') . \DIRECTORY_SEPARATOR;
+        if ($map['application'] === 'wcf') {
+            $path = $wcfRoot . \str_replace('/', \DIRECTORY_SEPARATOR, $map['relative']);
+        } else {
+            if (!recoveryValidateAppDirectoryName($map['application'])) {
+                return \recoveryIsPluginClassLoadable($className);
+            }
+            $path = $wcfRoot . $map['application'] . \DIRECTORY_SEPARATOR
+                . \str_replace('/', \DIRECTORY_SEPARATOR, $map['relative']);
         }
-        $path = $wcfRoot . $map['application'] . \DIRECTORY_SEPARATOR
-            . \str_replace('/', \DIRECTORY_SEPARATOR, $map['relative']);
+
+        if (!\is_file($path)) {
+            return false;
+        }
     }
 
-    return \is_file($path);
+    return \recoveryIsPluginClassLoadable($className);
+}
+
+/**
+ * Listener-Klassen aus EventHandler::getInstance()->register(Event::class, Listener::class).
+ *
+ * @return list<string>
+ */
+function recoveryCollectBootstrapPsr14RegisterListenerClasses(string $wcfDir): array
+{
+    $bootstrapDir = \rtrim($wcfDir, '/\\') . '/lib/bootstrap';
+    if (!\is_dir($bootstrapDir)) {
+        return [];
+    }
+
+    $rx = '~EventHandler::getInstance\(\)->register\s*\(\s*.+?\s*,\s*((?:\\\\?[A-Za-z_][\w\\\\]*)+)\s*::class\s*\)\s*;~s';
+    $listeners = [];
+
+    foreach (\glob($bootstrapDir . '/*.php') ?: [] as $bootstrapFile) {
+        $content = @\file_get_contents($bootstrapFile);
+        if ($content === false || $content === '') {
+            continue;
+        }
+        if (!\preg_match_all($rx, $content, $matches, \PREG_SET_ORDER)) {
+            continue;
+        }
+        foreach ($matches as $m) {
+            $listener = \ltrim((string) ($m[1] ?? ''), '\\');
+            if ($listener !== '') {
+                $listeners[$listener] = true;
+            }
+        }
+    }
+
+    $list = \array_keys($listeners);
+    \sort($list);
+
+    return $list;
 }
 
 /**
@@ -4144,8 +4199,14 @@ function recoveryPurgeOrphanedDbEventListeners(
  */
 function recoveryFindMissingBootstrapClasses(string $wcfDir): array
 {
+    $candidates = \array_merge(
+        recoveryCollectBootstrapReferencedClasses($wcfDir),
+        recoveryCollectBootstrapPsr14RegisterListenerClasses($wcfDir)
+    );
+    $candidates = \array_values(\array_unique($candidates));
+
     $missing = [];
-    foreach (recoveryCollectBootstrapReferencedClasses($wcfDir) as $class) {
+    foreach ($candidates as $class) {
         if (!recoveryIsPluginClassFilePresent($wcfDir, $class)) {
             $missing[] = $class;
         }
@@ -7228,7 +7289,8 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         $state = recoveryWizardLoadState($authHash);
         $scopeApp = isset($state['scopeApplication']) ? (string) $state['scopeApplication'] : null;
         $scopeApp = $scopeApp !== '' ? $scopeApp : null;
-        $diag = $state['diagnosis'] ?? recoveryBuildSystemDiagnosis($wcfDir, $db, WCF_N, $scopeApp);
+        $diag = recoveryBuildSystemDiagnosis($wcfDir, $db, WCF_N, $scopeApp);
+        recoveryWizardSaveState($authHash, \array_merge($state, ['diagnosis' => $diag]));
         $suggest = \array_merge([
             'orphans' => false,
             'files' => false,
@@ -7436,7 +7498,13 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
     <p><a href="<?= \htmlspecialchars($wizardUrl . '&wizard_phase=package') ?>" class="button">Zu Schritt 1 — Paket</a></p>
 <?php
         } else {
-        $diag = $state['diagnosis'];
+        $scopeForDiag = (string) ($state['scopeApplication'] ?? '');
+        $diag = recoveryBuildSystemDiagnosis(
+            $wcfDir,
+            $db,
+            WCF_N,
+            $scopeForDiag !== '' ? $scopeForDiag : null
+        );
         $fullServerScan = !empty($state['fullServerScan']);
         $packageLabel = (string) ($state['packageLabel'] ?? '');
         $scopeApp = (string) ($state['scopeApplication'] ?? '');
