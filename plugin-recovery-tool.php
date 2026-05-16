@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.6.2
+ * @version 1.6.3
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.6.2');
+define('RECOVERY_VERSION', '1.6.3');
 define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
@@ -3619,6 +3619,18 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
         .recovery-info-panel .recovery-info-hint {
             margin: 0 0 16px; font-size: 13px; color: #9D9D9D; line-height: 1.5;
         }
+        .recovery-info-panel--drawer summary {
+            cursor: pointer; font-size: 15px; font-weight: 600; color: #fff;
+            list-style: none; margin: 0 0 8px;
+        }
+        .recovery-info-panel--drawer summary::-webkit-details-marker { display: none; }
+        .recovery-status-bar {
+            margin: 0 0 20px; font-size: 13px; color: #9D9D9D; line-height: 1.5;
+        }
+        .recovery-status-sep { margin: 0 6px; color: #555; }
+        .recovery-status-warn { color: #fc6; }
+        .recovery-status-link { color: #6EC2FF; text-decoration: none; }
+        .recovery-status-link:hover { text-decoration: underline; }
         .recovery-info-grid { display: grid; gap: 10px; }
         .recovery-copy-row {
             display: grid;
@@ -3792,14 +3804,44 @@ function recoveryRenderCopyableRow(string $elementId, string $label, string $val
     echo '</div>';
 }
 
-function recoveryRenderRuntimeInfoPanel(string $authHash, string $baseUrl): void
+function recoveryRenderCompactStatusBar(string $authHash, string $baseUrl): void
+{
+    $rows = recoveryBuildRuntimeInfoRows($authHash, $baseUrl);
+    $logHint = '';
+    foreach ($rows as $row) {
+        if (($row['label'] ?? '') === 'Letzter Log-Hinweis') {
+            $raw = (string) ($row['value'] ?? '');
+            if (\str_contains($raw, 'ClassNotFound') || \str_contains($raw, 'Unable to find class')) {
+                $logHint = 'ClassNotFound im Log';
+            } elseif ($raw !== '') {
+                $logHint = \mb_strlen($raw) > 48 ? \mb_substr($raw, 0, 45) . '…' : $raw;
+            }
+            break;
+        }
+    }
+    ?>
+    <p class="recovery-status-bar" aria-label="Kurzstatus">
+        <span>Tool v<?= \htmlspecialchars(RECOVERY_VERSION) ?></span>
+        <span class="recovery-status-sep">·</span>
+        <span>PHP <?= \htmlspecialchars(\PHP_VERSION) ?></span>
+        <?php if ($logHint !== ''): ?>
+        <span class="recovery-status-sep">·</span>
+        <span class="recovery-status-warn"><i class="fa-solid fa-triangle-exclamation"></i> <?= \htmlspecialchars($logHint) ?></span>
+        <?php endif; ?>
+        <span class="recovery-status-sep">·</span>
+        <a href="#recovery-sysinfo" class="recovery-status-link">Systeminformationen</a>
+    </p>
+    <?php
+}
+
+function recoveryRenderRuntimeInfoPanel(string $authHash, string $baseUrl, bool $open = false): void
 {
     $rows = recoveryBuildRuntimeInfoRows($authHash, $baseUrl);
     ?>
-    <section class="recovery-info-panel" aria-labelledby="recovery-runtime-info-heading">
-        <h2 id="recovery-runtime-info-heading"><i class="fa-solid fa-circle-info"></i> System-Informationen</h2>
+    <details class="recovery-info-panel recovery-info-panel--drawer" id="recovery-sysinfo"<?= $open ? ' open' : '' ?>>
+        <summary><i class="fa-solid fa-circle-info"></i> System-Informationen</summary>
         <p class="recovery-info-hint">
-            Diese Werte können Sie bei Support-Anfragen mit angeben. Mit <strong>Kopieren</strong> übernehmen Sie sie in die Zwischenablage.
+            Für Support-Anfragen — per <strong>Kopieren</strong> in die Zwischenablage.
         </p>
         <div class="recovery-info-grid">
         <?php
@@ -3809,6 +3851,86 @@ function recoveryRenderRuntimeInfoPanel(string $authHash, string $baseUrl): void
     }
     ?>
         </div>
+    </details>
+    <?php
+}
+
+function recoveryShouldOfferEmergencyClassNotFoundFix(string $wcfDir): bool
+{
+    if (recoveryExtractMissingClassesFromLog($wcfDir) !== []) {
+        return true;
+    }
+
+    foreach (recoveryScanWoltLabLogForRecentErrors($wcfDir, 8) as $line) {
+        if (\str_contains((string) $line, 'ClassNotFound') || \str_contains((string) $line, 'Unable to find class')) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * @param array{bootstrapNeutralized?: list<string>, dbEventListenersDeleted?: int, cacheDeleted?: int, logClasses?: list<string>} $result
+ */
+function recoverySessionSetEmergencyFixed(string $authHash, array $result): void
+{
+    recoveryEnsureSession();
+    $_SESSION['recovery_emergency'] ??= [];
+    $_SESSION['recovery_emergency'][$authHash] = [
+        'at' => \time(),
+        'result' => $result,
+    ];
+}
+
+/**
+ * @return array{at: int, result: array<string, mixed>}|null
+ */
+function recoverySessionGetEmergencyFixed(string $authHash): ?array
+{
+    recoveryEnsureSession();
+    $entry = $_SESSION['recovery_emergency'][$authHash] ?? null;
+    if (!\is_array($entry)) {
+        return null;
+    }
+    if (\time() - (int) ($entry['at'] ?? 0) > 7200) {
+        unset($_SESSION['recovery_emergency'][$authHash]);
+
+        return null;
+    }
+
+    return $entry;
+}
+
+/**
+ * @param array<string, mixed> $result
+ */
+function recoveryRenderAcpRecoveredGuidance(array $result, string $acpUrl, string $uninstallUrl): void
+{
+    $bootstrapCount = \count($result['bootstrapNeutralized'] ?? []);
+    ?>
+    <section class="recovery-rec-panel recovery-rec-panel--ok" style="margin-bottom:20px" aria-labelledby="recovery-acp-ok-heading">
+        <h2 id="recovery-acp-ok-heading"><i class="fa-solid fa-circle-check"></i> ACP-Notfall erledigt</h2>
+        <p style="margin:0 0 12px;line-height:1.55">
+            Der ACP sollte wieder erreichbar sein
+            (<?= $bootstrapCount ?> Bootstrap-Datei(en) angepasst, Cache geleert).
+            Das war <strong>keine vollständige Deinstallation</strong> — nur der Absturz beim Start wurde behoben.
+        </p>
+        <p style="margin:0 0 10px;font-weight:600;color:#fff">Was Sie jetzt tun sollten:</p>
+        <ol class="recovery-next-list" style="margin:0 0 14px">
+            <li><a href="<?= \htmlspecialchars($acpUrl) ?>" style="color:#6EC2FF">ACP öffnen</a> und prüfen, ob alles lädt.</li>
+            <li>Steht das Plugin noch unter <strong>Pakete</strong>?
+                <ul style="margin:6px 0 0 18px">
+                    <li><strong>Ja</strong> → dort normal deinstallieren <em>oder</em>
+                        <a href="<?= \htmlspecialchars($uninstallUrl) ?>" style="color:#6EC2FF">Plugin entfernen</a> im Recovery Tool.</li>
+                    <li><strong>Nein</strong> (nur WoltLab Core sichtbar) → Reste per
+                        <a href="<?= \htmlspecialchars($uninstallUrl) ?>" style="color:#6EC2FF">Plugin entfernen</a>
+                        mit Paket-ID <code>de.sunnyc.wsc.shrinkr</code> bereinigen (DB + optional Ordner <code>shrinkr/</code>).</li>
+                </ul>
+            </li>
+            <li><strong>Nicht</strong> den Wizard nutzen, um fehlende Dateien wiederherzustellen — das wäre das Gegenteil einer Entfernung.</li>
+            <li>Recovery Tool und Auth-Datei vom Server löschen, wenn alles erledigt ist.</li>
+        </ol>
     </section>
     <?php
 }
@@ -3889,6 +4011,10 @@ function recoveryRenderGlobalNav(int $mode, string $authHash, string $baseUrl): 
     }
     echo '<a href="' . \htmlspecialchars($acpUrl) . '" class="recovery-nav-link recovery-nav-acp">'
         . '<i class="fa-solid fa-gauge-high"></i> Zum ACP</a>';
+    if ($mode === RECOVERY_MODE_SELECTION) {
+        echo '<a href="#recovery-sysinfo" class="recovery-nav-link">'
+            . '<i class="fa-solid fa-circle-info"></i> Systeminfo</a>';
+    }
     echo '</nav>';
 }
 
@@ -6618,6 +6744,11 @@ if (
 ) {
     try {
         $emergencyAcpResult = recoveryEmergencyFixAcpClassNotFound($wcfDirMain, $db, WCF_N, $emergencyAcpLog);
+        recoverySessionSetEmergencyFixed($authHash, $emergencyAcpResult);
+        \header(
+            'Location: ' . recoveryBuildModeUrl(RECOVERY_MODE_SELECTION, $authHash, ['acp_fixed' => '1'])
+        );
+        exit;
     } catch (\Throwable $e) {
         $emergencyAcpResult = [
             'error' => recoveryFormatUserError($e),
@@ -6627,6 +6758,11 @@ if (
             'logClasses' => [],
         ];
     }
+}
+
+$emergencyFixedSession = recoverySessionGetEmergencyFixed($authHash);
+if ($emergencyFixedSession !== null && isset($_GET['acp_fixed'])) {
+    $emergencyAcpResult = $emergencyFixedSession['result'];
 }
 
 recoveryRenderGlobalNav($mode, $authHash, $recoveryBaseUrl);
@@ -6644,6 +6780,10 @@ if ($mode === RECOVERY_MODE_SELECTION) {
     $adminUrl = recoveryBuildModeUrl(RECOVERY_MODE_USER_MANAGEMENT, $authHash);
     $uninstallUrl = recoveryBuildModeUrl(RECOVERY_MODE_PLUGIN_UNINSTALL, $authHash);
     $expertOpen = !empty($_GET['expert']);
+    $sysinfoOpen = !empty($_GET['sysinfo']);
+    $acpUrl = $recoveryBaseUrl . 'acp/';
+    $showEmergencyFix = recoveryShouldOfferEmergencyClassNotFoundFix($wcfDirMain)
+        && $emergencyFixedSession === null;
 ?>
     <?php if (isset($_GET['auth_ok'])): ?>
     <div class="alert alert-success"><i class="fa-solid fa-circle-check"></i> <strong>Anmeldung erfolgreich.</strong> Wählen Sie unten, was auf Ihrer Installation zutrifft.</div>
@@ -6657,46 +6797,27 @@ if ($mode === RECOVERY_MODE_SELECTION) {
         </p>
     </header>
 
-    <?php recoveryRenderRuntimeInfoPanel($authHash, $recoveryBaseUrl); ?>
+    <?php recoveryRenderCompactStatusBar($authHash, $recoveryBaseUrl); ?>
+    <?php recoveryRenderRuntimeInfoPanel($authHash, $recoveryBaseUrl, $sysinfoOpen); ?>
 
-    <?php if ($emergencyAcpResult !== null): ?>
-    <?php if (!empty($emergencyAcpResult['error'])): ?>
+    <?php if ($emergencyAcpResult !== null && !empty($emergencyAcpResult['error'])): ?>
     <div class="alert alert-error" style="margin-bottom:20px">
         <strong>Notfall-Reparatur fehlgeschlagen:</strong> <?= \htmlspecialchars((string) $emergencyAcpResult['error']) ?>
     </div>
-    <?php else: ?>
-    <div class="alert alert-success" style="margin-bottom:20px">
-        <strong><i class="fa-solid fa-circle-check"></i> Notfall-Reparatur ausgeführt (v<?= \htmlspecialchars(RECOVERY_VERSION) ?>)</strong><br>
-        Bootstrap-Dateien angepasst: <?= \count($emergencyAcpResult['bootstrapNeutralized'] ?? []) ?><br>
-        DB Event-Listener entfernt: <?= (int) ($emergencyAcpResult['dbEventListenersDeleted'] ?? 0) ?><br>
-        Cache-Dateien gelöscht: <?= (int) ($emergencyAcpResult['cacheDeleted'] ?? 0) ?><br>
-        <?php if (!empty($emergencyAcpResult['logClasses'])): ?>
-        Log-Klassen:
-        <?php
-        $lcHtml = [];
-        foreach ($emergencyAcpResult['logClasses'] as $lc) {
-            $lcHtml[] = '<code>' . \htmlspecialchars((string) $lc, ENT_QUOTES, 'UTF-8') . '</code>';
-        }
-        echo \implode(', ', $lcHtml);
-        ?><br>
-        <?php endif; ?>
-        <strong>Bitte jetzt <a href="<?= \htmlspecialchars($recoveryBaseUrl . 'acp/') ?>" style="color:#6EC2FF">ACP öffnen</a> und testen.</strong>
-    </div>
-    <?php if ($emergencyAcpLog !== []): ?>
-    <details style="margin:-8px 0 20px">
-        <summary style="cursor:pointer;color:#9D9D9D">Technisches Protokoll</summary>
-        <pre style="margin-top:8px;padding:12px;background:#1a1a1a;border-radius:6px;overflow:auto;font-size:12px"><?= \htmlspecialchars(\implode("\n", $emergencyAcpLog)) ?></pre>
-    </details>
-    <?php endif; ?>
-    <?php endif; ?>
+    <?php elseif ($emergencyFixedSession !== null || ($emergencyAcpResult !== null && empty($emergencyAcpResult['error']))): ?>
+    <?php
+        $guidanceResult = \is_array($emergencyAcpResult) ? $emergencyAcpResult : ($emergencyFixedSession['result'] ?? []);
+        recoveryRenderAcpRecoveredGuidance($guidanceResult, $acpUrl, $uninstallUrl);
+    ?>
     <?php endif; ?>
 
+    <?php if ($showEmergencyFix): ?>
     <section class="recovery-scenario-card" style="margin-bottom:24px;border-color:#c60;background:rgba(204,102,0,0.08)">
         <h2 style="margin:0 0 8px;font-size:17px"><i class="fa-solid fa-bolt"></i> Sofort: ACP zeigt ClassNotFound</h2>
-        <p style="margin:0 0 14px;color:#ccc;font-size:14px;line-height:1.5">
-            Liest fehlende Klassen aus dem WoltLab-Log, deaktiviert betroffene
-            <code>EventHandler::register()</code>-Aufrufe in <code>lib/bootstrap</code>, bereinigt DB-Listener und leert den Cache —
-            ohne Wizard. Typisch für <code>BoxCollectingShrinkrDashboardListener</code> und ähnliche Fehler.
+        <p style="margin:0 0 10px;color:#ccc;font-size:14px;line-height:1.5">
+            <strong>Automatisch erkannt</strong> — im WoltLab-Log steht eine <code>ClassNotFoundException</code>
+            (siehe Kurzstatus oben). Ein Klick deaktiviert die betroffenen Bootstrap-<code>register()</code>-Aufrufe,
+            bereinigt DB-Listener und leert den Cache.
         </p>
         <form method="POST" action="<?= \htmlspecialchars(recoveryBuildModeUrl(RECOVERY_MODE_SELECTION, $authHash)) ?>"
             data-recovery-loading="Notfall-Reparatur läuft (Bootstrap, DB, Cache) …"
@@ -6706,6 +6827,7 @@ if ($mode === RECOVERY_MODE_SELECTION) {
             <button type="submit" class="btn-danger"><i class="fa-solid fa-bolt"></i> ACP ClassNotFound jetzt beheben</button>
         </form>
     </section>
+    <?php endif; ?>
 
     <h2 style="margin:0 0 16px;font-size:18px;color:#fff">Was ist passiert?</h2>
     <div class="recovery-scenario-grid">
@@ -6713,9 +6835,9 @@ if ($mode === RECOVERY_MODE_SELECTION) {
             <i class="fa-solid fa-route recovery-scenario-icon" aria-hidden="true"></i>
             <h2>Plugin defekt / ACP nicht erreichbar</h2>
             <p>
-                Nach Installation oder Deinstallation bricht das Administrationspanel zusammen, ein Plugin lässt sich
-                nicht deinstallieren, <code>ClassNotFoundException</code> im Log — der Wizard führt Sie Schritt für Schritt
-                durch Diagnose, Reparatur und optionaler Deinstallation.
+                Wenn <code>/acp/</code> nicht lädt: Schritt für Schritt Diagnose, Reparatur, optional Dateien aus dem
+                Paket-Archiv. <strong>ACP läuft bereits?</strong> Dann nicht den Wizard für „Dateien wiederherstellen“ —
+                stattdessen Plugin entfernen (rechte Karte).
             </p>
             <span class="recovery-scenario-cta">Recovery-Wizard starten →</span>
         </a>
@@ -6734,8 +6856,8 @@ if ($mode === RECOVERY_MODE_SELECTION) {
             <i class="fa-solid fa-trash-can recovery-scenario-icon" aria-hidden="true"></i>
             <h2>Plugin gezielt entfernen</h2>
             <p>
-                Sie wissen welches Paket weg muss (<code>de.vendor.plugin</code>) und möchten es vollständig aus
-                Datenbank und optional Dateisystem entfernen — ohne den geführten Wizard.
+                Wie Deinstallieren im ACP, aber direkt über DB + optional Dateien — wenn das ACP wieder geht oder das
+                Paket in der Paketliste fehlt, Reste aber noch da sind (<code>de.sunnyc.wsc.shrinkr</code> usw.).
             </p>
             <span class="recovery-scenario-cta">Plugin Uninstall →</span>
         </a>
