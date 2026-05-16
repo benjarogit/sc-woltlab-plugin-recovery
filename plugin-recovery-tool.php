@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.5.25
+ * @version 1.5.26
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.5.25');
+define('RECOVERY_VERSION', '1.5.26');
 define('RECOVERY_DEBUG_LOG_PREFIX', 'recovery-tool-');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 
@@ -4320,7 +4320,7 @@ function recoveryCountNeutralizableBootstrapRegisters(string $wcfDir): int
 }
 
 /**
- * Kommentiert betroffene register()-Aufrufe zeilenweise mit // aus (kein Blockkommentar → keine */-Konflikte).
+ * Kommentiert betroffene register()-Aufrufe zeilenweise mit // aus (kein Blockkommentar, kein Stern-Slash).
  * Legt pro geänderter Datei ein Backup mit Suffix .recovery-backup-*.php an.
  *
  * @return list<string> absolute Pfade der geänderten Bootstrap-Dateien
