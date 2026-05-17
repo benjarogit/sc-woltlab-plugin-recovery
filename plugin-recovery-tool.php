@@ -2,8 +2,6 @@
 
 declare(strict_types=1);
 
-declare(strict_types=1);
-
 define('RECOVERY_STUB_BEER_CSS', 'https://cdn.jsdelivr.net/npm/beercss@4.0.21/dist/cdn/beer.min.css');
 define('RECOVERY_STUB_BEER_JS', 'https://cdn.jsdelivr.net/npm/beercss@4.0.21/dist/cdn/beer.min.js');
 define('RECOVERY_STUB_BEER_COLORS_JS', 'https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.4/dist/cdn/material-dynamic-colors.min.js');
@@ -12,7 +10,6 @@ define('RECOVERY_STUB_FA_CSS', 'https://cdnjs.cloudflare.com/ajax/libs/font-awes
 function recoveryStubShellCss(): string
 {
     return <<<'RECOVERY_STUB_CSS'
-    <style>
         :root, html[data-recovery-theme="dark"] {
             --recovery-bg: #2D2D2D;
             --recovery-text: #c0c0c0;
@@ -761,8 +758,6 @@ function recoveryStubRenderPackageInstallPage(string $authHash, string $bodyHtml
     recoveryStubRenderPageEnd();
 }
 
-declare(strict_types=1);
-
 /**
  * WoltLab Plugin Recovery Tool — Stub (v2.0)
  *
@@ -772,8 +767,8 @@ declare(strict_types=1);
  * @version 2.0.0
  */
 
-define('RECOVERY_STUB_VERSION', '2.0.0');
-define('RECOVERY_PACKAGE_VERSION', '2.0.0');
+define('RECOVERY_STUB_VERSION', '2.0.1');
+define('RECOVERY_PACKAGE_VERSION', '2.0.1');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
