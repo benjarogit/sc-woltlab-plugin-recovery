@@ -13,33 +13,24 @@
   <img src="https://github.com/user-attachments/assets/387d02cb-4d84-47e9-8d2b-aac2cebccf8a" width="100%">
 </p>
 
-## Installation (v2.0: Stub + Paket)
+## Installation
 
-Ab **v2.0.0** besteht das Release aus zwei Teilen:
+Alles Nötige liegt unter **[Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases)** — nicht „Code herunterladen“.
 
-| Artefakt | Rolle |
-|----------|--------|
-| **`plugin-recovery-tool.php`** (Stub) | PHP-Gate, Auth, Paket-Download — ins WoltLab-Root |
-| **`recovery-X.Y.Z.tar.gz`** | Gesamte Recovery-Logik — wird **nach Auth automatisch** nach `recovery-tool/` entpackt |
-
-1. Unter [Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases) **`plugin-recovery-tool.php`** (Stub) herunterladen und ins **WoltLab-Hauptverzeichnis** legen (neben `global.php`).
+1. **[`plugin-recovery-tool.php` herunterladen](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases/latest/download/plugin-recovery-tool.php)** und ins **WoltLab-Hauptverzeichnis** legen (neben `global.php`).
 2. Im Browser aufrufen: `https://ihre-domain.de/plugin-recovery-tool.php`
-3. Auth wie bisher (siehe unten) — danach lädt der Stub **`recovery-2.0.0.tar.gz`** von GitHub und entpackt es nach `recovery-tool/`.
-4. Bei Download-Problemen: Archiv manuell entpacken oder den Link auf der Installationsseite nutzen.
+3. Auth durchführen (siehe unten) — danach lädt das Tool das Paket **`recovery-2.0.0.tar.gz`** von GitHub und entpackt es nach `recovery-tool/`.
+4. Schlägt der automatische Download fehl: auf der Seite im Tool den Link zum Archiv nutzen und manuell nach `recovery-tool/` entpacken.
 
 ```
 ihr-woltlab-root/
 ├── global.php
-├── lib/
-├── acp/
-├── plugin-recovery-tool.php      ← Stub (klein)
-├── plugin-recovery-auth.php      ← nach Auth-Upload (manuell)
-└── recovery-tool/                ← Paket (automatisch oder manuell)
-    ├── bootstrap.php
-    └── …
+├── plugin-recovery-tool.php
+├── plugin-recovery-auth.php      ← nach Auth-Upload
+└── recovery-tool/                ← wird vom Tool angelegt
 ```
 
-**Migration von 1.x:** Stub ersetzen; altes Monolith-Release entfällt. Auth-Datei und Ablauf bleiben gleich.
+**Upgrade von 1.x:** Alte `plugin-recovery-tool.php` durch die neue Version aus dem Release ersetzen. Auth-Ablauf bleibt gleich.
 
 ### Anmeldung (Auth-Datei)
 
@@ -51,7 +42,7 @@ Beim ersten Aufruf erzeugt das Tool auf **Ihrem Server** die Datei `plugin-recov
 
 ### Nach der Nutzung entfernen
 
-Button **„Recovery Tool vollständig entfernen“** im Tool verwenden. Das Tool löscht sich selbst, die Auth-Datei, den Ordner `recovery-tool/`, `uploads/` und Recovery-Logs unter `log/`. **Nicht dauerhaft auf dem Server lassen.**
+Button **„Recovery Tool vollständig entfernen“** im Tool verwenden. Es löscht sich selbst, die Auth-Datei, den Ordner `recovery-tool/`, `uploads/` und Recovery-Logs unter `log/`. **Nicht dauerhaft auf dem Server lassen.**
 
 ---
 

@@ -13,26 +13,24 @@
   <img src="https://github.com/user-attachments/assets/387d02cb-4d84-47e9-8d2b-aac2cebccf8a" width="100%">
 </p>
 
-## Installation (v2.0: stub + package)
+## Installation
 
-From **v2.0.0** each release ships two artifacts:
+Download everything from **[Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases)** — do not use “Download ZIP” on the repo page.
 
-| Artifact | Role |
-|----------|------|
-| **`plugin-recovery-tool.php`** (stub) | Auth, package download — place in WoltLab root |
-| **`recovery-X.Y.Z.tar.gz`** | Full recovery logic — installed automatically into `recovery-tool/` after auth |
-
-1. Download **`plugin-recovery-tool.php`** from [Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases) into your **WoltLab root** (next to `global.php`).
+1. **[Download `plugin-recovery-tool.php`](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases/latest/download/plugin-recovery-tool.php)** and upload it to your **WoltLab root** (same folder as `global.php`).
 2. Open `https://your-domain.com/plugin-recovery-tool.php` in your browser.
-3. Complete auth (below) — the stub then downloads **`recovery-2.0.0.tar.gz`** from GitHub and extracts it to `recovery-tool/`.
+3. Complete auth (below) — the tool then downloads **`recovery-2.0.0.tar.gz`** from GitHub and extracts it to `recovery-tool/`.
+4. If automatic download fails, use the link on the tool’s page and extract the archive into `recovery-tool/` manually.
 
 ```
 your-woltlab-root/
 ├── global.php
-├── plugin-recovery-tool.php      ← stub
+├── plugin-recovery-tool.php
 ├── plugin-recovery-auth.php      ← after upload
-└── recovery-tool/                ← package (auto or manual)
+└── recovery-tool/                ← created by the tool
 ```
+
+**Upgrading from 1.x:** Replace the old `plugin-recovery-tool.php` with the new release file. The auth flow is unchanged.
 
 ### Sign-in (auth file)
 
@@ -53,41 +51,45 @@ Use **“Remove Recovery Tool completely”** in the tool. It deletes itself, th
 - ACP errors such as “Call to a member function toHtml() on null”
 - Failed plugin install broke the admin panel
 - `ClassNotFoundException` after partial deletion of plugin files
-- Need to remove a plugin but ACP is unreachable
-- Must clear all caches
-- Reset admin password without ACP access
+- You need to remove a plugin but the ACP is unreachable
+- Caches must be cleared and nothing else works
+- Reset an admin password without the ACP
 
 ## Modes
 
 | Mode | Purpose |
 |------|---------|
-| **ACP Repair** | Remove broken ACP menu entries by package ID or archive |
-| **Plugin Uninstall** | Full removal from database and filesystem (wizard with backup) |
+| **ACP Repair** | Remove broken ACP menu items by package ID or archive |
+| **Plugin Uninstall** | Fully remove a plugin from database and filesystem (wizard with backup) |
 | **User Management** | Search users, password, groups, email, 2FA |
 | **Cache Clear** | Clear templates and cache directories |
-| **Package List Repair** | Clean orphaned package database entries |
-| **Repair plugin files** | Restore missing `.class.php` files from package archive |
-| **Recovery Wizard** | Guided repair: diagnosis → selection → execution |
+| **Package List Repair** | Clean orphaned package entries in the database |
+| **Repair plugin files** | Restore missing `.class.php` from package archive |
+| **Recovery Wizard** | Guided repair: diagnose → plan → execute |
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/0278a36b-419b-45be-8b60-971c1ff1d3d0" width="100%">
+</p>
 
 ---
 
-## Features (summary)
+## Features
 
 ### ACP Repair
 
-Remove broken ACP menu entries (by identifier or uploaded `.tar`/`.tar.gz`), with preview. Clears cache afterwards.
+Remove broken ACP menu items (by identifier or uploaded `.tar`/`.tar.gz`), with preview before deletion. Clears cache afterwards.
 
 ### Plugin Uninstall
 
-3-step wizard: analyse PIP resources → optional SQL backup → execute. Dry-run available. **Irreversible** — back up the database first.
+3-step wizard: analyse all PIP resources → optional SQL backup → execute. Dry-run available. **Irreversible** — back up your database first.
 
 ### User Management
 
-Search users, reset password, groups, email, activate account, disable 2FA.
+Search users, set passwords, groups, email, activate accounts, disable 2FA.
 
 ### Cache Clear
 
-Deletes `tmp/`, `cache/`, `templates/compiled/`, `acp/templates/compiled/` on disk.
+Deletes `tmp/`, `cache/`, `templates/compiled/`, `acp/templates/compiled/` on the filesystem.
 
 ### Package List Repair
 
@@ -95,7 +97,7 @@ Cleans orphaned `wcf_package_installation_queue` and `wcf_application` entries.
 
 ### Repair plugin files & Recovery Wizard
 
-Upload a package archive; the tool finds missing bootstrap classes and copies files from `files.tar` / `files_wcf.tar`. The wizard walks you through diagnosis and repair.
+Upload a package archive; the tool detects missing bootstrap classes and copies files from `files.tar` / `files_wcf.tar`. The wizard guides you through diagnosis and repair.
 
 ---
 
@@ -103,18 +105,18 @@ Upload a package archive; the tool finds missing bootstrap classes and copies fi
 
 - **Delete immediately after use** — full database access
 - Auth token expires after 24 hours
-- Protected system directories cannot be deleted by mistake
+- Protected system directories cannot be deleted by accident
 - Use the WoltLab ACP for normal uninstalls
 
 ## Requirements
 
 - WoltLab Suite 6.0+
 - PHP 8.1+
-- Write access in the WoltLab directory (including `log/` for debug on errors)
+- Write access in the WoltLab directory (including `log/` for error debugging)
 
 ## Version & changelog
 
-Latest version and release notes: [Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases)
+Current version and release notes: [Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases)
 
 ## License
 
