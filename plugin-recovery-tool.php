@@ -338,7 +338,8 @@ function recoveryStubRenderAuthWizard(string $authHash): void
 function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMessage = null): void
 {
     $version = RECOVERY_PACKAGE_VERSION;
-    $ghUrl = \htmlspecialchars(recoveryStubReleaseDownloadUrl($version));
+    $ghDownloadUrl = \htmlspecialchars(recoveryStubReleaseDownloadUrl($version));
+    $ghReleaseUrl = \htmlspecialchars(recoveryStubReleasePageUrl($version));
     $dirName = RECOVERY_PACKAGE_DIR_NAME;
 
     recoveryStubRenderPageStart('Recovery-Paket installieren', 'Paket wird für die volle Oberfläche benötigt');
@@ -350,7 +351,7 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
     <section class="section">
         <header class="sectionHeader">
             <h2 class="sectionTitle">Paket automatisch installieren</h2>
-            <p class="sectionDescription">Lädt <code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code> von GitHub und entpackt es nach <code><?= \htmlspecialchars($dirName) ?>/</code>.</p>
+            <p class="sectionDescription">Lädt <a href="<?= $ghDownloadUrl ?>"><code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code></a> vom <a href="<?= $ghReleaseUrl ?>" rel="noopener noreferrer">GitHub-Release v<?= \htmlspecialchars($version) ?></a> und entpackt es nach <code><?= \htmlspecialchars($dirName) ?>/</code>.</p>
         </header>
         <p class="info"><i class="fa-solid fa-box-archive" aria-hidden="true"></i> Version <strong>v<?= \htmlspecialchars($version) ?></strong> enthält alle Recovery-Modi und die ACP-Oberfläche.</p>
         <form method="post" action="plugin-recovery-tool.php" id="installPackageForm">
@@ -373,7 +374,7 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
         </header>
         <dl>
             <dt><label>Archiv</label></dt>
-            <dd><a href="<?= $ghUrl ?>">recovery-<?= \htmlspecialchars($version) ?>.tar.gz</a></dd>
+            <dd><a href="<?= $ghDownloadUrl ?>">recovery-<?= \htmlspecialchars($version) ?>.tar.gz</a> (<a href="<?= $ghReleaseUrl ?>" rel="noopener noreferrer">Release</a>)</dd>
             <dt><label>Zielverzeichnis</label></dt>
             <dd><code><?= \htmlspecialchars($dirName) ?>/</code> im WoltLab-Hauptverzeichnis (neben <code>plugin-recovery-tool.php</code>)</dd>
         </dl>
@@ -406,11 +407,11 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.0.7
+ * @version 2.0.8
  */
 
-define('RECOVERY_STUB_VERSION', '2.0.7');
-define('RECOVERY_PACKAGE_VERSION', '2.0.7');
+define('RECOVERY_STUB_VERSION', '2.0.8');
+define('RECOVERY_PACKAGE_VERSION', '2.0.8');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
@@ -446,6 +447,11 @@ function recoveryStubReleaseDownloadUrl(string $version): string
 {
     return 'https://github.com/' . RECOVERY_GITHUB_REPO
         . '/releases/download/v' . $version . '/recovery-' . $version . '.tar.gz';
+}
+
+function recoveryStubReleasePageUrl(string $version): string
+{
+    return 'https://github.com/' . RECOVERY_GITHUB_REPO . '/releases/tag/v' . $version;
 }
 
 /**
