@@ -13,18 +13,25 @@
   <img src="https://github.com/user-attachments/assets/387d02cb-4d84-47e9-8d2b-aac2cebccf8a" width="100%">
 </p>
 
-## Installation (one file)
+## Installation (v2.0: stub + package)
 
-1. **[Download `plugin-recovery-tool.php`](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases/latest/download/plugin-recovery-tool.php)** — open [Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases), pick the latest version, and save **only this file** (not “Download ZIP”).
-2. Upload via FTP/SFTP to your **WoltLab root** (same folder as `global.php`).
-3. Open in your browser: `https://your-domain.com/plugin-recovery-tool.php`
+From **v2.0.0** each release ships two artifacts:
+
+| Artifact | Role |
+|----------|------|
+| **`plugin-recovery-tool.php`** (stub) | Auth, package download — place in WoltLab root |
+| **`recovery-X.Y.Z.tar.gz`** | Full recovery logic — installed automatically into `recovery-tool/` after auth |
+
+1. Download **`plugin-recovery-tool.php`** from [Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases) into your **WoltLab root** (next to `global.php`).
+2. Open `https://your-domain.com/plugin-recovery-tool.php` in your browser.
+3. Complete auth (below) — the stub then downloads **`recovery-2.0.0.tar.gz`** from GitHub and extracts it to `recovery-tool/`.
 
 ```
 your-woltlab-root/
 ├── global.php
-├── lib/
-├── acp/
-└── plugin-recovery-tool.php   ← only this one file
+├── plugin-recovery-tool.php      ← stub
+├── plugin-recovery-auth.php      ← after upload
+└── recovery-tool/                ← package (auto or manual)
 ```
 
 ### Sign-in (auth file)
@@ -37,7 +44,7 @@ On first visit the tool creates `plugin-recovery-auth.php` **on your server** (s
 
 ### Remove when done
 
-Use **“Remove Recovery Tool completely”** in the tool. It deletes itself, the auth file, and recovery logs under `log/`. **Do not leave it on the server.**
+Use **“Remove Recovery Tool completely”** in the tool. It deletes itself, the auth file, the `recovery-tool/` folder, `uploads/`, and recovery logs under `log/`. **Do not leave it on the server.**
 
 ---
 

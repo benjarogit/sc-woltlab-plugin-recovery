@@ -13,19 +13,33 @@
   <img src="https://github.com/user-attachments/assets/387d02cb-4d84-47e9-8d2b-aac2cebccf8a" width="100%">
 </p>
 
-## Installation (eine Datei)
+## Installation (v2.0: Stub + Paket)
 
-1. **[`plugin-recovery-tool.php` herunterladen](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases/latest/download/plugin-recovery-tool.php)** — unter [Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases) auf die neueste Version klicken und **nur diese Datei** speichern (nicht „Code herunterladen“).
-2. Per FTP/SFTP ins **WoltLab-Hauptverzeichnis** legen (derselbe Ordner wie `global.php`).
-3. Im Browser aufrufen: `https://ihre-domain.de/plugin-recovery-tool.php`
+Ab **v2.0.0** besteht das Release aus zwei Teilen:
+
+| Artefakt | Rolle |
+|----------|--------|
+| **`plugin-recovery-tool.php`** (Stub) | PHP-Gate, Auth, Paket-Download — ins WoltLab-Root |
+| **`recovery-X.Y.Z.tar.gz`** | Gesamte Recovery-Logik — wird **nach Auth automatisch** nach `recovery-tool/` entpackt |
+
+1. Unter [Releases](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases) **`plugin-recovery-tool.php`** (Stub) herunterladen und ins **WoltLab-Hauptverzeichnis** legen (neben `global.php`).
+2. Im Browser aufrufen: `https://ihre-domain.de/plugin-recovery-tool.php`
+3. Auth wie bisher (siehe unten) — danach lädt der Stub **`recovery-2.0.0.tar.gz`** von GitHub und entpackt es nach `recovery-tool/`.
+4. Bei Download-Problemen: Archiv manuell entpacken oder den Link auf der Installationsseite nutzen.
 
 ```
 ihr-woltlab-root/
 ├── global.php
 ├── lib/
 ├── acp/
-└── plugin-recovery-tool.php   ← nur diese eine Datei
+├── plugin-recovery-tool.php      ← Stub (klein)
+├── plugin-recovery-auth.php      ← nach Auth-Upload (manuell)
+└── recovery-tool/                ← Paket (automatisch oder manuell)
+    ├── bootstrap.php
+    └── …
 ```
+
+**Migration von 1.x:** Stub ersetzen; altes Monolith-Release entfällt. Auth-Datei und Ablauf bleiben gleich.
 
 ### Anmeldung (Auth-Datei)
 
@@ -37,7 +51,7 @@ Beim ersten Aufruf erzeugt das Tool auf **Ihrem Server** die Datei `plugin-recov
 
 ### Nach der Nutzung entfernen
 
-Button **„Recovery Tool vollständig entfernen“** im Tool verwenden. Das Tool löscht sich selbst, die Auth-Datei und Recovery-Logs unter `log/`. **Nicht dauerhaft auf dem Server lassen.**
+Button **„Recovery Tool vollständig entfernen“** im Tool verwenden. Das Tool löscht sich selbst, die Auth-Datei, den Ordner `recovery-tool/`, `uploads/` und Recovery-Logs unter `log/`. **Nicht dauerhaft auf dem Server lassen.**
 
 ---
 
