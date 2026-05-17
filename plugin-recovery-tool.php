@@ -407,11 +407,11 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.0.9
+ * @version 2.0.10
  */
 
-define('RECOVERY_STUB_VERSION', '2.0.9');
-define('RECOVERY_PACKAGE_VERSION', '2.0.9');
+define('RECOVERY_STUB_VERSION', '2.0.10');
+define('RECOVERY_PACKAGE_VERSION', '2.0.10');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
@@ -740,17 +740,15 @@ function recoveryStubExtractTarGz(string $archive, string $destination): array
                 if ($relative === '' || \str_contains($relative, '..')) {
                     continue;
                 }
-                if ($stripPrefix && \str_starts_with($relative, RECOVERY_PACKAGE_DIR_NAME . '/')) {
-                    $relative = \substr($relative, \strlen(RECOVERY_PACKAGE_DIR_NAME) + 1);
-                }
-                if ($relative !== '') {
-                    $files[] = $relative;
-                }
+                $files[] = $relative;
             }
             if ($files === []) {
                 return ['ok' => false, 'error' => 'Archiv enthält keine Dateien.'];
             }
             $phar->extractTo($destination, $files, true);
+            if ($stripPrefix) {
+                recoveryStubFlattenNestedPackageDir($destination);
+            }
         } catch (\Throwable $e) {
             return ['ok' => false, 'error' => 'PharData: ' . $e->getMessage()];
         }
@@ -766,10 +764,6 @@ function recoveryStubExtractTarGz(string $archive, string $destination): array
         if ($code !== 0) {
             return ['ok' => false, 'error' => 'tar exit ' . $code . ': ' . \implode("\n", $out)];
         }
-    }
-
-    if ($stripPrefix) {
-        recoveryStubFlattenNestedPackageDir($destination);
     }
 
     if (!\is_file($destination . 'bootstrap.php')) {
