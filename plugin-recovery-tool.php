@@ -13,19 +13,35 @@ function recoveryStubGetSiteBaseUrl(): string
 }
 
 /**
- * @return array{WCFSetup.css: string, woltlabSuite.png: string, fontAwesomeCss: string, fontAwesomeLocal: bool}
+ * @return list<string>
+ */
+function recoveryStubResolveAcpStylesheets(): array
+{
+    $root = recoveryStubWcfRoot();
+    foreach (['acp/style/style.css', 'acp/style/setup/WCFSetup.css'] as $relative) {
+        if (\is_readable($root . $relative)) {
+            return [$relative];
+        }
+    }
+
+    return [];
+}
+
+/**
+ * @return array{stylesheets: list<string>, WCFSetup.css: string, woltlabSuite.png: string, fontAwesomeCss: string, fontAwesomeLocal: bool}
  */
 function recoveryStubGetSetupAssets(): array
 {
     $root = recoveryStubWcfRoot();
     $assets = [
+        'stylesheets' => recoveryStubResolveAcpStylesheets(),
         'WCFSetup.css' => '',
         'woltlabSuite.png' => '',
         'fontAwesomeCss' => '',
         'fontAwesomeLocal' => false,
     ];
-    if (\is_readable($root . 'acp/style/setup/WCFSetup.css')) {
-        $assets['WCFSetup.css'] = 'acp/style/setup/WCFSetup.css';
+    if ($assets['stylesheets'] !== []) {
+        $assets['WCFSetup.css'] = $assets['stylesheets'][0];
     }
     if (\is_readable($root . 'acp/images/woltlabSuite.png')) {
         $assets['woltlabSuite.png'] = 'acp/images/woltlabSuite.png';
@@ -50,27 +66,7 @@ function recoveryStubAssetHref(string $relative): string
 function recoveryStubWizardCss(): string
 {
     return <<<'RECOVERY_STUB_WIZARD_CSS'
-/* Recovery-Tool: nur Ergänzungen — Basis ist WCFSetup.css (ACP) */
-
-.content {
-    margin: 0 auto;
-    max-width: 980px;
-}
-
-/* Auth-Wizard */
-.wizardSteps { display: flex; align-items: flex-start; margin: 0 0 30px; padding: 0; }
-.wizardStep { display: flex; flex-direction: column; align-items: center; position: relative; flex: 1; }
-.wizardStep::after { content: ''; position: absolute; top: 20px; left: 50%; width: 100%; height: 2px; background: var(--wcfContentBorderInner, #ddd); z-index: 0; }
-.wizardStep:last-child::after { display: none; }
-.wizardStepNumber { width: 40px; height: 40px; border-radius: 50%; background: var(--wcfTabularBoxBackgroundActive, #e0e0e0); color: var(--wcfContentDimmedText, #888); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; position: relative; z-index: 1; border: 2px solid var(--wcfContentBorderInner, #ddd); }
-.wizardStep.active .wizardStepNumber { background: var(--wcfStatusInfoBackground, #369); color: #fff; border-color: var(--wcfStatusInfoBorder, #369); }
-.wizardStep.completed .wizardStepNumber { background: var(--wcfStatusSuccessBackground, #3a3); color: transparent; border-color: var(--wcfStatusSuccessBorder, #3a3); }
-.wizardStep.completed .wizardStepNumber::after { content: '✓'; color: #fff; font-size: 16px; font-weight: 700; position: absolute; }
-.wizardStepLabel { margin-top: 8px; font-size: 12px; color: var(--wcfContentDimmedText, #888); text-align: center; line-height: 1.3; }
-.wizardStep.active .wizardStepLabel { color: var(--wcfContentText, #333); font-weight: 600; }
-.wizardPanel { display: none; }
-.wizardPanel.active { display: block; }
-
+/* Stub: keine Wizard-CSS — Layout kommt von WCFSetup / ACP style.css */
 
 RECOVERY_STUB_WIZARD_CSS;
 }
@@ -79,7 +75,6 @@ RECOVERY_STUB_WIZARD_CSS;
 function recoveryStubRenderPageStart(string $title, string $subtitle = ''): void
 {
     $assets = recoveryStubGetSetupAssets();
-    $cssHref = recoveryStubAssetHref($assets['WCFSetup.css']);
     $logoHref = recoveryStubAssetHref($assets['woltlabSuite.png']);
     $faHref = $assets['fontAwesomeCss'] !== ''
         ? recoveryStubAssetHref($assets['fontAwesomeCss'])
@@ -95,20 +90,24 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = ''): void
     <meta name="robots" content="noindex">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= \htmlspecialchars($title) ?></title>
-    <?php if ($cssHref !== ''): ?>
-    <link rel="stylesheet" href="<?= \htmlspecialchars($cssHref) ?>">
-    <?php endif; ?>
+    <?php foreach ($assets['stylesheets'] as $stylesheet): ?>
+    <link rel="stylesheet" type="text/css" href="<?= \htmlspecialchars(recoveryStubAssetHref($stylesheet)) ?>">
+    <?php endforeach; ?>
     <link rel="stylesheet" href="<?= \htmlspecialchars($faHref) ?>"<?= $faExtra ?>>
-    <style><?= recoveryStubWizardCss() ?></style>
+    <style>
+        .content { margin: 0 auto; max-width: 800px; }
+        .recovery-auth-step[hidden] { display: none !important; }
+    </style>
 </head>
-<body class="wcfAcp">
+<body id="tplRecoveryAuth" class="wcfAcp">
+<a id="top"></a>
 <div id="pageContainer" class="pageContainer acpPageHiddenMenu">
     <div class="pageHeaderContainer">
         <header id="pageHeaderFacade" class="pageHeaderFacade">
             <div class="layoutBoundary">
                 <div id="pageHeaderLogo" class="pageHeaderLogo">
                     <?php if ($logoHref !== ''): ?>
-                    <img src="<?= \htmlspecialchars($logoHref) ?>" alt="" style="width:281px;height:40px;display:inline!important;">
+                    <img src="<?= \htmlspecialchars($logoHref) ?>" alt="" class="pageHeaderLogoLarge" style="width:281px;height:40px;display:inline!important;">
                     <?php endif; ?>
                 </div>
             </div>
@@ -135,7 +134,7 @@ function recoveryStubRenderPageEnd(): void
         </section>
     </div>
 </div>
-<p class="recovery-footer-meta" style="text-align:right;font-size:13px;margin:16px;">
+<p class="recovery-footer-meta" style="text-align:right;font-size:13px;margin:16px;color:var(--wcfContentDimmedText,#888);">
     <a href="https://github.com/benjarogit/sc-woltlab-plugin-recovery" target="_blank" rel="noopener">Plugin Recovery Tool</a>
     | <a href="https://manual.woltlab.com/de/recovery-tool/" target="_blank" rel="noopener">WoltLab Recovery</a>
 </p>
@@ -149,52 +148,49 @@ function recoveryStubRenderAuthWizard(string $authHash): void
     $authFile = RECOVERY_AUTH_FILENAME;
     recoveryStubRenderPageStart('Plugin Recovery Tool', 'Authentifizierung erforderlich');
     ?>
-    <div class="wizardSteps" id="authWizardSteps">
-        <div class="wizardStep active">
-            <div class="wizardStepNumber">1</div>
-            <div class="wizardStepLabel">Auth-Datei laden</div>
-        </div>
-        <div class="wizardStep">
-            <div class="wizardStepNumber">2</div>
-            <div class="wizardStepLabel">Hochladen</div>
-        </div>
-        <div class="wizardStep">
-            <div class="wizardStepNumber">3</div>
-            <div class="wizardStepLabel">Starten</div>
-        </div>
-    </div>
+    <p class="sectionDescription" style="margin-bottom:20px">
+        <progress id="authWizardProgress" value="1" max="3" style="width:300px">33%</progress>
+        <span id="authWizardProgressLabel"> Schritt 1 von 3</span>
+    </p>
 
-    <div class="wizardPanel active" id="wp1">
-        <p class="info"><strong><i class="fa-solid fa-file-arrow-down"></i> Schritt 1: Auth-Datei herunterladen</strong><br>
-        Laden Sie die Authentifizierungsdatei herunter. Sie enthält ein einmaliges Token.</p>
+    <section class="section recovery-auth-step" id="auth-step-1">
+        <header class="sectionHeader">
+            <h2 class="sectionTitle">Auth-Datei laden</h2>
+            <p class="sectionDescription">Laden Sie die Authentifizierungsdatei herunter. Sie enthält ein einmaliges Token.</p>
+        </header>
+        <p class="info"><i class="fa-solid fa-file-arrow-down"></i> Die Datei <code><?= \htmlspecialchars($authFile) ?></code> wird für Schritt 2 benötigt.</p>
         <div class="formSubmit">
             <a href="?action=download-auth-file&amp;t=<?= \htmlspecialchars($authHash) ?>" class="button" id="downloadBtn">
                 <i class="fa-solid fa-file-arrow-down"></i> <?= \htmlspecialchars($authFile) ?> herunterladen
             </a>
         </div>
-    </div>
+    </section>
 
-    <div class="wizardPanel" id="wp2">
-        <p class="info"><strong><i class="fa-solid fa-file-arrow-up"></i> Schritt 2: Datei hochladen</strong><br>
-        Laden Sie <code><?= \htmlspecialchars($authFile) ?></code> ins WoltLab-Hauptverzeichnis (neben <code>plugin-recovery-tool.php</code>).<br>
-        <small>Nutzen Sie FTP, SFTP oder den Dateimanager Ihres Hosters.</small></p>
+    <section class="section recovery-auth-step" id="auth-step-2" hidden>
+        <header class="sectionHeader">
+            <h2 class="sectionTitle">Datei hochladen</h2>
+            <p class="sectionDescription">Legen Sie die Datei ins WoltLab-Hauptverzeichnis (neben <code>plugin-recovery-tool.php</code>).</p>
+        </header>
+        <p class="info"><i class="fa-solid fa-file-arrow-up"></i> FTP, SFTP oder Dateimanager Ihres Hosters.</p>
         <div class="formSubmit">
             <button type="button" class="button" id="uploadedBtn">
                 <i class="fa-solid fa-circle-check"></i> Ich habe die Datei hochgeladen
             </button>
         </div>
-        <span id="pollStatus" style="margin-left:14px;font-size:13px;color:var(--wcfContentDimmedText,#888);"></span>
-    </div>
+        <p><small id="pollStatus"></small></p>
+    </section>
 
-    <div class="wizardPanel" id="wp3">
-        <p class="success"><strong><i class="fa-solid fa-circle-check"></i> Authentifizierung erfolgreich!</strong><br>
-        Die Auth-Datei wurde erkannt.</p>
+    <section class="section recovery-auth-step" id="auth-step-3" hidden>
+        <header class="sectionHeader">
+            <h2 class="sectionTitle">Recovery Tool starten</h2>
+        </header>
+        <p class="success"><strong><i class="fa-solid fa-circle-check"></i> Authentifizierung erfolgreich!</strong> Die Auth-Datei wurde erkannt.</p>
         <div class="formSubmit">
             <a href="?t=<?= \htmlspecialchars($authHash) ?>&amp;auth_ok=1" class="button">
                 <i class="fa-solid fa-rocket"></i> Recovery Tool starten
             </a>
         </div>
-    </div>
+    </section>
 
     <p class="warning" style="margin-top:24px;"><i class="fa-solid fa-shield-halved"></i> <strong>Sicherheitshinweis:</strong>
     Löschen Sie <code>plugin-recovery-tool.php</code> und <code><?= \htmlspecialchars($authFile) ?></code> nach der Verwendung.</p>
@@ -203,16 +199,27 @@ function recoveryStubRenderAuthWizard(string $authHash): void
     (function () {
         var authToken = <?= \json_encode($authHash) ?>;
         var pollInterval = null;
+        var progress = document.getElementById('authWizardProgress');
+        var progressLabel = document.getElementById('authWizardProgressLabel');
+        var steps = [
+            document.getElementById('auth-step-1'),
+            document.getElementById('auth-step-2'),
+            document.getElementById('auth-step-3')
+        ];
+
         function goToStep(n) {
-            document.querySelectorAll('#authWizardSteps .wizardStep').forEach(function (el, i) {
-                el.classList.remove('active', 'completed');
-                if (i + 1 < n) { el.classList.add('completed'); }
-                if (i + 1 === n) { el.classList.add('active'); }
+            steps.forEach(function (el, i) {
+                if (!el) { return; }
+                el.hidden = i + 1 !== n;
             });
-            document.querySelectorAll('.wizardPanel').forEach(function (el, i) {
-                el.classList.toggle('active', i + 1 === n);
-            });
+            if (progress) {
+                progress.value = String(n);
+            }
+            if (progressLabel) {
+                progressLabel.textContent = ' Schritt ' + n + ' von 3';
+            }
         }
+
         document.getElementById('downloadBtn').addEventListener('click', function () {
             setTimeout(function () { goToStep(2); }, 800);
         });
@@ -223,8 +230,12 @@ function recoveryStubRenderAuthWizard(string $authHash): void
                 fetch('?action=auth-status&t=' + encodeURIComponent(authToken))
                     .then(function (r) { return r.json(); })
                     .then(function (data) {
-                        if (data.ok) { clearInterval(pollInterval); goToStep(3); }
-                        else { document.getElementById('pollStatus').textContent = 'Datei noch nicht gefunden \u2013 prüfe erneut\u2026'; }
+                        if (data.ok) {
+                            clearInterval(pollInterval);
+                            goToStep(3);
+                        } else {
+                            document.getElementById('pollStatus').textContent = 'Datei noch nicht gefunden \u2013 prüfe erneut\u2026';
+                        }
                     })
                     .catch(function () {});
             }, 2000);
@@ -248,11 +259,11 @@ function recoveryStubRenderPackageInstallPage(string $authHash, string $bodyHtml
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.0.0
+ * @version 2.0.3
  */
 
-define('RECOVERY_STUB_VERSION', '2.0.2');
-define('RECOVERY_PACKAGE_VERSION', '2.0.2');
+define('RECOVERY_STUB_VERSION', '2.0.3');
+define('RECOVERY_PACKAGE_VERSION', '2.0.3');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
@@ -531,7 +542,7 @@ if ($action === 'install-package' && $isAuthenticated) {
         \header('Location: plugin-recovery-tool.php?t=' . \urlencode($authHash) . '&package_ok=1');
         exit;
     }
-    recoveryStubRenderPackageInstallPage($authHash, '<div class="alert alert-error">' . $result['error'] . '</div>');
+    recoveryStubRenderPackageInstallPage($authHash, '<p class="error">' . $result['error'] . '</div>');
     exit;
 }
 
