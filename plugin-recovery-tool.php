@@ -344,6 +344,10 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
 
     recoveryStubRenderPageStart('Recovery-Paket installieren', 'Paket wird für die volle Oberfläche benötigt');
     ?>
+    <p class="sectionDescription" style="margin-bottom:16px">
+        Debug-Logs: <code><?= \htmlspecialchars(RECOVERY_STUB_LOG_SUBDIR) ?>/</code>
+        (z.&nbsp;B. <code>stub-<?= \date('Y-m-d') ?>.log</code>)
+    </p>
     <?php if ($errorMessage !== null && $errorMessage !== ''): ?>
     <p class="error"><strong><i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Fehler</strong><br><?= $errorMessage ?></p>
     <?php endif; ?>
@@ -407,16 +411,17 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.0.10
+ * @version 2.0.11
  */
 
-define('RECOVERY_STUB_VERSION', '2.0.10');
-define('RECOVERY_PACKAGE_VERSION', '2.0.10');
+define('RECOVERY_STUB_VERSION', '2.0.11');
+define('RECOVERY_PACKAGE_VERSION', '2.0.11');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
 define('RECOVERY_PACKAGE_DIR_NAME', 'recovery-tool');
 
+require __DIR__ . '/recovery-stub-logger.php';
 
 if (\PHP_VERSION_ID < 80100) {
     \header('Content-Type: text/html; charset=utf-8');
@@ -794,6 +799,7 @@ function recoveryStubExtractTarGz(string $archive, string $destination): array
 function recoveryStubInstallPackage(string $version): array
 {
     @\set_time_limit(300);
+    recoveryStubLog('info', 'Paket-Installation gestartet', ['version' => $version]);
 
     $url = recoveryStubReleaseDownloadUrl($version);
     $dest = recoveryStubPackageDir();
@@ -801,6 +807,8 @@ function recoveryStubInstallPackage(string $version): array
 
     $download = recoveryStubHttpDownload($url);
     if (!$download['ok']) {
+        recoveryStubLog('error', 'Download fehlgeschlagen', ['error' => $download['error'], 'url' => $url]);
+
         return [
             'ok' => false,
             'error' => $download['error'] . ' Bitte '
@@ -833,30 +841,20 @@ function recoveryStubInstallPackage(string $version): array
     $extract = recoveryStubExtractTarGz($archive, $dest);
     @\unlink($archive);
 
+    if ($extract['ok']) {
+        recoveryStubLog('info', 'Paket erfolgreich installiert', ['dest' => $dest]);
+    } else {
+        recoveryStubLog('error', 'Paket-Entpacken fehlgeschlagen', ['error' => $extract['error'] ?? '']);
+    }
+
     return $extract;
 }
 
 function recoveryStubCleanupAuxiliary(): void
 {
-    $root = recoveryStubWcfRoot();
-    $paths = [
-        $root . RECOVERY_AUTH_FILENAME,
-        $root . 'uploads',
-        recoveryStubPackageDir(),
-    ];
-    foreach ($paths as $path) {
-        if (\is_file($path)) {
-            @\unlink($path);
-        } elseif (\is_dir($path)) {
-            recoveryStubRemoveDirectory($path);
-        }
-    }
-    foreach (\glob($root . 'log/recovery-tool-*.ndjson') ?: [] as $log) {
-        @\unlink($log);
-    }
-    foreach (\glob($root . 'log/plugin-recovery-*.ndjson') ?: [] as $log) {
-        @\unlink($log);
-    }
+    recoveryStubLog('info', 'Stub-Cleanup gestartet');
+    recoveryStubCleanupAllRecoveryArtifacts();
+    recoveryStubLog('info', 'Stub-Cleanup abgeschlossen');
 }
 
 // --- Token ---
