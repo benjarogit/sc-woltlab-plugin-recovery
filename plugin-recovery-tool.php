@@ -161,6 +161,41 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
         #pageHeader { padding: 30px 20px; }
         .content { margin: 0 auto; max-width: 800px; }
         .recovery-auth-step[hidden] { display: none !important; }
+        .recovery-log-panel { margin-top: 24px; }
+        .recovery-log-panel > summary {
+            cursor: pointer;
+            list-style: none;
+            font-weight: 600;
+        }
+        .recovery-log-panel > summary::-webkit-details-marker { display: none; }
+        .recovery-log-panel > summary::before {
+            content: "\f078";
+            font-family: "Font Awesome 6 Free", "Font Awesome 7 Free";
+            font-weight: 900;
+            display: inline-block;
+            margin-right: 8px;
+            transition: transform 0.15s ease;
+        }
+        .recovery-log-panel[open] > summary::before { transform: rotate(-180deg); }
+        .recovery-log-files { margin: 12px 0 0; }
+        .recovery-log-files dt { font-weight: 600; margin-top: 8px; }
+        .recovery-log-files dd { margin: 2px 0 0; color: var(--wcfContentDimmedText, #888); }
+        .recovery-log-files code { font-size: 12px; }
+        .recovery-log-pre {
+            margin: 12px 0 0;
+            padding: 12px 14px;
+            max-height: 220px;
+            overflow: auto;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.45;
+            border-radius: 4px;
+            background: var(--wcfSidebarBackground, rgba(0,0,0,.06));
+            border: 1px solid var(--wcfContainerBorder, rgba(0,0,0,.12));
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .recovery-log-empty { margin: 8px 0 0; color: var(--wcfContentDimmedText, #888); font-size: 13px; }
     </style>
     <?php if ($wizardCss !== '' && !$assets['usesCompiledAcpStyle']): ?>
     <style><?= $wizardCss ?></style>
@@ -204,8 +239,65 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
     <?php
 }
 
-function recoveryStubRenderPageEnd(): void
+function recoveryStubRenderLogPanel(bool $expanded = false): void
 {
+    $catalog = recoveryStubLogFileCatalog();
+    $excerpt = recoveryStubRecentLogExcerpt();
+    $open = $expanded || $excerpt !== [];
+    ?>
+    <section class="section recovery-log-section">
+        <details class="recovery-log-panel"<?= $open ? ' open' : '' ?>>
+            <summary>Protokoll &amp; Diagnose</summary>
+            <p class="sectionDescription" style="margin-top:12px">
+                Verzeichnis: <code title="<?= \htmlspecialchars(recoveryStubLogDir()) ?>"><?= \htmlspecialchars(recoveryStubLogDisplayPath()) ?></code>
+            </p>
+            <dl class="recovery-log-files">
+                <?php foreach ($catalog as $entry): ?>
+                <dt>
+                    <?= \htmlspecialchars($entry['label']) ?>
+                    <?php if ($entry['exists']): ?>
+                    <span class="badge green small"><?= \htmlspecialchars(recoveryStubFormatLogSize($entry['size'])) ?></span>
+                    <?php else: ?>
+                    <span class="badge small">leer</span>
+                    <?php endif; ?>
+                </dt>
+                <dd>
+                    <?= \htmlspecialchars($entry['description']) ?>
+                    — <code><?= \htmlspecialchars($entry['file']) ?></code>
+                </dd>
+                <?php endforeach; ?>
+            </dl>
+            <?php if ($excerpt !== []): ?>
+            <p class="sectionDescription" style="margin-top:14px">Letzte Einträge</p>
+            <pre class="recovery-log-pre" role="log"><?= \htmlspecialchars(\implode("\n", $excerpt)) ?></pre>
+            <?php else: ?>
+            <p class="recovery-log-empty">Nach Aktionen (Download, Auth, Installation) erscheinen hier die letzten Zeilen.</p>
+            <?php endif; ?>
+        </details>
+    </section>
+    <?php
+}
+
+function recoveryStubFormatLogSize(int $bytes): string
+{
+    if ($bytes < 1024) {
+        return $bytes . ' B';
+    }
+    if ($bytes < 1048576) {
+        return \round($bytes / 1024, 1) . ' KB';
+    }
+
+    return \round($bytes / 1048576, 1) . ' MB';
+}
+
+/**
+ * @param array{showLogPanel?: bool, logPanelExpanded?: bool} $options
+ */
+function recoveryStubRenderPageEnd(array $options = []): void
+{
+    if ($options['showLogPanel'] ?? true) {
+        recoveryStubRenderLogPanel((bool) ($options['logPanelExpanded'] ?? false));
+    }
     ?>
                 </div>
             </div>
@@ -225,17 +317,13 @@ function recoveryStubRenderIntegrityError(string $message, ?string $logDir = nul
 {
     recoveryStubLogExposeHeaders();
     recoveryStubRenderPageStart('Plugin Recovery Tool', 'Integritätsprüfung fehlgeschlagen');
-    $logDir = $logDir ?? recoveryStubLogDir();
     ?>
     <p class="error"><strong><i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Ungültige Recovery-Datei</strong><br>
     <?= \htmlspecialchars($message) ?></p>
     <p class="info">Laden Sie <code>plugin-recovery-tool.php</code> ausschließlich vom
         <a href="https://github.com/<?= \htmlspecialchars(RECOVERY_GITHUB_REPO) ?>/releases" rel="noopener noreferrer">offiziellen GitHub-Release</a> herunter.</p>
-    <p class="info"><i class="fa-solid fa-file-lines" aria-hidden="true"></i>
-        Details wurden protokolliert unter <code><?= \htmlspecialchars($logDir) ?></code>
-        (<code>stub-errors-<?= \date('Y-m-d') ?>.log</code>, <code>stub-actions-<?= \date('Y-m-d') ?>.log</code>).</p>
     <?php
-    recoveryStubRenderPageEnd();
+    recoveryStubRenderPageEnd(['logPanelExpanded' => true]);
 }
 
 function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = null): void
@@ -353,7 +441,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
     }());
     </script>
     <?php
-    recoveryStubRenderPageEnd();
+    recoveryStubRenderPageEnd(['logPanelExpanded' => $errorMessage !== null && $errorMessage !== '']);
 }
 
 function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMessage = null): void
@@ -365,12 +453,6 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
 
     recoveryStubRenderPageStart('Recovery-Paket installieren', 'Paket wird für die volle Oberfläche benötigt');
     ?>
-    <p class="sectionDescription" style="margin-bottom:16px">
-        Logs: <code><?= \htmlspecialchars(recoveryStubLogDir()) ?></code>
-        — <code>stub-<?= \date('Y-m-d') ?>.log</code>,
-        <code>stub-actions-<?= \date('Y-m-d') ?>.log</code>,
-        <code>stub-errors-<?= \date('Y-m-d') ?>.log</code>
-    </p>
     <?php if ($errorMessage !== null && $errorMessage !== ''): ?>
     <p class="error"><strong><i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Fehler</strong><br><?= $errorMessage ?></p>
     <?php endif; ?>
@@ -425,7 +507,7 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
     }());
     </script>
     <?php
-    recoveryStubRenderPageEnd();
+    recoveryStubRenderPageEnd(['logPanelExpanded' => $errorMessage !== null && $errorMessage !== '']);
 }
 
 \define('RECOVERY_STUB_LOG_SUBDIR', 'log/recovery');
@@ -555,6 +637,79 @@ function recoveryStubLogRequestStarted(): void
         'logDir' => recoveryStubLogDir(),
         'wcfRoot' => recoveryStubWcfRoot(),
     ]);
+}
+
+function recoveryStubLogDisplayPath(): string
+{
+    $root = \rtrim(recoveryStubWcfRoot(), '/\\') . '/';
+    $dir = recoveryStubLogDir();
+    if (\str_starts_with($dir, $root)) {
+        return \rtrim(\substr($dir, \strlen($root)), '/') . '/';
+    }
+
+    return $dir;
+}
+
+/**
+ * @return list<array{file: string, label: string, description: string, exists: bool, size: int}>
+ */
+function recoveryStubLogFileCatalog(): array
+{
+    $date = \date('Y-m-d');
+    $entries = [
+        ['file' => 'stub-' . $date . '.log', 'label' => 'Gesamtprotokoll', 'description' => 'Alle Meldungen des Stub'],
+        ['file' => 'stub-actions-' . $date . '.log', 'label' => 'Aktionen', 'description' => 'Requests, Auth-Schritte, Installation'],
+        ['file' => 'stub-errors-' . $date . '.log', 'label' => 'Fehler', 'description' => 'Integrität, Auth, Download'],
+        ['file' => 'stub-debug-' . $date . '.ndjson', 'label' => 'Debug (NDJSON)', 'description' => 'Strukturierte Diagnose'],
+    ];
+    foreach ($entries as &$entry) {
+        $path = recoveryStubLogPath($entry['file']);
+        $entry['exists'] = \is_file($path) && \is_readable($path);
+        $entry['size'] = $entry['exists'] ? (int) \filesize($path) : 0;
+    }
+    unset($entry);
+
+    return $entries;
+}
+
+function recoveryStubReadLogTail(string $basename, int $maxLines = 15): string
+{
+    if (!\preg_match('~^stub-(?:actions-|errors-|debug-)?\d{4}-\d{2}-\d{2}\.(?:log|ndjson)$~', $basename)) {
+        return '';
+    }
+    $path = recoveryStubLogPath($basename);
+    if (!\is_file($path) || !\is_readable($path)) {
+        return '';
+    }
+    $lines = @\file($path, \FILE_IGNORE_NEW_LINES);
+    if (!\is_array($lines) || $lines === []) {
+        return '';
+    }
+
+    return \implode("\n", \array_slice($lines, -\max(1, $maxLines)));
+}
+
+/**
+ * @return list<string>
+ */
+function recoveryStubRecentLogExcerpt(int $maxLines = 18): array
+{
+    $date = \date('Y-m-d');
+    $chunks = [];
+    foreach (['stub-errors-' . $date . '.log', 'stub-actions-' . $date . '.log', 'stub-' . $date . '.log'] as $file) {
+        $tail = recoveryStubReadLogTail($file, 8);
+        if ($tail !== '') {
+            $chunks[] = '--- ' . $file . " ---\n" . $tail;
+        }
+    }
+
+    if ($chunks === []) {
+        return [];
+    }
+
+    $merged = \explode("\n", \implode("\n", $chunks));
+
+    return \array_slice($merged, -\max(1, $maxLines));
 }
 
 function recoveryStubLogExposeHeaders(): void
@@ -945,12 +1100,12 @@ function recoveryStubCleanupAuthState(): void
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.1.2
+ * @version 2.1.3
  */
 
-define('RECOVERY_STUB_VERSION', '2.1.2');
-define('RECOVERY_PACKAGE_VERSION', '2.1.2');
-define('RECOVERY_STUB_INTEGRITY_HASH', '70f77486446c79d6c3c4964986c622e05973f03a53e050a113f3d107ad08587c');
+define('RECOVERY_STUB_VERSION', '2.1.3');
+define('RECOVERY_PACKAGE_VERSION', '2.1.3');
+define('RECOVERY_STUB_INTEGRITY_HASH', '67697e9e1be16e6514d5ffc252f431f185ec2e1f7a620b675ab7c395ec4c7575');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
