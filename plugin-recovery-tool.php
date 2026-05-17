@@ -221,7 +221,19 @@ function recoveryStubRenderPageEnd(): void
     <?php
 }
 
-function recoveryStubRenderAuthWizard(string $authHash): void
+function recoveryStubRenderIntegrityError(string $message): void
+{
+    recoveryStubRenderPageStart('Plugin Recovery Tool', 'Integritätsprüfung fehlgeschlagen');
+    ?>
+    <p class="error"><strong><i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Ungültige Recovery-Datei</strong><br>
+    <?= \htmlspecialchars($message) ?></p>
+    <p class="info">Laden Sie <code>plugin-recovery-tool.php</code> ausschließlich vom
+        <a href="https://github.com/<?= \htmlspecialchars(RECOVERY_GITHUB_REPO) ?>/releases" rel="noopener noreferrer">offiziellen GitHub-Release</a> herunter.</p>
+    <?php
+    recoveryStubRenderPageEnd();
+}
+
+function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = null): void
 {
     $authFile = RECOVERY_AUTH_FILENAME;
     recoveryStubRenderPageStart('Plugin Recovery Tool', '', [
@@ -230,10 +242,13 @@ function recoveryStubRenderAuthWizard(string $authHash): void
         'label' => 'Schritt 1 von 3',
     ]);
     ?>
+    <?php if ($errorMessage !== null && $errorMessage !== ''): ?>
+    <p class="error"><strong><i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Authentifizierung</strong><br><?= \htmlspecialchars($errorMessage) ?></p>
+    <?php endif; ?>
     <section class="section recovery-auth-step" id="auth-step-1">
         <header class="sectionHeader">
             <h2 class="sectionTitle">Auth-Datei laden</h2>
-            <p class="sectionDescription">Laden Sie die Authentifizierungsdatei herunter. Sie enthält ein einmaliges Token.</p>
+            <p class="sectionDescription">Laden Sie die Auth-Datei herunter. Sie ist kryptografisch an diese Sitzung und diese Tool-Version gebunden.</p>
         </header>
         <p class="info"><i class="fa-solid fa-file-arrow-down" aria-hidden="true"></i> Die Datei <code><?= \htmlspecialchars($authFile) ?></code> wird für Schritt 2 benötigt.</p>
         <div class="formSubmit">
@@ -263,7 +278,7 @@ function recoveryStubRenderAuthWizard(string $authHash): void
         </header>
         <p class="success"><strong><i class="fa-solid fa-circle-check" aria-hidden="true"></i> Authentifizierung erfolgreich!</strong> Die Auth-Datei wurde erkannt.</p>
         <div class="formSubmit">
-            <a href="?t=<?= \htmlspecialchars($authHash) ?>&amp;auth_ok=1" class="button buttonPrimary">
+            <a href="?t=<?= \htmlspecialchars($authHash) ?>" class="button buttonPrimary">
                 <i class="fa-solid fa-rocket" aria-hidden="true"></i> Recovery Tool starten
             </a>
         </div>
@@ -323,7 +338,8 @@ function recoveryStubRenderAuthWizard(string $authHash): void
                             clearInterval(pollInterval);
                             goToStep(3);
                         } else {
-                            document.getElementById('pollStatus').textContent = 'Datei noch nicht gefunden \u2013 prüfe erneut\u2026';
+                            var msg = data.message || 'Datei noch nicht gefunden \u2013 prüfe erneut\u2026';
+                            document.getElementById('pollStatus').textContent = msg;
                         }
                     })
                     .catch(function () {});
@@ -405,23 +421,424 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
     recoveryStubRenderPageEnd();
 }
 
+\define('RECOVERY_STUB_LOG_SUBDIR', 'log/recovery');
+
+function recoveryStubLogDir(): string
+{
+    $dir = \rtrim(recoveryStubWcfRoot(), '/\\') . '/' . RECOVERY_STUB_LOG_SUBDIR . '/';
+    if (\is_file($dir)) {
+        @\unlink($dir);
+    }
+    if (!\is_dir($dir)) {
+        @\mkdir($dir, 0775, true);
+    }
+
+    return $dir;
+}
+
+function recoveryStubLogPath(string $basename): string
+{
+    return recoveryStubLogDir() . $basename;
+}
+
+/**
+ * @param array<string, mixed> $context
+ */
+function recoveryStubLog(string $level, string $message, array $context = []): void
+{
+    $line = \sprintf("[%s] [%s] %s", \date('Y-m-d H:i:s'), \strtoupper($level), $message);
+    if ($context !== []) {
+        $json = \json_encode($context, \JSON_UNESCAPED_UNICODE);
+        if ($json !== false) {
+            $line .= ' ' . $json;
+        }
+    }
+    @\file_put_contents(
+        recoveryStubLogPath('stub-' . \date('Y-m-d') . '.log'),
+        $line . "\n",
+        \FILE_APPEND | \LOCK_EX
+    );
+}
+
+/** @param array<string, mixed> $data */
+function recoveryStubLogDebug(string $location, string $message, array $data = []): void
+{
+    recoveryStubLog('debug', $message, ['location' => $location] + $data);
+    $payload = [
+        'location' => $location,
+        'message' => $message,
+        'data' => $data,
+        'timestamp' => (int) \round(\microtime(true) * 1000),
+        'stubVersion' => \defined('RECOVERY_STUB_VERSION') ? RECOVERY_STUB_VERSION : null,
+    ];
+    $line = \json_encode($payload, \JSON_UNESCAPED_UNICODE);
+    if ($line !== false) {
+        @\file_put_contents(
+            recoveryStubLogPath('stub-debug-' . \date('Y-m-d') . '.ndjson'),
+            $line . "\n",
+            \FILE_APPEND | \LOCK_EX
+        );
+    }
+}
+
+function recoveryStubCleanupAllRecoveryArtifacts(): void
+{
+    $root = recoveryStubWcfRoot();
+
+    $logDir = \rtrim($root, '/\\') . '/' . RECOVERY_STUB_LOG_SUBDIR;
+    if (\is_dir($logDir)) {
+        recoveryStubRemoveDirectory($logDir);
+    }
+
+    foreach (
+        [
+            $root . 'log/recovery-tool-*.ndjson',
+            $root . 'log/plugin-recovery-*.ndjson',
+            $root . 'log/debug-*.ndjson',
+        ] as $pattern
+    ) {
+        foreach (\glob($pattern) ?: [] as $file) {
+            if (\is_file($file)) {
+                @\unlink($file);
+            }
+        }
+    }
+
+    foreach (
+        [
+            $root . RECOVERY_AUTH_FILENAME,
+            $root . 'uploads/.recovery-cache',
+            recoveryStubPackageDir(),
+        ] as $path
+    ) {
+        if (\is_file($path)) {
+            @\unlink($path);
+        } elseif (\is_dir($path)) {
+            recoveryStubRemoveDirectory($path);
+        }
+    }
+
+    $tmpDir = \rtrim($root, '/\\') . '/tmp/';
+    if (\is_dir($tmpDir)) {
+        foreach (\glob($tmpDir . 'recovery-*.tar.gz') ?: [] as $archive) {
+            if (\is_file($archive)) {
+                @\unlink($archive);
+            }
+        }
+    }
+}
+
+\define('RECOVERY_AUTH_FORMAT', 2);
+\define('RECOVERY_AUTH_PENDING_DIR', 'log/recovery/.auth-pending');
+\define('RECOVERY_AUTH_BOUND_DIR', 'log/recovery/.auth-bound');
+
+function recoveryStubAuthStateDir(string $subDir): string
+{
+    $dir = \rtrim(recoveryStubWcfRoot(), '/\\') . '/' . $subDir . '/';
+    if (!\is_dir($dir)) {
+        @\mkdir($dir, 0700, true);
+    }
+    if (\is_dir($dir)) {
+        @\chmod($dir, 0700);
+    }
+
+    return $dir;
+}
+
+function recoveryStubPendingAuthPath(string $token): string
+{
+    return recoveryStubAuthStateDir(RECOVERY_AUTH_PENDING_DIR) . $token . '.json';
+}
+
+function recoveryStubBoundAuthPath(string $token): string
+{
+    return recoveryStubAuthStateDir(RECOVERY_AUTH_BOUND_DIR) . $token . '.json';
+}
+
+function recoveryStubBuildId(): string
+{
+    $hash = \defined('RECOVERY_STUB_INTEGRITY_HASH') ? (string) RECOVERY_STUB_INTEGRITY_HASH : '';
+
+    return RECOVERY_STUB_VERSION . '-' . \substr($hash, 0, 16);
+}
+
+function recoveryStubVerifyIntegrity(): ?string
+{
+    if (!\defined('RECOVERY_STUB_INTEGRITY_HASH') || RECOVERY_STUB_INTEGRITY_HASH === '') {
+        return 'Stub-Integritätsprüfung fehlt (kein offizielles Release?).';
+    }
+    $content = (string) @\file_get_contents(__FILE__);
+    if ($content === '') {
+        return 'Stub-Datei konnte nicht gelesen werden.';
+    }
+    $placeholder = \str_repeat('0', 64);
+    $canonical = \preg_replace(
+        "/define\\('RECOVERY_STUB_INTEGRITY_HASH',\\s*'[^']*'\\);/",
+        "define('RECOVERY_STUB_INTEGRITY_HASH', '7c9baafc958fa1d5717535c4ea818e0d73da49c943a3b916216435f834d2f82f');",
+        $content,
+        1
+    );
+    if ($canonical === null) {
+        return 'Stub-Integritätsprüfung fehlgeschlagen.';
+    }
+    $actual = \hash('sha256', $canonical);
+    if (!\hash_equals((string) RECOVERY_STUB_INTEGRITY_HASH, $actual)) {
+        return 'Die Datei plugin-recovery-tool.php wurde verändert oder ist kein offizielles Release von GitHub.';
+    }
+
+    return null;
+}
+
+function recoveryStubAssertValidToken(string $token): bool
+{
+    return \preg_match('~^[a-f0-9]{40}$~', $token) === 1;
+}
+
+/**
+ * @return array<string, mixed>|null
+ */
+function recoveryStubLoadAuthState(string $path): ?array
+{
+    if (!\is_file($path) || !\is_readable($path)) {
+        return null;
+    }
+    $json = \json_decode((string) \file_get_contents($path), true);
+
+    return \is_array($json) ? $json : null;
+}
+
+function recoveryStubSaveAuthState(string $path, array $state): bool
+{
+    $dir = \dirname($path);
+    if (!\is_dir($dir)) {
+        @\mkdir($dir, 0700, true);
+    }
+    $payload = \json_encode($state, \JSON_UNESCAPED_UNICODE);
+    if ($payload === false) {
+        return false;
+    }
+
+    return @\file_put_contents($path, $payload, \LOCK_EX) !== false && @\chmod($path, 0600);
+}
+
+function recoveryStubCreatePendingSession(string $token): void
+{
+    if (!recoveryStubAssertValidToken($token)) {
+        return;
+    }
+    $now = \time();
+    recoveryStubSaveAuthState(recoveryStubPendingAuthPath($token), [
+        'token' => $token,
+        'secret' => \bin2hex(\random_bytes(32)),
+        'stubBuildId' => recoveryStubBuildId(),
+        'stubIntegrity' => \defined('RECOVERY_STUB_INTEGRITY_HASH') ? RECOVERY_STUB_INTEGRITY_HASH : '',
+        'createdAt' => $now,
+        'expiresAt' => $now + 86400,
+        'authIssuedAt' => null,
+    ]);
+    recoveryStubLogDebug('auth', 'pending_session_created', ['tokenPrefix' => \substr($token, 0, 8)]);
+}
+
+function recoveryStubAuthSignature(string $secret, int $expires, string $token, string $stubBuildId): string
+{
+    $payload = $expires . "\n" . $token . "\n" . $stubBuildId;
+
+    return \hash_hmac('sha256', $payload, $secret);
+}
+
+/**
+ * @return array{ok: true, content: string}|array{ok: false, error: string}
+ */
+function recoveryStubGenerateAuthFileContent(string $token): array
+{
+    if (!recoveryStubAssertValidToken($token)) {
+        return ['ok' => false, 'error' => 'Ungültige Sitzung.'];
+    }
+
+    $pending = recoveryStubLoadAuthState(recoveryStubPendingAuthPath($token));
+    if ($pending === null) {
+        recoveryStubLog('warning', 'Auth-Download ohne Pending-Session', ['tokenPrefix' => \substr($token, 0, 8)]);
+
+        return ['ok' => false, 'error' => 'Keine gültige Recovery-Sitzung. Bitte plugin-recovery-tool.php erneut aufrufen.'];
+    }
+
+    if (($pending['stubBuildId'] ?? '') !== recoveryStubBuildId()) {
+        return ['ok' => false, 'error' => 'Auth-Datei passt nicht zu dieser plugin-recovery-tool.php (Version/Build).'];
+    }
+
+    if (($pending['stubIntegrity'] ?? '') !== '' && \defined('RECOVERY_STUB_INTEGRITY_HASH')
+        && !\hash_equals((string) $pending['stubIntegrity'], (string) RECOVERY_STUB_INTEGRITY_HASH)) {
+        return ['ok' => false, 'error' => 'Stub wurde seit Sitzungsstart verändert. Neu starten.'];
+    }
+
+    $expires = (int) ($pending['expiresAt'] ?? 0);
+    if ($expires <= \time()) {
+        return ['ok' => false, 'error' => 'Sitzung abgelaufen. Tool neu aufrufen.'];
+    }
+
+    $secret = (string) ($pending['secret'] ?? '');
+    if ($secret === '') {
+        return ['ok' => false, 'error' => 'Sitzungsgeheimnis fehlt.'];
+    }
+
+    $stubBuildId = recoveryStubBuildId();
+    $signature = recoveryStubAuthSignature($secret, $expires, $token, $stubBuildId);
+
+    $pending['authIssuedAt'] = \time();
+    recoveryStubSaveAuthState(recoveryStubPendingAuthPath($token), $pending);
+
+    $content = "<?php exit; /* WoltLab Plugin Recovery Auth v" . RECOVERY_AUTH_FORMAT . " — NICHT BEARBEITEN */ ?>\n"
+        . $expires . "\n"
+        . $token . "\n"
+        . $stubBuildId . "\n"
+        . $signature;
+
+    recoveryStubLog('info', 'Auth-Datei ausgestellt', ['tokenPrefix' => \substr($token, 0, 8)]);
+
+    return ['ok' => true, 'content' => $content];
+}
+
+/**
+ * @return array{ok: bool, reason?: string}
+ */
+function recoveryStubValidateAuthFile(string $urlToken): array
+{
+    if (!recoveryStubAssertValidToken($urlToken)) {
+        return ['ok' => false, 'reason' => 'invalid_token'];
+    }
+
+    $authPath = recoveryStubWcfRoot() . RECOVERY_AUTH_FILENAME;
+    if (!\is_file($authPath) || !\is_readable($authPath)) {
+        return ['ok' => false, 'reason' => 'missing_file'];
+    }
+
+    $lines = \preg_split("/\r\n|\n|\r/", (string) \file_get_contents($authPath)) ?: [];
+    if (\count($lines) < 4) {
+        return ['ok' => false, 'reason' => 'legacy_or_invalid_format'];
+    }
+
+    if (!\str_contains((string) ($lines[0] ?? ''), 'Auth v' . RECOVERY_AUTH_FORMAT)) {
+        return ['ok' => false, 'reason' => 'wrong_format_version'];
+    }
+
+    $expires = (int) ($lines[1] ?? 0);
+    $fileToken = \trim((string) ($lines[2] ?? ''));
+    $fileStubBuildId = \trim((string) ($lines[3] ?? ''));
+    $fileSignature = \trim((string) ($lines[4] ?? ''));
+
+    if ($expires <= \time()) {
+        return ['ok' => false, 'reason' => 'expired'];
+    }
+
+    if (!\hash_equals($urlToken, $fileToken)) {
+        recoveryStubLog('warning', 'Auth-Token-Mismatch URL vs. Datei', []);
+
+        return ['ok' => false, 'reason' => 'token_mismatch'];
+    }
+
+    if (!\hash_equals(recoveryStubBuildId(), $fileStubBuildId)) {
+        recoveryStubLog('warning', 'Auth-Stub-Build-Mismatch', [
+            'expected' => recoveryStubBuildId(),
+            'got' => $fileStubBuildId,
+        ]);
+
+        return ['ok' => false, 'reason' => 'stub_mismatch'];
+    }
+
+    $state = recoveryStubLoadAuthState(recoveryStubPendingAuthPath($urlToken))
+        ?? recoveryStubLoadAuthState(recoveryStubBoundAuthPath($urlToken));
+    if ($state === null) {
+        return ['ok' => false, 'reason' => 'no_server_session'];
+    }
+
+    if (($state['stubBuildId'] ?? '') !== recoveryStubBuildId()) {
+        return ['ok' => false, 'reason' => 'server_stub_mismatch'];
+    }
+
+    $secret = (string) ($state['secret'] ?? '');
+    if ($secret === '') {
+        return ['ok' => false, 'reason' => 'no_secret'];
+    }
+
+    $expected = recoveryStubAuthSignature($secret, $expires, $fileToken, $fileStubBuildId);
+    if ($fileSignature === '' || !\hash_equals($expected, $fileSignature)) {
+        recoveryStubLog('warning', 'Auth-Signatur ungültig', []);
+
+        return ['ok' => false, 'reason' => 'bad_signature'];
+    }
+
+    recoveryStubSaveAuthState(recoveryStubBoundAuthPath($urlToken), $state + [
+        'boundAt' => \time(),
+        'lastValidatedAt' => \time(),
+    ]);
+    @\unlink(recoveryStubPendingAuthPath($urlToken));
+
+    recoveryStubLog('info', 'Auth erfolgreich validiert', ['tokenPrefix' => \substr($urlToken, 0, 8)]);
+
+    return ['ok' => true];
+}
+
+function recoveryStubIsAuthenticated(string $urlToken): bool
+{
+    static $cache = [];
+
+    if (isset($cache[$urlToken])) {
+        return $cache[$urlToken];
+    }
+
+    $bound = recoveryStubLoadAuthState(recoveryStubBoundAuthPath($urlToken));
+    if ($bound !== null && (int) ($bound['expiresAt'] ?? 0) > \time()) {
+        if (($bound['stubBuildId'] ?? '') === recoveryStubBuildId()) {
+            return $cache[$urlToken] = true;
+        }
+    }
+
+    $result = recoveryStubValidateAuthFile($urlToken);
+
+    return $cache[$urlToken] = $result['ok'];
+}
+
+function recoveryStubAuthFailureMessage(string $reason): string
+{
+    return match ($reason) {
+        'token_mismatch' => 'Die Auth-Datei gehört nicht zu dieser Sitzung (URL-Token stimmt nicht überein).',
+        'stub_mismatch', 'server_stub_mismatch' => 'Die Auth-Datei passt nicht zu dieser plugin-recovery-tool.php-Version.',
+        'bad_signature' => 'Die Auth-Datei wurde manipuliert oder stammt von einer anderen Sitzung.',
+        'expired' => 'Die Auth-Datei ist abgelaufen. Bitte neu herunterladen.',
+        'no_server_session' => 'Keine gültige Recovery-Sitzung auf dem Server. Tool-URL erneut aufrufen.',
+        'legacy_or_invalid_format', 'wrong_format_version' => 'Ungültige oder veraltete Auth-Datei. Bitte neu herunterladen.',
+        'missing_file' => 'Auth-Datei wurde noch nicht hochgeladen.',
+        default => 'Authentifizierung fehlgeschlagen.',
+    };
+}
+
+function recoveryStubCleanupAuthState(): void
+{
+    foreach ([RECOVERY_AUTH_PENDING_DIR, RECOVERY_AUTH_BOUND_DIR] as $sub) {
+        $dir = \rtrim(recoveryStubWcfRoot(), '/\\') . '/' . $sub;
+        if (\is_dir($dir)) {
+            recoveryStubRemoveDirectory($dir);
+        }
+    }
+}
+
 /**
  * WoltLab Plugin Recovery Tool — Stub (v2.0)
  *
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.0.11
+ * @version 2.1.0
  */
 
-define('RECOVERY_STUB_VERSION', '2.0.11');
-define('RECOVERY_PACKAGE_VERSION', '2.0.11');
+define('RECOVERY_STUB_VERSION', '2.1.0');
+define('RECOVERY_PACKAGE_VERSION', '2.1.0');
+define('RECOVERY_STUB_INTEGRITY_HASH', '0000000000000000000000000000000000000000000000000000000000000000');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
 define('RECOVERY_PACKAGE_DIR_NAME', 'recovery-tool');
 
-require __DIR__ . '/recovery-stub-logger.php';
 
 if (\PHP_VERSION_ID < 80100) {
     \header('Content-Type: text/html; charset=utf-8');
@@ -857,9 +1274,16 @@ function recoveryStubCleanupAuxiliary(): void
     recoveryStubLog('info', 'Stub-Cleanup abgeschlossen');
 }
 
-// --- Token ---
-if (empty($_REQUEST['t']) || !\preg_match('~^[a-f0-9]{40}$~', (string) $_REQUEST['t'])) {
+$integrityError = recoveryStubVerifyIntegrity();
+if ($integrityError !== null) {
+    recoveryStubRenderIntegrityError($integrityError);
+    exit;
+}
+
+// --- Token / Sitzung ---
+if (empty($_REQUEST['t']) || !recoveryStubAssertValidToken((string) $_REQUEST['t'])) {
     $authHash = \bin2hex(\random_bytes(20));
+    recoveryStubCreatePendingSession($authHash);
     \header('Location: plugin-recovery-tool.php?t=' . $authHash);
     exit;
 }
@@ -867,31 +1291,33 @@ $authHash = (string) $_REQUEST['t'];
 $action = (!empty($_REQUEST['action'])) ? (string) $_REQUEST['action'] : '';
 
 if ($action === 'download-auth-file') {
-    $expiresTimestamp = \time() + 86400;
-    $content = "<?php exit; /* --- NICHT BEARBEITEN --- */ ?>\n{$expiresTimestamp}\n{$authHash}";
+    $generated = recoveryStubGenerateAuthFileContent($authHash);
+    if (!$generated['ok']) {
+        recoveryStubRenderAuthWizard($authHash, (string) ($generated['error'] ?? ''));
+        exit;
+    }
+    $content = $generated['content'];
     \header('Content-type: application/octet-stream');
     \header('Content-Disposition: attachment; filename="' . RECOVERY_AUTH_FILENAME . '"');
-    \header('Content-Length: ' . \strlen($content));
+    \header('Content-Length: ' . (string) \strlen($content));
     echo $content;
     exit;
 }
 
-$isAuthenticated = false;
-$authFilePath = recoveryStubWcfRoot() . RECOVERY_AUTH_FILENAME;
-if (\is_file($authFilePath) && \is_readable($authFilePath)) {
-    $lines = \explode("\n", (string) \file_get_contents($authFilePath));
-    if (\count($lines) >= 3) {
-        $expiresTimestamp = (int) $lines[1];
-        $storedHash = \trim($lines[2]);
-        if ($expiresTimestamp > \time() && \hash_equals($storedHash, $authHash)) {
-            $isAuthenticated = true;
-        }
-    }
-}
+$isAuthenticated = recoveryStubIsAuthenticated($authHash);
 
 if ($action === 'auth-status') {
+    $reason = null;
+    if (!$isAuthenticated) {
+        $check = recoveryStubValidateAuthFile($authHash);
+        $reason = $check['reason'] ?? 'unknown';
+    }
     \header('Content-Type: application/json; charset=utf-8');
-    echo \json_encode(['ok' => $isAuthenticated]);
+    echo \json_encode([
+        'ok' => $isAuthenticated,
+        'reason' => $isAuthenticated ? null : $reason,
+        'message' => $isAuthenticated ? null : recoveryStubAuthFailureMessage((string) $reason),
+    ]);
     exit;
 }
 
@@ -915,7 +1341,18 @@ if ($action === 'install-package' && $isAuthenticated) {
 }
 
 if (!$isAuthenticated) {
-    recoveryStubRenderAuthWizard($authHash);
+    if (recoveryStubLoadAuthState(recoveryStubPendingAuthPath($authHash)) === null
+        && recoveryStubLoadAuthState(recoveryStubBoundAuthPath($authHash)) === null) {
+        recoveryStubCreatePendingSession($authHash);
+    }
+    $authHint = null;
+    if (\is_file(recoveryStubWcfRoot() . RECOVERY_AUTH_FILENAME)) {
+        $check = recoveryStubValidateAuthFile($authHash);
+        if (!$check['ok'] && isset($check['reason'])) {
+            $authHint = recoveryStubAuthFailureMessage((string) $check['reason']);
+        }
+    }
+    recoveryStubRenderAuthWizard($authHash, $authHint);
     exit;
 }
 
