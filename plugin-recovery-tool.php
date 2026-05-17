@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.8.1
+ * @version 1.8.2
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.8.1');
+define('RECOVERY_VERSION', '1.8.2');
 define('RECOVERY_BEER_CSS', 'https://cdn.jsdelivr.net/npm/beercss@4.0.21/dist/cdn/beer.min.css');
 define('RECOVERY_BEER_JS', 'https://cdn.jsdelivr.net/npm/beercss@4.0.21/dist/cdn/beer.min.js');
 define('RECOVERY_BEER_COLORS_JS', 'https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.4/dist/cdn/material-dynamic-colors.min.js');
@@ -5136,7 +5136,16 @@ function recoveryRenderPageStart(string $documentTitle, string $contentTitle = '
 
 function recoveryRenderPageEnd(?array $assets = null): void
 {
-    $assets ??= recoveryGetSetupAssets();
+    try {
+        $assets ??= recoveryGetSetupAssets();
+    } catch (\Throwable $ignored) {
+        $assets ??= [
+            'WCFSetup.css' => '',
+            'woltlabSuite.png' => '',
+            'fontAwesomeCss' => '',
+            'fontAwesomeLocal' => false,
+        ];
+    }
     $baseUrl = '';
     try {
         $baseUrl = recoveryGetSiteBaseUrl();
@@ -8269,7 +8278,15 @@ if ($recoveryBootstrapError !== null) {
 }
 
 $recoveryBaseUrl = recoveryGetSiteBaseUrl();
-$db = \wcf\system\WCF::getDB();
+try {
+    $db = \wcf\system\WCF::getDB();
+} catch (\Throwable $e) {
+    echo '<div class="alert alert-error"><strong>Datenbank nicht verfügbar:</strong> '
+        . \nl2br(\htmlspecialchars(recoveryFormatUserError($e))) . '</div>';
+    recoveryRenderExceptionDetails($e);
+    recoveryRenderPageEnd();
+    exit;
+}
 $wcfDirMain = \rtrim((string) WCF_DIR, '/\\') . '/';
 $emergencyAcpResult = null;
 $emergencyAcpLog = [];
@@ -10351,12 +10368,12 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
 <?php
     } elseif ($phase === 'diagnose') {
         $state = recoveryWizardLoadState($authHash);
-        if (empty($state['diagnosis'])) {
+        if (empty($state['diagnosis'])):
 ?>
     <div class="alert alert-warning">Noch keine Diagnose. Bitte zuerst Schritt 1 (Paket) ausführen.</div>
     <p><a href="<?= \htmlspecialchars($wizardUrl . '&wizard_phase=package') ?>" class="button">Zu Schritt 1 — Paket</a></p>
 <?php
-        } else {
+        else:
         $scopeForDiag = (string) ($state['scopeApplication'] ?? '');
         $diag = recoveryBuildSystemDiagnosis(
             $wcfDir,
@@ -10426,7 +10443,7 @@ elseif ($mode === RECOVERY_MODE_RECOVERY_WIZARD) {
         <button type="submit" class="button"><i class="fa-solid fa-arrow-right"></i> Weiter — Plan &amp; Auswahl</button>
     </form>
 <?php
-    }
+        endif;
     }
 }
 
