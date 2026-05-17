@@ -572,9 +572,10 @@ function recoveryStubVerifyIntegrity(): ?string
         return 'Stub-Datei konnte nicht gelesen werden.';
     }
     $placeholder = \str_repeat('0', 64);
+    // Nur die top-level define-Zeile (nicht String-Literale in diesem Quelltext)
     $canonical = \preg_replace(
-        "/define\\('RECOVERY_STUB_INTEGRITY_HASH',\\s*'[^']*'\\);/",
-        "define('RECOVERY_STUB_INTEGRITY_HASH', '7c9baafc958fa1d5717535c4ea818e0d73da49c943a3b916216435f834d2f82f');",
+        "/^define\\('RECOVERY_STUB_INTEGRITY_HASH',\\s*'[^']*'\\);/m",
+        "define('RECOVERY_STUB_INTEGRITY_HASH', '" . $placeholder . "');",
         $content,
         1
     );
@@ -828,12 +829,12 @@ function recoveryStubCleanupAuthState(): void
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.1.0
+ * @version 2.1.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.1.0');
-define('RECOVERY_PACKAGE_VERSION', '2.1.0');
-define('RECOVERY_STUB_INTEGRITY_HASH', '0000000000000000000000000000000000000000000000000000000000000000');
+define('RECOVERY_STUB_VERSION', '2.1.1');
+define('RECOVERY_PACKAGE_VERSION', '2.1.1');
+define('RECOVERY_STUB_INTEGRITY_HASH', '22cf0c85bd6ffc183571ca9fcc590a00a8fec2955771c1b8ab92d8debeefed20');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
