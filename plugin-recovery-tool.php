@@ -335,10 +335,61 @@ function recoveryStubRenderAuthWizard(string $authHash): void
     recoveryStubRenderPageEnd();
 }
 
-function recoveryStubRenderPackageInstallPage(string $authHash, string $bodyHtml): void
+function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMessage = null): void
 {
+    $version = RECOVERY_PACKAGE_VERSION;
+    $installUrl = '?action=install-package&amp;t=' . \htmlspecialchars($authHash);
+    $ghUrl = \htmlspecialchars(recoveryStubReleaseDownloadUrl($version));
+    $dirName = RECOVERY_PACKAGE_DIR_NAME;
+
     recoveryStubRenderPageStart('Recovery-Paket installieren', 'Paket wird für die volle Oberfläche benötigt');
-    echo $bodyHtml;
+    ?>
+    <?php if ($errorMessage !== null && $errorMessage !== ''): ?>
+    <p class="error"><strong><i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Fehler</strong><br><?= $errorMessage ?></p>
+    <?php endif; ?>
+
+    <section class="section">
+        <header class="sectionHeader">
+            <h2 class="sectionTitle">Paket automatisch installieren</h2>
+            <p class="sectionDescription">Lädt <code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code> von GitHub und entpackt es nach <code><?= \htmlspecialchars($dirName) ?>/</code>.</p>
+        </header>
+        <p class="info"><i class="fa-solid fa-box-archive" aria-hidden="true"></i> Version <strong>v<?= \htmlspecialchars($version) ?></strong> enthält alle Recovery-Modi und die ACP-Oberfläche.</p>
+        <div class="formSubmit">
+            <a href="<?= $installUrl ?>" class="button buttonPrimary" id="installPackageBtn">
+                <i class="fa-solid fa-download" aria-hidden="true"></i> Paket automatisch installieren
+            </a>
+        </div>
+    </section>
+
+    <section class="section">
+        <header class="sectionHeader">
+            <h2 class="sectionTitle">Manuelle Installation</h2>
+            <p class="sectionDescription">Wenn der automatische Download auf Ihrem Server blockiert ist.</p>
+        </header>
+        <dl>
+            <dt><label>Archiv</label></dt>
+            <dd><a href="<?= $ghUrl ?>">recovery-<?= \htmlspecialchars($version) ?>.tar.gz</a></dd>
+            <dt><label>Zielverzeichnis</label></dt>
+            <dd><code><?= \htmlspecialchars($dirName) ?>/</code> im WoltLab-Hauptverzeichnis (neben <code>plugin-recovery-tool.php</code>)</dd>
+        </dl>
+    </section>
+
+    <script>
+    (function () {
+        var btn = document.getElementById('installPackageBtn');
+        if (!btn) { return; }
+        btn.addEventListener('click', function () {
+            btn.classList.add('disabled');
+            btn.setAttribute('aria-busy', 'true');
+            var icon = btn.querySelector('.fa-download');
+            if (icon) {
+                icon.classList.remove('fa-download');
+                icon.classList.add('fa-spinner', 'fa-spin');
+            }
+        });
+    }());
+    </script>
+    <?php
     recoveryStubRenderPageEnd();
 }
 
@@ -348,11 +399,11 @@ function recoveryStubRenderPackageInstallPage(string $authHash, string $bodyHtml
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.0.3
+ * @version 2.0.5
  */
 
-define('RECOVERY_STUB_VERSION', '2.0.4');
-define('RECOVERY_PACKAGE_VERSION', '2.0.4');
+define('RECOVERY_STUB_VERSION', '2.0.5');
+define('RECOVERY_PACKAGE_VERSION', '2.0.5');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
@@ -631,7 +682,7 @@ if ($action === 'install-package' && $isAuthenticated) {
         \header('Location: plugin-recovery-tool.php?t=' . \urlencode($authHash) . '&package_ok=1');
         exit;
     }
-    recoveryStubRenderPackageInstallPage($authHash, '<p class="error">' . $result['error'] . '</div>');
+    recoveryStubRenderPackageInstallPage($authHash, (string) ($result['error'] ?? ''));
     exit;
 }
 
@@ -641,15 +692,7 @@ if (!$isAuthenticated) {
 }
 
 if (!recoveryStubPackageReady()) {
-    $installUrl = '?action=install-package&amp;t=' . \htmlspecialchars($authHash);
-    $ghUrl = \htmlspecialchars(recoveryStubReleaseDownloadUrl(RECOVERY_PACKAGE_VERSION));
-    $body = '<div class="alert alert-info">'
-        . '<strong><i class="fa-solid fa-box-archive"></i> Recovery-Paket erforderlich</strong><br>'
-        . 'Nach der Anmeldung wird das Paket <strong>v' . \htmlspecialchars(RECOVERY_PACKAGE_VERSION) . '</strong> benötigt.</div>'
-        . '<p><a class="button" href="' . $installUrl . '"><i class="fa-solid fa-download"></i> Paket automatisch installieren</a></p>'
-        . '<p>Oder <a href="' . $ghUrl . '">recovery-' . RECOVERY_PACKAGE_VERSION . '.tar.gz</a> manuell nach <code>'
-        . RECOVERY_PACKAGE_DIR_NAME . '/</code> entpacken.</p>';
-    recoveryStubRenderPackageInstallPage($authHash, $body);
+    recoveryStubRenderPackageInstallPage($authHash);
     exit;
 }
 
