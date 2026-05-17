@@ -196,6 +196,18 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
             word-break: break-word;
         }
         .recovery-log-empty { margin: 8px 0 0; color: var(--wcfContentDimmedText, #888); font-size: 13px; }
+        @keyframes recovery-spin { to { transform: rotate(360deg); } }
+        .recovery-spinner {
+            border: 2px solid currentColor;
+            border-right-color: transparent;
+            border-radius: 50%;
+            display: inline-block;
+            width: 1.1em;
+            height: 1.1em;
+            vertical-align: -0.15em;
+            animation: recovery-spin 0.7s linear infinite;
+        }
+        .recovery-loading-inline { display: inline-flex; align-items: center; gap: 8px; }
     </style>
     <?php if ($wizardCss !== '' && !$assets['usesCompiledAcpStyle']): ?>
     <style><?= $wizardCss ?></style>
@@ -480,8 +492,8 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
         <form method="post" action="plugin-recovery-tool.php" id="installPackageForm">
             <input type="hidden" name="action" value="install-package">
             <input type="hidden" name="t" value="<?= \htmlspecialchars($authHash) ?>">
-            <p class="info" id="installPackageStatus" hidden>
-                <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+            <p class="info recovery-loading-inline" id="installPackageStatus" hidden>
+                <span class="recovery-spinner" aria-hidden="true"></span>
                 Paket wird heruntergeladen und entpackt — bitte warten …
             </p>
             <div class="formSubmit">
@@ -1114,12 +1126,12 @@ function recoveryStubCleanupAuthState(): void
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.1.4
+ * @version 2.1.5
  */
 
-define('RECOVERY_STUB_VERSION', '2.1.4');
-define('RECOVERY_PACKAGE_VERSION', '2.1.4');
-define('RECOVERY_STUB_INTEGRITY_HASH', 'cb542c490560e0bc5c0458ea6a7af59e1e877deebc4c2fe2104b1e2c23d8ae77');
+define('RECOVERY_STUB_VERSION', '2.1.5');
+define('RECOVERY_PACKAGE_VERSION', '2.1.5');
+define('RECOVERY_STUB_INTEGRITY_HASH', 'fd5798dea86db08fc15aa33c10334064518b4257003c61fad746f88b8e6b43b0');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
