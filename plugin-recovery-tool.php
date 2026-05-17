@@ -239,6 +239,21 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
     <?php
 }
 
+function recoveryStubLogFileBadge(array $entry): string
+{
+    $isErrorLog = \str_contains($entry['file'], 'stub-errors-');
+    $hasContent = $entry['exists'] && $entry['size'] > 0;
+
+    if ($hasContent) {
+        return '<span class="badge green small">' . \htmlspecialchars(recoveryStubFormatLogSize($entry['size'])) . '</span>';
+    }
+    if ($isErrorLog) {
+        return '<span class="badge green small">keine Fehler</span>';
+    }
+
+    return '<span class="badge small">noch keine Einträge</span>';
+}
+
 function recoveryStubRenderLogPanel(bool $expanded = false): void
 {
     $catalog = recoveryStubLogFileCatalog();
@@ -251,15 +266,14 @@ function recoveryStubRenderLogPanel(bool $expanded = false): void
             <p class="sectionDescription" style="margin-top:12px">
                 Verzeichnis: <code title="<?= \htmlspecialchars(recoveryStubLogDir()) ?>"><?= \htmlspecialchars(recoveryStubLogDisplayPath()) ?></code>
             </p>
+            <p class="info" style="margin-top:10px"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                Die Log-Dateien sind Protokolle, kein Fehlerstatus der Oberfläche.
+                Ein leeres <strong>Fehlerprotokoll</strong> bedeutet: es ist nichts schiefgelaufen.</p>
             <dl class="recovery-log-files">
                 <?php foreach ($catalog as $entry): ?>
                 <dt>
                     <?= \htmlspecialchars($entry['label']) ?>
-                    <?php if ($entry['exists']): ?>
-                    <span class="badge green small"><?= \htmlspecialchars(recoveryStubFormatLogSize($entry['size'])) ?></span>
-                    <?php else: ?>
-                    <span class="badge small">leer</span>
-                    <?php endif; ?>
+                    <?= recoveryStubLogFileBadge($entry) ?>
                 </dt>
                 <dd>
                     <?= \htmlspecialchars($entry['description']) ?>
@@ -659,7 +673,7 @@ function recoveryStubLogFileCatalog(): array
     $entries = [
         ['file' => 'stub-' . $date . '.log', 'label' => 'Gesamtprotokoll', 'description' => 'Alle Meldungen des Stub'],
         ['file' => 'stub-actions-' . $date . '.log', 'label' => 'Aktionen', 'description' => 'Requests, Auth-Schritte, Installation'],
-        ['file' => 'stub-errors-' . $date . '.log', 'label' => 'Fehler', 'description' => 'Integrität, Auth, Download'],
+        ['file' => 'stub-errors-' . $date . '.log', 'label' => 'Fehlerprotokoll', 'description' => 'Nur bei echten Fehlern (Integrität, Auth, Download)'],
         ['file' => 'stub-debug-' . $date . '.ndjson', 'label' => 'Debug (NDJSON)', 'description' => 'Strukturierte Diagnose'],
     ];
     foreach ($entries as &$entry) {
@@ -1100,12 +1114,12 @@ function recoveryStubCleanupAuthState(): void
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.1.3
+ * @version 2.1.4
  */
 
-define('RECOVERY_STUB_VERSION', '2.1.3');
-define('RECOVERY_PACKAGE_VERSION', '2.1.3');
-define('RECOVERY_STUB_INTEGRITY_HASH', '67697e9e1be16e6514d5ffc252f431f185ec2e1f7a620b675ab7c395ec4c7575');
+define('RECOVERY_STUB_VERSION', '2.1.4');
+define('RECOVERY_PACKAGE_VERSION', '2.1.4');
+define('RECOVERY_STUB_INTEGRITY_HASH', 'cb542c490560e0bc5c0458ea6a7af59e1e877deebc4c2fe2104b1e2c23d8ae77');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
