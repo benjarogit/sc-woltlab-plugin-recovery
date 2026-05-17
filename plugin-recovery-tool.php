@@ -407,11 +407,11 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.0.8
+ * @version 2.0.9
  */
 
-define('RECOVERY_STUB_VERSION', '2.0.8');
-define('RECOVERY_PACKAGE_VERSION', '2.0.8');
+define('RECOVERY_STUB_VERSION', '2.0.9');
+define('RECOVERY_PACKAGE_VERSION', '2.0.9');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
@@ -582,16 +582,6 @@ function recoveryStubPackageReady(): bool
     return \version_compare($installed, RECOVERY_PACKAGE_VERSION, '>=');
 }
 
-function recoveryStubIsUnsafeArchivePath(string $path): bool
-{
-    $path = \str_replace('\\', '/', $path);
-    if ($path === '' || $path[0] === '/' || \str_contains($path, '..')) {
-        return true;
-    }
-
-    return false;
-}
-
 function recoveryStubRemoveDirectory(string $dir): void
 {
     if (!\is_dir($dir)) {
@@ -607,19 +597,160 @@ function recoveryStubRemoveDirectory(string $dir): void
     @\rmdir($dir);
 }
 
+function recoveryStubCopyDirectory(string $src, string $dst): void
+{
+    if (!\is_dir($dst) && !@\mkdir($dst, 0755, true)) {
+        return;
+    }
+    $it = new \RecursiveIteratorIterator(
+        new \RecursiveDirectoryIterator($src, \RecursiveDirectoryIterator::SKIP_DOTS),
+        \RecursiveIteratorIterator::SELF_FIRST
+    );
+    foreach ($it as $item) {
+        $target = $dst . \substr($item->getPathname(), \strlen($src));
+        if ($item->isDir()) {
+            if (!\is_dir($target)) {
+                @\mkdir($target, 0755, true);
+            }
+        } else {
+            @\copy($item->getPathname(), $target);
+        }
+    }
+}
+
+function recoveryStubMoveItem(string $src, string $dst): void
+{
+    if (\is_dir($src)) {
+        if (\is_dir($dst)) {
+            recoveryStubRemoveDirectory($dst);
+        }
+        if (!@\rename($src, $dst)) {
+            recoveryStubCopyDirectory($src, $dst);
+            recoveryStubRemoveDirectory($src);
+        }
+
+        return;
+    }
+
+    if (!@\rename($src, $dst)) {
+        @\copy($src, $dst);
+        @\unlink($src);
+    }
+}
+
+function recoveryStubPharRelativePath(string $archive, \SplFileInfo $entry): string
+{
+    $path = \str_replace('\\', '/', $entry->getPathname());
+    $prefix = 'phar://' . $archive . '/';
+    if (\str_starts_with($path, $prefix)) {
+        return \substr($path, \strlen($prefix));
+    }
+
+    return \ltrim($path, './');
+}
+
+function recoveryStubArchiveUsesPackagePrefix(string $archive): bool
+{
+    if (!\class_exists(\PharData::class, false)) {
+        return true;
+    }
+
+    try {
+        $phar = new \PharData($archive);
+        foreach (new \RecursiveIteratorIterator($phar, \RecursiveIteratorIterator::SELF_FIRST) as $entry) {
+            if (!$entry->isFile()) {
+                continue;
+            }
+            $path = recoveryStubPharRelativePath($archive, $entry);
+
+            return \str_starts_with($path, RECOVERY_PACKAGE_DIR_NAME . '/');
+        }
+    } catch (\Throwable $ignored) {
+    }
+
+    return false;
+}
+
+function recoveryStubValidateArchive(string $archive): ?string
+{
+    if (!\class_exists(\PharData::class, false)) {
+        return null;
+    }
+
+    try {
+        $phar = new \PharData($archive);
+        foreach (new \RecursiveIteratorIterator($phar) as $entry) {
+            if (!$entry->isFile()) {
+                continue;
+            }
+            $path = recoveryStubPharRelativePath($archive, $entry);
+            if ($path === 'bootstrap.php' || \str_ends_with($path, '/bootstrap.php')) {
+                return null;
+            }
+        }
+    } catch (\Throwable $e) {
+        return 'Archiv ungültig: ' . $e->getMessage();
+    }
+
+    return 'Archiv enthält keine bootstrap.php.';
+}
+
+function recoveryStubFlattenNestedPackageDir(string $destination): void
+{
+    $nested = \rtrim($destination, '/\\') . '/' . RECOVERY_PACKAGE_DIR_NAME;
+    if (!\is_dir($nested) || !\is_file($nested . '/bootstrap.php')) {
+        return;
+    }
+
+    foreach (new \DirectoryIterator($nested) as $item) {
+        if ($item->isDot()) {
+            continue;
+        }
+        recoveryStubMoveItem($item->getPathname(), \rtrim($destination, '/\\') . '/' . $item->getFilename());
+    }
+    recoveryStubRemoveDirectory($nested);
+}
+
 /**
  * @return array{ok: bool, error?: string}
  */
 function recoveryStubExtractTarGz(string $archive, string $destination): array
 {
+    $destination = \rtrim($destination, '/\\') . '/';
     if (!\is_dir($destination) && !@\mkdir($destination, 0755, true)) {
         return ['ok' => false, 'error' => 'Zielverzeichnis konnte nicht angelegt werden.'];
     }
 
+    $archiveError = recoveryStubValidateArchive($archive);
+    if ($archiveError !== null) {
+        return ['ok' => false, 'error' => $archiveError];
+    }
+
+    $stripPrefix = recoveryStubArchiveUsesPackagePrefix($archive);
+
     if (\class_exists(\PharData::class, false)) {
         try {
             $phar = new \PharData($archive);
-            $phar->extractTo($destination, null, true);
+            $files = [];
+            foreach (new \RecursiveIteratorIterator($phar) as $entry) {
+                if (!$entry->isFile()) {
+                    continue;
+                }
+                $relative = recoveryStubPharRelativePath($archive, $entry);
+                if ($relative === '' || \str_contains($relative, '..')) {
+                    continue;
+                }
+                if ($stripPrefix && \str_starts_with($relative, RECOVERY_PACKAGE_DIR_NAME . '/')) {
+                    $relative = \substr($relative, \strlen(RECOVERY_PACKAGE_DIR_NAME) + 1);
+                }
+                if ($relative !== '') {
+                    $files[] = $relative;
+                }
+            }
+            if ($files === []) {
+                return ['ok' => false, 'error' => 'Archiv enthält keine Dateien.'];
+            }
+            $phar->extractTo($destination, $files, true);
         } catch (\Throwable $e) {
             return ['ok' => false, 'error' => 'PharData: ' . $e->getMessage()];
         }
@@ -629,6 +760,7 @@ function recoveryStubExtractTarGz(string $archive, string $destination): array
             return ['ok' => false, 'error' => 'Weder Phar noch tar verfügbar.'];
         }
         $cmd = \escapeshellarg($tar) . ' -xzf ' . \escapeshellarg($archive)
+            . ($stripPrefix ? ' --strip-components=1' : '')
             . ' -C ' . \escapeshellarg($destination) . ' 2>&1';
         \exec($cmd, $out, $code);
         if ($code !== 0) {
@@ -636,37 +768,27 @@ function recoveryStubExtractTarGz(string $archive, string $destination): array
         }
     }
 
-    // Archiv enthält recovery-tool/ als Top-Level
-    $nested = $destination . '/' . RECOVERY_PACKAGE_DIR_NAME;
-    if (\is_dir($nested) && \is_file($nested . '/bootstrap.php')) {
-        foreach (new \DirectoryIterator($nested) as $item) {
-            if ($item->isDot()) {
-                continue;
-            }
-            $src = $item->getPathname();
-            $dst = $destination . '/' . $item->getFilename();
-            if ($item->isDir()) {
-                if (\is_dir($dst)) {
-                    recoveryStubRemoveDirectory($dst);
+    if ($stripPrefix) {
+        recoveryStubFlattenNestedPackageDir($destination);
+    }
+
+    if (!\is_file($destination . 'bootstrap.php')) {
+        $found = [];
+        if (\is_dir($destination)) {
+            foreach (new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($destination, \RecursiveDirectoryIterator::SKIP_DOTS)
+            ) as $file) {
+                if ($file->isFile() && $file->getFilename() === 'bootstrap.php') {
+                    $found[] = \str_replace($destination, '', $file->getPathname());
                 }
-                @\rename($src, $dst);
-            } else {
-                @\rename($src, $dst);
             }
         }
-        recoveryStubRemoveDirectory($nested);
-    }
 
-    foreach (new \RecursiveIteratorIterator(
-        new \RecursiveDirectoryIterator($destination, \RecursiveDirectoryIterator::SKIP_DOTS)
-    ) as $file) {
-        if (recoveryStubIsUnsafeArchivePath(\str_replace($destination . '/', '', $file->getPathname()))) {
-            @\unlink($file->getPathname());
-        }
-    }
+        $hint = $found !== []
+            ? ' Gefunden unter: ' . \implode(', ', $found) . ' (Verschachtelung konnte nicht aufgelöst werden).'
+            : ' Bitte <code>recovery-tool/</code> leeren und erneut versuchen oder manuell entpacken.';
 
-    if (!\is_file($destination . '/bootstrap.php')) {
-        return ['ok' => false, 'error' => 'Paket unvollständig (bootstrap.php fehlt).'];
+        return ['ok' => false, 'error' => 'Paket unvollständig (bootstrap.php fehlt).' . $hint];
     }
 
     return ['ok' => true];
