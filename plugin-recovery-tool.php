@@ -9,7 +9,7 @@
  * 4. Cache Clear - Löscht alle Caches und kompilierte Templates
  *
  * @author Sunny C.
- * @version 1.8.0
+ * @version 1.8.1
  * @requires PHP >= 8.1 (wie WoltLab Suite 6.x; kein künstliches 8.3-Minimum)
  *
  * Eine Datei: ins WoltLab-Hauptverzeichnis legen (neben global.php).
@@ -21,7 +21,7 @@
 // KONFIGURATION
 // ============================================================================
 
-define('RECOVERY_VERSION', '1.8.0');
+define('RECOVERY_VERSION', '1.8.1');
 define('RECOVERY_BEER_CSS', 'https://cdn.jsdelivr.net/npm/beercss@4.0.21/dist/cdn/beer.min.css');
 define('RECOVERY_BEER_JS', 'https://cdn.jsdelivr.net/npm/beercss@4.0.21/dist/cdn/beer.min.js');
 define('RECOVERY_BEER_COLORS_JS', 'https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.4/dist/cdn/material-dynamic-colors.min.js');
@@ -3592,7 +3592,8 @@ function recoveryBuildBackupCommandHints(string $wcfDir): array
     if (\defined('WCF_DIR') && \is_readable(WCF_DIR . 'config.inc.php')) {
         $dbPassword = '';
         $defaultDriverOptions = [];
-        require WCF_DIR . 'config.inc.php';
+        /** @noinspection PhpIncludeInspection config setzt $dbHost, $dbUser, $dbName, $dbPort */
+        require_once WCF_DIR . 'config.inc.php';
     }
 
     $wcfDirQuoted = \escapeshellarg(\rtrim($wcfDir, '/\\'));
@@ -10458,8 +10459,6 @@ elseif ($mode === RECOVERY_MODE_DIRECTORY_STRUCTURE) {
         $db,
         WCF_N
     );
-}
-
 }
 
 ?>
