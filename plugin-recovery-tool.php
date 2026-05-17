@@ -406,11 +406,11 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.0.6
+ * @version 2.0.7
  */
 
-define('RECOVERY_STUB_VERSION', '2.0.6');
-define('RECOVERY_PACKAGE_VERSION', '2.0.6');
+define('RECOVERY_STUB_VERSION', '2.0.7');
+define('RECOVERY_PACKAGE_VERSION', '2.0.7');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
@@ -448,19 +448,23 @@ function recoveryStubReleaseDownloadUrl(string $version): string
         . '/releases/download/v' . $version . '/recovery-' . $version . '.tar.gz';
 }
 
+/**
+ * WoltLab-Temp wie FileUtil::getTempFolder() — WCF_DIR/tmp/
+ */
 function recoveryStubDownloadCacheDir(): string
 {
-    $candidates = [
-        recoveryStubWcfRoot() . 'uploads/.recovery-cache/',
-        \sys_get_temp_dir() . '/woltlab-recovery-cache/',
-    ];
-    foreach ($candidates as $dir) {
-        if (\is_dir($dir) || @\mkdir($dir, 0755, true)) {
-            return \rtrim($dir, '/\\') . '/';
-        }
+    $dir = recoveryStubWcfRoot() . 'tmp/';
+    if (\is_file($dir)) {
+        @\unlink($dir);
+    }
+    if (!\is_dir($dir) && !@\mkdir($dir, 0777, true)) {
+        return \rtrim(\sys_get_temp_dir(), '/\\') . '/';
+    }
+    if (\is_dir($dir) && !\is_writable($dir)) {
+        @\chmod($dir, 0777);
     }
 
-    return \sys_get_temp_dir() . '/';
+    return \rtrim($dir, '/\\') . '/';
 }
 
 /**
