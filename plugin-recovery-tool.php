@@ -221,14 +221,19 @@ function recoveryStubRenderPageEnd(): void
     <?php
 }
 
-function recoveryStubRenderIntegrityError(string $message): void
+function recoveryStubRenderIntegrityError(string $message, ?string $logDir = null): void
 {
+    recoveryStubLogExposeHeaders();
     recoveryStubRenderPageStart('Plugin Recovery Tool', 'Integritätsprüfung fehlgeschlagen');
+    $logDir = $logDir ?? recoveryStubLogDir();
     ?>
     <p class="error"><strong><i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Ungültige Recovery-Datei</strong><br>
     <?= \htmlspecialchars($message) ?></p>
     <p class="info">Laden Sie <code>plugin-recovery-tool.php</code> ausschließlich vom
         <a href="https://github.com/<?= \htmlspecialchars(RECOVERY_GITHUB_REPO) ?>/releases" rel="noopener noreferrer">offiziellen GitHub-Release</a> herunter.</p>
+    <p class="info"><i class="fa-solid fa-file-lines" aria-hidden="true"></i>
+        Details wurden protokolliert unter <code><?= \htmlspecialchars($logDir) ?></code>
+        (<code>stub-errors-<?= \date('Y-m-d') ?>.log</code>, <code>stub-actions-<?= \date('Y-m-d') ?>.log</code>).</p>
     <?php
     recoveryStubRenderPageEnd();
 }
@@ -361,8 +366,10 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
     recoveryStubRenderPageStart('Recovery-Paket installieren', 'Paket wird für die volle Oberfläche benötigt');
     ?>
     <p class="sectionDescription" style="margin-bottom:16px">
-        Debug-Logs: <code><?= \htmlspecialchars(RECOVERY_STUB_LOG_SUBDIR) ?>/</code>
-        (z.&nbsp;B. <code>stub-<?= \date('Y-m-d') ?>.log</code>)
+        Logs: <code><?= \htmlspecialchars(recoveryStubLogDir()) ?></code>
+        — <code>stub-<?= \date('Y-m-d') ?>.log</code>,
+        <code>stub-actions-<?= \date('Y-m-d') ?>.log</code>,
+        <code>stub-errors-<?= \date('Y-m-d') ?>.log</code>
     </p>
     <?php if ($errorMessage !== null && $errorMessage !== ''): ?>
     <p class="error"><strong><i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Fehler</strong><br><?= $errorMessage ?></p>
@@ -425,6 +432,11 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
 
 function recoveryStubLogDir(): string
 {
+    static $resolved = null;
+    if ($resolved !== null) {
+        return $resolved;
+    }
+
     $dir = \rtrim(recoveryStubWcfRoot(), '/\\') . '/' . RECOVERY_STUB_LOG_SUBDIR . '/';
     if (\is_file($dir)) {
         @\unlink($dir);
@@ -432,13 +444,51 @@ function recoveryStubLogDir(): string
     if (!\is_dir($dir)) {
         @\mkdir($dir, 0775, true);
     }
+    if (\is_dir($dir)) {
+        if (!\is_writable($dir)) {
+            @\chmod($dir, 0775);
+        }
+        if (\is_writable($dir)) {
+            return $resolved = $dir;
+        }
+    }
 
-    return $dir;
+    $fallback = \rtrim(\sys_get_temp_dir(), '/\\') . '/woltlab-recovery-stub/';
+    if (!\is_dir($fallback)) {
+        @\mkdir($fallback, 0775, true);
+    }
+
+    return $resolved = $fallback;
 }
 
 function recoveryStubLogPath(string $basename): string
 {
     return recoveryStubLogDir() . $basename;
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function recoveryStubRequestContext(): array
+{
+    $token = isset($_REQUEST['t']) ? (string) $_REQUEST['t'] : '';
+
+    return [
+        'method' => $_SERVER['REQUEST_METHOD'] ?? 'GET',
+        'action' => isset($_REQUEST['action']) ? (string) $_REQUEST['action'] : null,
+        'tokenPrefix' => $token !== '' ? \substr($token, 0, 8) : null,
+        'uri' => $_SERVER['REQUEST_URI'] ?? '',
+        'remoteAddr' => $_SERVER['REMOTE_ADDR'] ?? null,
+        'stubVersion' => \defined('RECOVERY_STUB_VERSION') ? RECOVERY_STUB_VERSION : null,
+    ];
+}
+
+function recoveryStubWriteLogLine(string $basename, string $line): void
+{
+    $path = recoveryStubLogPath($basename);
+    if (@\file_put_contents($path, $line . "\n", \FILE_APPEND | \LOCK_EX) === false) {
+        @\error_log('[recovery-stub] log_write_failed path=' . $path . ' line=' . $line);
+    }
 }
 
 /**
@@ -448,15 +498,37 @@ function recoveryStubLog(string $level, string $message, array $context = []): v
 {
     $line = \sprintf("[%s] [%s] %s", \date('Y-m-d H:i:s'), \strtoupper($level), $message);
     if ($context !== []) {
-        $json = \json_encode($context, \JSON_UNESCAPED_UNICODE);
+        $json = \json_encode($context, \JSON_UNESCAPED_UNICODE | \JSON_INVALID_UTF8_SUBSTITUTE);
         if ($json !== false) {
             $line .= ' ' . $json;
         }
     }
-    @\file_put_contents(
-        recoveryStubLogPath('stub-' . \date('Y-m-d') . '.log'),
-        $line . "\n",
-        \FILE_APPEND | \LOCK_EX
+    recoveryStubWriteLogLine('stub-' . \date('Y-m-d') . '.log', $line);
+}
+
+/**
+ * @param array<string, mixed> $context
+ */
+function recoveryStubLogAction(string $action, array $context = []): void
+{
+    $payload = ['action' => $action] + recoveryStubRequestContext() + $context;
+    recoveryStubLog('info', 'ACTION ' . $action, $payload);
+    recoveryStubWriteLogLine(
+        'stub-actions-' . \date('Y-m-d') . '.log',
+        \sprintf("[%s] %s %s", \date('Y-m-d H:i:s'), $action, \json_encode($payload, \JSON_UNESCAPED_UNICODE) ?: '{}')
+    );
+}
+
+/**
+ * @param array<string, mixed> $context
+ */
+function recoveryStubLogError(string $message, array $context = []): void
+{
+    $payload = recoveryStubRequestContext() + $context;
+    recoveryStubLog('error', $message, $payload);
+    recoveryStubWriteLogLine(
+        'stub-errors-' . \date('Y-m-d') . '.log',
+        \sprintf("[%s] %s %s", \date('Y-m-d H:i:s'), $message, \json_encode($payload, \JSON_UNESCAPED_UNICODE) ?: '{}')
     );
 }
 
@@ -470,15 +542,30 @@ function recoveryStubLogDebug(string $location, string $message, array $data = [
         'data' => $data,
         'timestamp' => (int) \round(\microtime(true) * 1000),
         'stubVersion' => \defined('RECOVERY_STUB_VERSION') ? RECOVERY_STUB_VERSION : null,
-    ];
-    $line = \json_encode($payload, \JSON_UNESCAPED_UNICODE);
+    ] + recoveryStubRequestContext();
+    $line = \json_encode($payload, \JSON_UNESCAPED_UNICODE | \JSON_INVALID_UTF8_SUBSTITUTE);
     if ($line !== false) {
-        @\file_put_contents(
-            recoveryStubLogPath('stub-debug-' . \date('Y-m-d') . '.ndjson'),
-            $line . "\n",
-            \FILE_APPEND | \LOCK_EX
-        );
+        recoveryStubWriteLogLine('stub-debug-' . \date('Y-m-d') . '.ndjson', $line);
     }
+}
+
+function recoveryStubLogRequestStarted(): void
+{
+    recoveryStubLogAction('request', [
+        'logDir' => recoveryStubLogDir(),
+        'wcfRoot' => recoveryStubWcfRoot(),
+    ]);
+}
+
+function recoveryStubLogExposeHeaders(): void
+{
+    static $sent = false;
+    if ($sent || \headers_sent()) {
+        return;
+    }
+    $sent = true;
+    \header('X-WFL-Recovery-Stub-Log-Dir-B64: ' . \base64_encode(recoveryStubLogDir()));
+    \header('X-WFL-Recovery-Stub-Log-B64: ' . \base64_encode(recoveryStubLogPath('stub-' . \date('Y-m-d') . '.log')));
 }
 
 function recoveryStubCleanupAllRecoveryArtifacts(): void
@@ -562,17 +649,28 @@ function recoveryStubBuildId(): string
     return RECOVERY_STUB_VERSION . '-' . \substr($hash, 0, 16);
 }
 
-function recoveryStubVerifyIntegrity(): ?string
+/**
+ * @return array{ok: bool, message?: string, expectedPrefix?: string, actualPrefix?: string, logDir?: string}
+ */
+function recoveryStubVerifyIntegrityDetailed(): array
 {
+    $logDir = recoveryStubLogDir();
     if (!\defined('RECOVERY_STUB_INTEGRITY_HASH') || RECOVERY_STUB_INTEGRITY_HASH === '') {
-        return 'Stub-Integritätsprüfung fehlt (kein offizielles Release?).';
+        return [
+            'ok' => false,
+            'message' => 'Stub-Integritätsprüfung fehlt (kein offizielles Release?).',
+            'logDir' => $logDir,
+        ];
     }
     $content = (string) @\file_get_contents(__FILE__);
     if ($content === '') {
-        return 'Stub-Datei konnte nicht gelesen werden.';
+        return [
+            'ok' => false,
+            'message' => 'Stub-Datei konnte nicht gelesen werden.',
+            'logDir' => $logDir,
+        ];
     }
     $placeholder = \str_repeat('0', 64);
-    // Nur die top-level define-Zeile (nicht String-Literale in diesem Quelltext)
     $canonical = \preg_replace(
         "/^define\\('RECOVERY_STUB_INTEGRITY_HASH',\\s*'[^']*'\\);/m",
         "define('RECOVERY_STUB_INTEGRITY_HASH', '" . $placeholder . "');",
@@ -580,14 +678,32 @@ function recoveryStubVerifyIntegrity(): ?string
         1
     );
     if ($canonical === null) {
-        return 'Stub-Integritätsprüfung fehlgeschlagen.';
+        return [
+            'ok' => false,
+            'message' => 'Stub-Integritätsprüfung fehlgeschlagen.',
+            'logDir' => $logDir,
+        ];
     }
+    $expected = (string) RECOVERY_STUB_INTEGRITY_HASH;
     $actual = \hash('sha256', $canonical);
-    if (!\hash_equals((string) RECOVERY_STUB_INTEGRITY_HASH, $actual)) {
-        return 'Die Datei plugin-recovery-tool.php wurde verändert oder ist kein offizielles Release von GitHub.';
+    if (!\hash_equals($expected, $actual)) {
+        return [
+            'ok' => false,
+            'message' => 'Die Datei plugin-recovery-tool.php wurde verändert oder ist kein offizielles Release von GitHub.',
+            'expectedPrefix' => \substr($expected, 0, 16),
+            'actualPrefix' => \substr($actual, 0, 16),
+            'logDir' => $logDir,
+        ];
     }
 
-    return null;
+    return ['ok' => true, 'logDir' => $logDir];
+}
+
+function recoveryStubVerifyIntegrity(): ?string
+{
+    $result = recoveryStubVerifyIntegrityDetailed();
+
+    return $result['ok'] ? null : (string) ($result['message'] ?? 'Integritätsprüfung fehlgeschlagen.');
 }
 
 function recoveryStubAssertValidToken(string $token): bool
@@ -829,12 +945,12 @@ function recoveryStubCleanupAuthState(): void
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.1.1
+ * @version 2.1.2
  */
 
-define('RECOVERY_STUB_VERSION', '2.1.1');
-define('RECOVERY_PACKAGE_VERSION', '2.1.1');
-define('RECOVERY_STUB_INTEGRITY_HASH', '22cf0c85bd6ffc183571ca9fcc590a00a8fec2955771c1b8ab92d8debeefed20');
+define('RECOVERY_STUB_VERSION', '2.1.2');
+define('RECOVERY_PACKAGE_VERSION', '2.1.2');
+define('RECOVERY_STUB_INTEGRITY_HASH', '70f77486446c79d6c3c4964986c622e05973f03a53e050a113f3d107ad08587c');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
@@ -1275,16 +1391,26 @@ function recoveryStubCleanupAuxiliary(): void
     recoveryStubLog('info', 'Stub-Cleanup abgeschlossen');
 }
 
-$integrityError = recoveryStubVerifyIntegrity();
-if ($integrityError !== null) {
-    recoveryStubRenderIntegrityError($integrityError);
+recoveryStubLogRequestStarted();
+recoveryStubLogExposeHeaders();
+
+$integrityResult = recoveryStubVerifyIntegrityDetailed();
+if (!$integrityResult['ok']) {
+    recoveryStubLogError('Integritätsprüfung fehlgeschlagen', $integrityResult);
+    recoveryStubLogAction('integrity_denied', $integrityResult);
+    recoveryStubRenderIntegrityError(
+        (string) ($integrityResult['message'] ?? 'Integritätsprüfung fehlgeschlagen.'),
+        (string) ($integrityResult['logDir'] ?? recoveryStubLogDir())
+    );
     exit;
 }
+recoveryStubLogDebug('bootstrap', 'integrity_ok', ['buildId' => recoveryStubBuildId()]);
 
 // --- Token / Sitzung ---
 if (empty($_REQUEST['t']) || !recoveryStubAssertValidToken((string) $_REQUEST['t'])) {
     $authHash = \bin2hex(\random_bytes(20));
     recoveryStubCreatePendingSession($authHash);
+    recoveryStubLogAction('session_start', ['tokenPrefix' => \substr($authHash, 0, 8)]);
     \header('Location: plugin-recovery-tool.php?t=' . $authHash);
     exit;
 }
@@ -1292,8 +1418,10 @@ $authHash = (string) $_REQUEST['t'];
 $action = (!empty($_REQUEST['action'])) ? (string) $_REQUEST['action'] : '';
 
 if ($action === 'download-auth-file') {
+    recoveryStubLogAction('auth_download');
     $generated = recoveryStubGenerateAuthFileContent($authHash);
     if (!$generated['ok']) {
+        recoveryStubLogError('Auth-Datei konnte nicht erstellt werden', ['error' => $generated['error'] ?? '']);
         recoveryStubRenderAuthWizard($authHash, (string) ($generated['error'] ?? ''));
         exit;
     }
@@ -1312,6 +1440,9 @@ if ($action === 'auth-status') {
     if (!$isAuthenticated) {
         $check = recoveryStubValidateAuthFile($authHash);
         $reason = $check['reason'] ?? 'unknown';
+        recoveryStubLogAction('auth_status_pending', ['reason' => $reason]);
+    } else {
+        recoveryStubLogAction('auth_status_ok');
     }
     \header('Content-Type: application/json; charset=utf-8');
     echo \json_encode([
@@ -1323,6 +1454,7 @@ if ($action === 'auth-status') {
 }
 
 if ($action === 'cleanup') {
+    recoveryStubLogAction('cleanup');
     recoveryStubCleanupAuxiliary();
     \register_shutdown_function(static function (): void {
         @\unlink(__DIR__ . '/plugin-recovery-tool.php');
@@ -1332,6 +1464,7 @@ if ($action === 'cleanup') {
 }
 
 if ($action === 'install-package' && $isAuthenticated) {
+    recoveryStubLogAction('install_package', ['version' => RECOVERY_PACKAGE_VERSION]);
     $result = recoveryStubInstallPackage(RECOVERY_PACKAGE_VERSION);
     if ($result['ok']) {
         \header('Location: plugin-recovery-tool.php?t=' . \urlencode($authHash) . '&package_ok=1');
@@ -1353,15 +1486,18 @@ if (!$isAuthenticated) {
             $authHint = recoveryStubAuthFailureMessage((string) $check['reason']);
         }
     }
+    recoveryStubLogAction('auth_wizard', ['hint' => $authHint]);
     recoveryStubRenderAuthWizard($authHash, $authHint);
     exit;
 }
 
 if (!recoveryStubPackageReady()) {
+    recoveryStubLogAction('package_install_page');
     recoveryStubRenderPackageInstallPage($authHash);
     exit;
 }
 
+recoveryStubLogAction('package_bootstrap');
 // --- Paket laden ---
 \define('RECOVERY_WCF_ROOT', recoveryStubWcfRoot());
 \define('RECOVERY_PACKAGE_DIR', recoveryStubPackageDir());
