@@ -338,7 +338,6 @@ function recoveryStubRenderAuthWizard(string $authHash): void
 function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMessage = null): void
 {
     $version = RECOVERY_PACKAGE_VERSION;
-    $installUrl = '?action=install-package&amp;t=' . \htmlspecialchars($authHash);
     $ghUrl = \htmlspecialchars(recoveryStubReleaseDownloadUrl($version));
     $dirName = RECOVERY_PACKAGE_DIR_NAME;
 
@@ -354,11 +353,17 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
             <p class="sectionDescription">Lädt <code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code> von GitHub und entpackt es nach <code><?= \htmlspecialchars($dirName) ?>/</code>.</p>
         </header>
         <p class="info"><i class="fa-solid fa-box-archive" aria-hidden="true"></i> Version <strong>v<?= \htmlspecialchars($version) ?></strong> enthält alle Recovery-Modi und die ACP-Oberfläche.</p>
-        <div class="formSubmit">
-            <a href="<?= $installUrl ?>" class="button buttonPrimary" id="installPackageBtn">
-                <i class="fa-solid fa-download" aria-hidden="true"></i> Paket automatisch installieren
-            </a>
-        </div>
+        <form method="post" action="plugin-recovery-tool.php" id="installPackageForm">
+            <input type="hidden" name="action" value="install-package">
+            <input type="hidden" name="t" value="<?= \htmlspecialchars($authHash) ?>">
+            <p class="info" id="installPackageStatus" hidden>
+                <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+                Paket wird heruntergeladen und entpackt — bitte warten …
+            </p>
+            <div class="formSubmit">
+                <input type="submit" id="installPackageBtn" class="button buttonPrimary" value="Paket automatisch installieren" accesskey="s">
+            </div>
+        </form>
     </section>
 
     <section class="section">
@@ -376,15 +381,17 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
 
     <script>
     (function () {
-        var btn = document.getElementById('installPackageBtn');
-        if (!btn) { return; }
-        btn.addEventListener('click', function () {
-            btn.classList.add('disabled');
-            btn.setAttribute('aria-busy', 'true');
-            var icon = btn.querySelector('.fa-download');
-            if (icon) {
-                icon.classList.remove('fa-download');
-                icon.classList.add('fa-spinner', 'fa-spin');
+        var form = document.getElementById('installPackageForm');
+        if (!form) { return; }
+        form.addEventListener('submit', function () {
+            var status = document.getElementById('installPackageStatus');
+            var btn = document.getElementById('installPackageBtn');
+            if (status) {
+                status.hidden = false;
+            }
+            if (btn) {
+                btn.disabled = true;
+                btn.value = 'Installation läuft …';
             }
         });
     }());
@@ -399,11 +406,11 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.0.5
+ * @version 2.0.6
  */
 
-define('RECOVERY_STUB_VERSION', '2.0.5');
-define('RECOVERY_PACKAGE_VERSION', '2.0.5');
+define('RECOVERY_STUB_VERSION', '2.0.6');
+define('RECOVERY_PACKAGE_VERSION', '2.0.6');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
@@ -439,6 +446,94 @@ function recoveryStubReleaseDownloadUrl(string $version): string
 {
     return 'https://github.com/' . RECOVERY_GITHUB_REPO
         . '/releases/download/v' . $version . '/recovery-' . $version . '.tar.gz';
+}
+
+function recoveryStubDownloadCacheDir(): string
+{
+    $candidates = [
+        recoveryStubWcfRoot() . 'uploads/.recovery-cache/',
+        \sys_get_temp_dir() . '/woltlab-recovery-cache/',
+    ];
+    foreach ($candidates as $dir) {
+        if (\is_dir($dir) || @\mkdir($dir, 0755, true)) {
+            return \rtrim($dir, '/\\') . '/';
+        }
+    }
+
+    return \sys_get_temp_dir() . '/';
+}
+
+/**
+ * @return array{ok: true, data: string}|array{ok: false, error: string}
+ */
+function recoveryStubHttpDownload(string $url): array
+{
+    if (\function_exists('curl_init')) {
+        $ch = \curl_init($url);
+        if ($ch === false) {
+            return ['ok' => false, 'error' => 'cURL konnte nicht initialisiert werden.'];
+        }
+        \curl_setopt_array($ch, [
+            \CURLOPT_RETURNTRANSFER => true,
+            \CURLOPT_FOLLOWLOCATION => true,
+            \CURLOPT_MAXREDIRS => 10,
+            \CURLOPT_CONNECTTIMEOUT => 30,
+            \CURLOPT_TIMEOUT => 300,
+            \CURLOPT_USERAGENT => 'WoltLab-Plugin-Recovery/' . RECOVERY_STUB_VERSION,
+            \CURLOPT_SSL_VERIFYPEER => true,
+            \CURLOPT_SSL_VERIFYHOST => 2,
+        ]);
+        $data = \curl_exec($ch);
+        $httpCode = (int) \curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = \curl_error($ch);
+        \curl_close($ch);
+        if ($data === false) {
+            return ['ok' => false, 'error' => 'cURL: ' . ($curlError !== '' ? $curlError : 'Unbekannter Fehler')];
+        }
+        if ($httpCode !== 200) {
+            return ['ok' => false, 'error' => 'HTTP-Status ' . $httpCode . ' beim Download.'];
+        }
+
+        return ['ok' => true, 'data' => $data];
+    }
+
+    if (!\ini_get('allow_url_fopen')) {
+        return [
+            'ok' => false,
+            'error' => 'allow_url_fopen ist deaktiviert und cURL nicht verfügbar. Bitte manuell installieren.',
+        ];
+    }
+
+    $context = \stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'follow_location' => 1,
+            'max_redirects' => 10,
+            'timeout' => 300,
+            'header' => 'User-Agent: WoltLab-Plugin-Recovery/' . RECOVERY_STUB_VERSION . "\r\n",
+        ],
+        'ssl' => [
+            'verify_peer' => true,
+            'verify_peer_name' => true,
+        ],
+    ]);
+    $data = @\file_get_contents($url, false, $context);
+    if ($data === false) {
+        $last = \error_get_last();
+
+        return [
+            'ok' => false,
+            'error' => 'Download fehlgeschlagen'
+                . ($last['message'] ?? '' ? ' (' . $last['message'] . ')' : '') . '.',
+        ];
+    }
+
+    return ['ok' => true, 'data' => $data];
+}
+
+function recoveryStubIsGzipArchive(string $data): bool
+{
+    return \strlen($data) >= 2 && $data[0] === "\x1f" && $data[1] === "\x8b";
 }
 
 function recoveryStubReadInstalledVersion(): ?string
@@ -572,31 +667,40 @@ function recoveryStubExtractTarGz(string $archive, string $destination): array
  */
 function recoveryStubInstallPackage(string $version): array
 {
+    @\set_time_limit(300);
+
     $url = recoveryStubReleaseDownloadUrl($version);
     $dest = recoveryStubPackageDir();
-    $cacheDir = $dest . '.cache/';
-    if (!\is_dir($cacheDir) && !@\mkdir($cacheDir, 0755, true)) {
-        $cacheDir = \sys_get_temp_dir() . '/';
-    }
-    $archive = $cacheDir . 'recovery-' . $version . '.tar.gz';
+    $archive = recoveryStubDownloadCacheDir() . 'recovery-' . $version . '.tar.gz';
 
-    $data = @\file_get_contents($url);
-    if ($data === false) {
+    $download = recoveryStubHttpDownload($url);
+    if (!$download['ok']) {
         return [
             'ok' => false,
-            'error' => 'Download fehlgeschlagen. Bitte '
+            'error' => $download['error'] . ' Bitte '
                 . '<a href="' . \htmlspecialchars($url) . '">recovery-' . $version . '.tar.gz</a> '
                 . 'manuell nach <code>' . RECOVERY_PACKAGE_DIR_NAME . '/</code> entpacken.',
         ];
     }
+
+    $data = $download['data'];
+    if (!recoveryStubIsGzipArchive($data)) {
+        return [
+            'ok' => false,
+            'error' => 'Ungültige Antwort vom Server (kein gzip-Archiv). Bitte manuell installieren.',
+        ];
+    }
+
     if (@\file_put_contents($archive, $data) === false) {
-        return ['ok' => false, 'error' => 'Archiv konnte nicht gespeichert werden.'];
+        return ['ok' => false, 'error' => 'Archiv konnte nicht gespeichert werden: ' . \htmlspecialchars($archive)];
     }
 
     if (\is_dir($dest)) {
         recoveryStubRemoveDirectory($dest);
     }
     if (!@\mkdir($dest, 0755, true)) {
+        @\unlink($archive);
+
         return ['ok' => false, 'error' => 'Verzeichnis ' . RECOVERY_PACKAGE_DIR_NAME . '/ konnte nicht erstellt werden.'];
     }
 
@@ -636,7 +740,7 @@ if (empty($_REQUEST['t']) || !\preg_match('~^[a-f0-9]{40}$~', (string) $_REQUEST
     exit;
 }
 $authHash = (string) $_REQUEST['t'];
-$action = (!empty($_GET['action'])) ? (string) $_GET['action'] : '';
+$action = (!empty($_REQUEST['action'])) ? (string) $_REQUEST['action'] : '';
 
 if ($action === 'download-auth-file') {
     $expiresTimestamp = \time() + 86400;
