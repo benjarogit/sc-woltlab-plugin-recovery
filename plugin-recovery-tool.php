@@ -34,7 +34,7 @@ function recoveryStubUsesCompiledAcpStyle(): bool
 }
 
 /**
- * @return array{stylesheets: list<string>, WCFSetup.css: string, woltlabSuite.png: string, fontAwesomeCss: string, fontAwesomeLocal: bool, usesCompiledAcpStyle: bool}
+ * @return array{stylesheets: list<string>, WCFSetup.css: string, woltlabSuite.png: string, fontAwesomeCss: string, fontAwesomeLocal: bool, usesCompiledAcpStyle: bool, webComponentsJs: string}
  */
 function recoveryStubGetSetupAssets(): array
 {
@@ -47,16 +47,57 @@ function recoveryStubGetSetupAssets(): array
         'fontAwesomeCss' => '',
         'fontAwesomeLocal' => false,
         'usesCompiledAcpStyle' => recoveryStubUsesCompiledAcpStyle(),
+        'webComponentsJs' => '',
     ];
     if (\is_readable($root . 'acp/images/woltlabSuite.png')) {
         $assets['woltlabSuite.png'] = 'acp/images/woltlabSuite.png';
     }
-    if (\is_readable($root . 'icon/font-awesome/v7/css/all.min.css')) {
+    $wcPath = 'js/WoltLabSuite/WebComponent.min.js';
+    if (\is_readable($root . $wcPath)) {
+        $assets['webComponentsJs'] = $wcPath;
+    }
+    if (!$assets['usesCompiledAcpStyle'] && \is_readable($root . 'icon/font-awesome/v7/css/all.min.css')) {
         $assets['fontAwesomeCss'] = 'icon/font-awesome/v7/css/all.min.css';
         $assets['fontAwesomeLocal'] = true;
     }
 
     return $assets;
+}
+
+function recoveryStubFaIcon(int $size, string $name, bool $solid = false): string
+{
+    $size = \in_array($size, [16, 24, 32, 48, 64, 96, 128, 144], true) ? $size : 16;
+    $name = \htmlspecialchars($name, \ENT_QUOTES, 'UTF-8');
+    if ($solid) {
+        return \sprintf('<fa-icon size="%d" name="%s" solid></fa-icon>', $size, $name);
+    }
+
+    return \sprintf('<fa-icon size="%d" name="%s"></fa-icon>', $size, $name);
+}
+
+function recoveryStubLoadingIndicator(int $size = 24): string
+{
+    if (!\in_array($size, [24, 48, 96], true)) {
+        $size = 24;
+    }
+
+    return '<woltlab-core-loading-indicator size="' . $size . '" hide-text></woltlab-core-loading-indicator>';
+}
+
+function recoveryStubRenderWebComponentsScript(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $assets = recoveryStubGetSetupAssets();
+    if (($assets['webComponentsJs'] ?? '') === '') {
+        return;
+    }
+    $done = true;
+    ?>
+    <script data-eager="true" src="<?= \htmlspecialchars(recoveryStubAssetHref($assets['webComponentsJs'])) ?>"></script>
+    <?php
 }
 
 function recoveryStubAssetHref(string $relative): string
@@ -138,7 +179,7 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
     $logoHref = recoveryStubAssetHref($assets['woltlabSuite.png']);
     $faHref = $assets['fontAwesomeCss'] !== ''
         ? recoveryStubAssetHref($assets['fontAwesomeCss'])
-        : 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css';
+        : '';
     $faExtra = $assets['fontAwesomeLocal'] ? '' : ' crossorigin="anonymous" referrerpolicy="no-referrer"';
     $wizardCss = recoveryStubWizardCss();
 
@@ -154,8 +195,11 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
     <?php foreach ($assets['stylesheets'] as $stylesheet): ?>
     <link rel="stylesheet" type="text/css" media="screen" href="<?= \htmlspecialchars(recoveryStubAssetHref($stylesheet)) ?>">
     <?php endforeach; ?>
+    <?php if ($faHref !== ''): ?>
     <link rel="stylesheet" href="<?= \htmlspecialchars($faHref) ?>"<?= $faExtra ?>>
+    <?php endif; ?>
     <?php recoveryStubRenderColorSchemeHeadScript(); ?>
+    <?php recoveryStubRenderWebComponentsScript(); ?>
     <style>
         #pageHeaderContainer { height: 100px; }
         #pageHeader { padding: 30px 20px; }
@@ -196,18 +240,7 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
             word-break: break-word;
         }
         .recovery-log-empty { margin: 8px 0 0; color: var(--wcfContentDimmedText, #888); font-size: 13px; }
-        @keyframes recovery-spin { to { transform: rotate(360deg); } }
-        .recovery-spinner {
-            border: 2px solid currentColor;
-            border-right-color: transparent;
-            border-radius: 50%;
-            display: inline-block;
-            width: 1.1em;
-            height: 1.1em;
-            vertical-align: -0.15em;
-            animation: recovery-spin 0.7s linear infinite;
-        }
-        .recovery-loading-inline { display: inline-flex; align-items: center; gap: 8px; }
+        .recovery-loading-inline { display: inline-flex; align-items: center; gap: 10px; }
     </style>
     <?php if ($wizardCss !== '' && !$assets['usesCompiledAcpStyle']): ?>
     <style><?= $wizardCss ?></style>
@@ -493,7 +526,7 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
             <input type="hidden" name="action" value="install-package">
             <input type="hidden" name="t" value="<?= \htmlspecialchars($authHash) ?>">
             <p class="info recovery-loading-inline" id="installPackageStatus" hidden>
-                <span class="recovery-spinner" aria-hidden="true"></span>
+                <?= recoveryStubLoadingIndicator(24) ?>
                 Paket wird heruntergeladen und entpackt — bitte warten …
             </p>
             <div class="formSubmit">
@@ -1126,12 +1159,12 @@ function recoveryStubCleanupAuthState(): void
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.1.5
+ * @version 2.1.6
  */
 
-define('RECOVERY_STUB_VERSION', '2.1.5');
-define('RECOVERY_PACKAGE_VERSION', '2.1.5');
-define('RECOVERY_STUB_INTEGRITY_HASH', 'fd5798dea86db08fc15aa33c10334064518b4257003c61fad746f88b8e6b43b0');
+define('RECOVERY_STUB_VERSION', '2.1.6');
+define('RECOVERY_PACKAGE_VERSION', '2.1.6');
+define('RECOVERY_STUB_INTEGRITY_HASH', '5e56ec1ab1a58fb379da74ac8b1f5a3d74706b850d810c308fee9269c3b1df7e');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
