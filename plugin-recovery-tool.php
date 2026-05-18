@@ -388,16 +388,18 @@ function recoveryStubRenderIntegrityError(string $message, ?string $logDir = nul
 function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = null): void
 {
     $authFile = RECOVERY_AUTH_FILENAME;
+    $initialStep = recoveryStubGetAuthWizardStep($authHash);
+    $stepLabels = ['Schritt 1 von 3', 'Schritt 2 von 3', 'Schritt 3 von 3'];
     recoveryStubRenderPageStart('Plugin Recovery Tool', '', [
-        'value' => 1,
+        'value' => $initialStep,
         'max' => 3,
-        'label' => 'Schritt 1 von 3',
+        'label' => $stepLabels[$initialStep - 1],
     ]);
     ?>
     <?php if ($errorMessage !== null && $errorMessage !== ''): ?>
-    <p class="error"><strong><i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Authentifizierung</strong><br><?= \htmlspecialchars($errorMessage) ?></p>
+    <p class="error"><strong><?= recoveryStubFaIcon(16, 'circle-xmark', true) ?> Authentifizierung</strong><br><?= \htmlspecialchars($errorMessage) ?></p>
     <?php endif; ?>
-    <section class="section recovery-auth-step" id="auth-step-1">
+    <section class="section recovery-auth-step" id="auth-step-1"<?= $initialStep !== 1 ? ' hidden' : '' ?>>
         <header class="sectionHeader">
             <h2 class="sectionTitle">Auth-Datei laden</h2>
             <p class="sectionDescription">Laden Sie die Auth-Datei herunter. Sie ist kryptografisch an diese Sitzung und diese Tool-Version gebunden.</p>
@@ -410,7 +412,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
         </div>
     </section>
 
-    <section class="section recovery-auth-step" id="auth-step-2" hidden>
+    <section class="section recovery-auth-step" id="auth-step-2"<?= $initialStep !== 2 ? ' hidden' : '' ?>>
         <header class="sectionHeader">
             <h2 class="sectionTitle">Datei hochladen</h2>
             <p class="sectionDescription">Legen Sie die Datei ins WoltLab-Hauptverzeichnis (neben <code>plugin-recovery-tool.php</code>).</p>
@@ -476,9 +478,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
             updateProgressLabel(n);
         }
 
-        document.getElementById('downloadBtn').addEventListener('click', function () {
-            setTimeout(function () { goToStep(2); }, 800);
-        });
+        goToStep(<?= (int) $initialStep ?>);
         document.getElementById('uploadedBtn').addEventListener('click', function () {
             document.getElementById('pollStatus').textContent = 'Prüfe Upload\u2026';
             if (pollInterval) { clearInterval(pollInterval); }
@@ -1109,6 +1109,32 @@ function recoveryStubValidateAuthFile(string $urlToken): array
     return ['ok' => true];
 }
 
+function recoveryStubInvalidateBoundSession(string $urlToken): void
+{
+    if (!recoveryStubAssertValidToken($urlToken)) {
+        return;
+    }
+    @\unlink(recoveryStubBoundAuthPath($urlToken));
+}
+
+function recoveryStubGetAuthWizardStep(string $urlToken): int
+{
+    if (!recoveryStubAssertValidToken($urlToken)) {
+        return 1;
+    }
+
+    if (!empty($_GET['wizard']) && (int) $_GET['wizard'] === 2) {
+        return 2;
+    }
+
+    $pending = recoveryStubLoadAuthState(recoveryStubPendingAuthPath($urlToken));
+    if ($pending !== null && ($pending['authIssuedAt'] ?? null) !== null) {
+        return 2;
+    }
+
+    return 1;
+}
+
 function recoveryStubIsAuthenticated(string $urlToken): bool
 {
     static $cache = [];
@@ -1117,16 +1143,16 @@ function recoveryStubIsAuthenticated(string $urlToken): bool
         return $cache[$urlToken];
     }
 
-    $bound = recoveryStubLoadAuthState(recoveryStubBoundAuthPath($urlToken));
-    if ($bound !== null && (int) ($bound['expiresAt'] ?? 0) > \time()) {
-        if (($bound['stubBuildId'] ?? '') === recoveryStubBuildId()) {
-            return $cache[$urlToken] = true;
+    $result = recoveryStubValidateAuthFile($urlToken);
+    if (!$result['ok']) {
+        if (\is_file(recoveryStubBoundAuthPath($urlToken))) {
+            recoveryStubInvalidateBoundSession($urlToken);
         }
+
+        return $cache[$urlToken] = false;
     }
 
-    $result = recoveryStubValidateAuthFile($urlToken);
-
-    return $cache[$urlToken] = $result['ok'];
+    return $cache[$urlToken] = true;
 }
 
 function recoveryStubAuthFailureMessage(string $reason): string
@@ -1159,12 +1185,12 @@ function recoveryStubCleanupAuthState(): void
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.1.6
+ * @version 2.1.7
  */
 
-define('RECOVERY_STUB_VERSION', '2.1.6');
-define('RECOVERY_PACKAGE_VERSION', '2.1.6');
-define('RECOVERY_STUB_INTEGRITY_HASH', '5e56ec1ab1a58fb379da74ac8b1f5a3d74706b850d810c308fee9269c3b1df7e');
+define('RECOVERY_STUB_VERSION', '2.1.7');
+define('RECOVERY_PACKAGE_VERSION', '2.1.7');
+define('RECOVERY_STUB_INTEGRITY_HASH', '15d4908449cbcacd4596b4eadbe9aa610ed381e6429c674febb7692b71643db8');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
