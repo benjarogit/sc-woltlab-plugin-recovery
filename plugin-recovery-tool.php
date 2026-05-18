@@ -56,7 +56,7 @@ function recoveryStubGetSetupAssets(): array
     if (\is_readable($root . $wcPath)) {
         $assets['webComponentsJs'] = $wcPath;
     }
-    if (!$assets['usesCompiledAcpStyle'] && \is_readable($root . 'icon/font-awesome/v7/css/all.min.css')) {
+    if (\is_readable($root . 'icon/font-awesome/v7/css/all.min.css')) {
         $assets['fontAwesomeCss'] = 'icon/font-awesome/v7/css/all.min.css';
         $assets['fontAwesomeLocal'] = true;
     }
@@ -64,7 +64,7 @@ function recoveryStubGetSetupAssets(): array
     return $assets;
 }
 
-function recoveryStubFaIcon(int $size, string $name, bool $solid = false): string
+function recoveryStubFaIcon(int $size, string $name, bool $solid = true): string
 {
     $size = \in_array($size, [16, 24, 32, 48, 64, 96, 128, 144], true) ? $size : 16;
     $name = \htmlspecialchars($name, \ENT_QUOTES, 'UTF-8');
@@ -84,6 +84,94 @@ function recoveryStubLoadingIndicator(int $size = 24): string
     return '<woltlab-core-loading-indicator size="' . $size . '" hide-text></woltlab-core-loading-indicator>';
 }
 
+function recoveryStubRenderWoltLabHeadGlobals(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    $timeNow = \time();
+    ?>
+    <script data-eager="true">
+    window.TIME_NOW = window.TIME_NOW || <?= (int) $timeNow ?>;
+    window.LAST_UPDATE_TIME = window.LAST_UPDATE_TIME || <?= (int) $timeNow ?>;
+    </script>
+    <?php
+}
+
+function recoveryStubRenderFaIconStyles(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    $root = recoveryStubWcfRoot();
+    $solidFont = '';
+    $regularFont = '';
+    foreach ([
+        'acp/style/font/fa-solid-900.woff2',
+        'icon/font-awesome/v7/webfonts/fa-solid-900.woff2',
+    ] as $rel) {
+        if (\is_readable($root . $rel)) {
+            $solidFont = recoveryStubAssetHref($rel);
+            break;
+        }
+    }
+    foreach ([
+        'acp/style/font/fa-regular-400.woff2',
+        'icon/font-awesome/v7/webfonts/fa-regular-400.woff2',
+    ] as $rel) {
+        if (\is_readable($root . $rel)) {
+            $regularFont = recoveryStubAssetHref($rel);
+            break;
+        }
+    }
+    ?>
+    <style>
+    <?php if ($regularFont !== ''): ?>
+    @font-face {
+        font-family: "Font Awesome 7 Free";
+        font-style: normal;
+        font-weight: 400;
+        font-display: block;
+        src: url("<?= \htmlspecialchars($regularFont) ?>") format("woff2");
+    }
+    <?php endif; ?>
+    <?php if ($solidFont !== ''): ?>
+    @font-face {
+        font-family: "Font Awesome 7 Free";
+        font-style: normal;
+        font-weight: 900;
+        font-display: block;
+        src: url("<?= \htmlspecialchars($solidFont) ?>") format("woff2");
+    }
+    <?php endif; ?>
+    fa-brand, fa-icon {
+        align-items: center;
+        display: inline-flex;
+        height: var(--icon-size);
+        justify-content: center;
+        pointer-events: none;
+        width: calc(var(--icon-size) * 1.25);
+    }
+    fa-icon:not(:defined) { visibility: hidden; }
+    fa-icon:defined { visibility: visible; }
+    fa-icon[size="16"] { --font-size: 14px; --icon-size: 16px; }
+    fa-icon[size="24"] { --font-size: 18px; --icon-size: 24px; }
+    fa-icon[size="32"] { --font-size: 28px; --icon-size: 32px; }
+    fa-icon {
+        font-family: var(--fa-font-family, "Font Awesome 7 Free") !important;
+        font-size: var(--font-size) !important;
+        font-weight: var(--fa-font-weight, 400) !important;
+        line-height: 1 !important;
+    }
+    fa-icon[solid] { font-weight: 900 !important; }
+    </style>
+    <?php
+}
+
 function recoveryStubRenderWebComponentsScript(): void
 {
     static $done = false;
@@ -95,8 +183,14 @@ function recoveryStubRenderWebComponentsScript(): void
         return;
     }
     $done = true;
+    $href = recoveryStubAssetHref($assets['webComponentsJs']);
+    $mtime = @\filemtime(recoveryStubWcfRoot() . $assets['webComponentsJs']);
+    if ($mtime !== false) {
+        $href .= (\str_contains($href, '?') ? '&' : '?') . 'v=' . $mtime;
+    }
+    recoveryStubRenderWoltLabHeadGlobals();
     ?>
-    <script data-eager="true" src="<?= \htmlspecialchars(recoveryStubAssetHref($assets['webComponentsJs'])) ?>"></script>
+    <script data-eager="true" src="<?= \htmlspecialchars($href) ?>"></script>
     <?php
 }
 
@@ -199,6 +293,8 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
     <link rel="stylesheet" href="<?= \htmlspecialchars($faHref) ?>"<?= $faExtra ?>>
     <?php endif; ?>
     <?php recoveryStubRenderColorSchemeHeadScript(); ?>
+    <?php recoveryStubRenderWoltLabHeadGlobals(); ?>
+    <?php recoveryStubRenderFaIconStyles(); ?>
     <?php recoveryStubRenderWebComponentsScript(); ?>
     <style>
         #pageHeaderContainer { height: 100px; }
@@ -1185,12 +1281,12 @@ function recoveryStubCleanupAuthState(): void
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.1.7
+ * @version 2.1.8
  */
 
-define('RECOVERY_STUB_VERSION', '2.1.7');
-define('RECOVERY_PACKAGE_VERSION', '2.1.7');
-define('RECOVERY_STUB_INTEGRITY_HASH', '15d4908449cbcacd4596b4eadbe9aa610ed381e6429c674febb7692b71643db8');
+define('RECOVERY_STUB_VERSION', '2.1.8');
+define('RECOVERY_PACKAGE_VERSION', '2.1.8');
+define('RECOVERY_STUB_INTEGRITY_HASH', '9247cac5fb58854a2e5f27be674ab3d155eb2abcbf82dfc2804a4136aece3225');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
