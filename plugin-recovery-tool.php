@@ -291,27 +291,28 @@ function recoveryStubWizardCss(): string
 .recovery-cmd-block,
 pre.recoveryLog,
 .recovery-log-pre {
-    display: block;
+    display: block !important;
     overflow-x: auto;
     margin: 12px 0;
-    padding: 12px 14px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 13px;
-    line-height: 1.5;
+    padding: 12px 14px !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+    font-size: 13px !important;
+    line-height: 1.5 !important;
     white-space: pre-wrap;
     word-break: break-word;
-    color: #e8e8e8;
-    background: #1e1e1e;
-    border: 1px solid #444;
+    color: #e8ecf0 !important;
+    background: #1e2832 !important;
+    border: 1px solid #3d4f5f !important;
     border-radius: 4px;
+    box-shadow: none !important;
 }
 
 html[data-color-scheme="light"] .recovery-cmd-block,
 html[data-color-scheme="light"] pre.recoveryLog,
 html[data-color-scheme="light"] .recovery-log-pre {
-    color: #1a1a1a;
-    background: #f4f4f4;
-    border-color: #ccc;
+    color: #1a1a1a !important;
+    background: #f4f4f4 !important;
+    border-color: #ccc !important;
 }
 
 /* Auth wizard alerts */
@@ -1844,9 +1845,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.2.1');
-define('RECOVERY_PACKAGE_VERSION', '2.2.1');
-define('RECOVERY_STUB_INTEGRITY_HASH', '6015b2e356e71572ab4bedfe09d5a5f777095f0ef7deb9fb6a764601333989b6');
+define('RECOVERY_STUB_VERSION', '2.3.1');
+define('RECOVERY_PACKAGE_VERSION', '2.3.1');
+define('RECOVERY_STUB_INTEGRITY_HASH', '273a304fa8bd65a73e477b5af049fa1b78e9e96a57f20dd61f4ae1ccdc8e6eba');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');

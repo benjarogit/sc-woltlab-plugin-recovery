@@ -19,7 +19,7 @@ Download everything from **[Releases](https://github.com/benjarogit/sc-woltlab-p
 
 1. **[Download `plugin-recovery-tool.php`](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases/latest/download/plugin-recovery-tool.php)** and upload it to your **WoltLab root** (same folder as `global.php`).
 2. Open `https://your-domain.com/plugin-recovery-tool.php` in your browser.
-3. Complete auth (below) — the tool then downloads **`recovery-2.0.0.tar.gz`** from GitHub and extracts it to `recovery-tool/`.
+3. Complete auth (below) — the tool then downloads **`recovery-X.Y.Z.tar.gz`** from the [latest release](https://github.com/benjarogit/sc-woltlab-plugin-recovery/releases/latest) and extracts it to `recovery-tool/`.
 4. If automatic download fails, use the link on the tool’s page and extract the archive into `recovery-tool/` manually.
 
 ```
