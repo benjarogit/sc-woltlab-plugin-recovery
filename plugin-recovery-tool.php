@@ -223,37 +223,85 @@ function recoveryStubAssetHref(string $relative): string
 function recoveryStubWizardCss(): string
 {
     return <<<'RECOVERY_STUB_WIZARD_CSS'
-/* Stub: Dark-Mode wenn nur WCFSetup.css (kein kompiliertes acp/style/style.css). */
-@media (prefers-color-scheme: dark) {
-    html[data-color-scheme="dark"] body.wcfAcp,
-    html[data-color-scheme="system"] body.wcfAcp {
-        background-color: #1a1a1a;
-        color: #c8c8c8;
-    }
-    html[data-color-scheme="dark"] .contentHeader .contentTitle,
-    html[data-color-scheme="dark"] .sectionTitle,
-    html[data-color-scheme="system"] .contentHeader .contentTitle,
-    html[data-color-scheme="system"] .sectionTitle {
-        color: #e8e8e8;
-    }
-    html[data-color-scheme="dark"] .info,
-    html[data-color-scheme="system"] .info {
-        background-color: rgba(33, 150, 243, 0.12);
-        border-left-color: #2196f3;
-        color: #b8d4f0;
-    }
-    html[data-color-scheme="dark"] .warning,
-    html[data-color-scheme="system"] .warning {
-        background-color: rgba(255, 193, 7, 0.12);
-        border-left-color: #ffc107;
-        color: #e8d9a8;
-    }
-    html[data-color-scheme="dark"] .success,
-    html[data-color-scheme="system"] .success {
-        background-color: rgba(76, 175, 80, 0.12);
-        border-left-color: #4caf50;
-        color: #c8e6c9;
-    }
+/* Auth wizard (stub) — complements WCFSetup when no compiled ACP style */
+.recovery-auth-alert {
+    margin: 0 0 20px;
+    padding: 14px 16px;
+    border-radius: 4px;
+    border-left: 4px solid var(--wcfStatusInfoBorder, #2196f3);
+    background: var(--wcfStatusInfoBackground, rgba(33, 150, 243, 0.08));
+}
+.recovery-auth-alert--error {
+    border-left-color: var(--wcfStatusErrorBorder, #f44336);
+    background: var(--wcfStatusErrorBackground, rgba(244, 67, 54, 0.08));
+}
+.recovery-auth-alert--warning {
+    border-left-color: var(--wcfStatusWarningBorder, #ff9800);
+    background: var(--wcfStatusWarningBackground, rgba(255, 152, 0, 0.1));
+}
+.recovery-auth-alert--info {
+    border-left-color: var(--wcfStatusInfoBorder, #2196f3);
+    background: var(--wcfStatusInfoBackground, rgba(33, 150, 243, 0.08));
+}
+.recovery-auth-alert[hidden] {
+    display: none !important;
+}
+.recovery-auth-alert-title {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0 0 8px;
+}
+.recovery-auth-alert-title strong {
+    font-weight: 600;
+}
+.recovery-auth-alert p {
+    margin: 0 0 8px;
+}
+.recovery-auth-alert-steps {
+    margin: 8px 0 0 1.25em;
+    padding: 0;
+}
+.recovery-auth-alert-steps li {
+    margin: 6px 0;
+}
+.recovery-auth-alert-steps code {
+    font-size: 0.92em;
+}
+
+.recovery-auth-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+.recovery-auth-actions .button[data-state="done"],
+.recovery-auth-actions .button[data-state="success"] {
+    pointer-events: none;
+}
+.recovery-auth-btn-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.recovery-auth-actions .button .recovery-auth-btn-label {
+    display: none;
+}
+.recovery-auth-actions .button[data-state="idle"] .recovery-auth-btn-label[data-state="idle"],
+.recovery-auth-actions .button[data-state="loading"] .recovery-auth-btn-label[data-state="loading"],
+.recovery-auth-actions .button[data-state="done"] .recovery-auth-btn-label[data-state="done"],
+.recovery-auth-actions .button[data-state="success"] .recovery-auth-btn-label[data-state="success"] {
+    display: inline-flex;
+}
+
+.recovery-auth-status-line {
+    margin: 12px 0 0;
+    font-size: 13px;
+    color: var(--wcfContentDimmedText, #888);
+    min-height: 1.25em;
+}
+.recovery-auth-status-line:empty {
+    display: none;
 }
 
 RECOVERY_STUB_WIZARD_CSS;
@@ -355,7 +403,7 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
         .recovery-log-empty { margin: 8px 0 0; color: var(--wcfContentDimmedText, #888); font-size: 13px; }
         .recovery-loading-inline { display: inline-flex; align-items: center; gap: 10px; }
     </style>
-    <?php if ($wizardCss !== '' && !$assets['usesCompiledAcpStyle']): ?>
+    <?php if ($wizardCss !== ''): ?>
     <style><?= $wizardCss ?></style>
     <?php endif; ?>
 </head>
@@ -416,7 +464,7 @@ function recoveryStubRenderLogPanel(bool $expanded = false): void
 {
     $catalog = recoveryStubLogFileCatalog();
     $excerpt = recoveryStubRecentLogExcerpt();
-    $open = $expanded || $excerpt !== [];
+    $open = $expanded;
     ?>
     <section class="section recovery-log-section">
         <details class="recovery-log-panel"<?= $open ? ' open' : '' ?>>
@@ -498,7 +546,41 @@ function recoveryStubRenderIntegrityError(string $message, ?string $logDir = nul
     recoveryStubRenderPageEnd(['logPanelExpanded' => true]);
 }
 
-function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = null): void
+/**
+ * @param list<string> $steps
+ */
+function recoveryStubRenderAuthAlertSteps(array $steps): void
+{
+    if ($steps === []) {
+        return;
+    }
+    echo '<ol class="recovery-auth-alert-steps">';
+    foreach ($steps as $step) {
+        echo '<li>' . $step . '</li>';
+    }
+    echo '</ol>';
+}
+
+function recoveryStubRenderAuthAlertBox(?string $reason): void
+{
+    if ($reason === null || $reason === '') {
+        return;
+    }
+    $d = recoveryStubAuthFailureDetails($reason);
+    $class = 'recovery-auth-alert recovery-auth-alert--' . \htmlspecialchars($d['severity']);
+    ?>
+    <div id="authAlert" class="<?= $class ?>" role="alert">
+        <p class="recovery-auth-alert-title">
+            <?= recoveryStubFaIcon(16, $d['severity'] === 'info' ? 'circle-info' : 'triangle-exclamation', true) ?>
+            <strong><?= \htmlspecialchars($d['title']) ?></strong>
+        </p>
+        <p><?= \htmlspecialchars($d['message']) ?></p>
+        <?php recoveryStubRenderAuthAlertSteps($d['steps']); ?>
+    </div>
+    <?php
+}
+
+function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = null, ?string $errorReason = null): void
 {
     $authFile = RECOVERY_AUTH_FILENAME;
     $initialStep = recoveryStubGetAuthWizardStep($authHash);
@@ -509,34 +591,56 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
         'label' => $stepLabels[$initialStep - 1],
     ]);
     ?>
-    <?php if ($errorMessage !== null && $errorMessage !== ''): ?>
-    <p class="error"><strong><?= recoveryStubFaIcon(16, 'circle-xmark', true) ?> Authentifizierung</strong><br><?= \htmlspecialchars($errorMessage) ?></p>
+    <?php if ($errorReason === null): ?>
+    <div id="authAlert" class="recovery-auth-alert" hidden role="alert"></div>
+    <?php else: ?>
+    <?php recoveryStubRenderAuthAlertBox($errorReason); ?>
     <?php endif; ?>
     <section class="section recovery-auth-step" id="auth-step-1"<?= $initialStep !== 1 ? ' hidden' : '' ?>>
         <header class="sectionHeader">
-            <h2 class="sectionTitle">Auth-Datei laden</h2>
-            <p class="sectionDescription">Laden Sie die Auth-Datei herunter. Sie ist kryptografisch an diese Sitzung und diese Tool-Version gebunden.</p>
+            <h2 class="sectionTitle">Schritt 1 — Auth-Datei laden</h2>
+            <p class="sectionDescription">Nur für <strong>diese</strong> Sitzung gültig. Bei neuem Tool-Link oder Lesezeichen: Auth-Datei neu herunterladen und alte auf dem Server überschreiben.</p>
         </header>
-        <p class="info"><fa-icon size="16" name="file-arrow-down" solid></fa-icon> Die Datei <code><?= \htmlspecialchars($authFile) ?></code> wird für Schritt 2 benötigt.</p>
-        <div class="formSubmit">
-            <a href="?action=download-auth-file&amp;t=<?= \htmlspecialchars($authHash) ?>" class="button buttonPrimary" id="downloadBtn">
-                <fa-icon size="16" name="file-arrow-down" solid></fa-icon> <?= \htmlspecialchars($authFile) ?> herunterladen
-            </a>
+        <p class="info"><fa-icon size="16" name="file-arrow-down" solid></fa-icon>
+            Dateiname: <code><?= \htmlspecialchars($authFile) ?></code></p>
+        <div class="formSubmit recovery-auth-actions">
+            <button type="button" class="button buttonPrimary" id="downloadBtn" data-state="<?= $initialStep >= 2 ? 'done' : 'idle' ?>"<?= $initialStep >= 2 ? ' disabled' : '' ?>>
+                <span class="recovery-auth-btn-label" data-state="idle">
+                    <fa-icon size="16" name="file-arrow-down" solid></fa-icon> <?= \htmlspecialchars($authFile) ?> herunterladen
+                </span>
+                <span class="recovery-auth-btn-label" data-state="loading">
+                    <fa-icon size="16" name="spinner" solid></fa-icon> Wird erstellt …
+                </span>
+                <span class="recovery-auth-btn-label" data-state="done">
+                    <fa-icon size="16" name="circle-check" solid></fa-icon> Heruntergeladen — weiter zu Schritt 2
+                </span>
+            </button>
         </div>
     </section>
 
     <section class="section recovery-auth-step" id="auth-step-2"<?= $initialStep !== 2 ? ' hidden' : '' ?>>
         <header class="sectionHeader">
-            <h2 class="sectionTitle">Datei hochladen</h2>
-            <p class="sectionDescription">Legen Sie die Datei ins WoltLab-Hauptverzeichnis (neben <code>plugin-recovery-tool.php</code>).</p>
+            <h2 class="sectionTitle">Schritt 2 — Hochladen &amp; prüfen</h2>
+            <p class="sectionDescription">Datei ins WoltLab-Hauptverzeichnis legen (neben <code>plugin-recovery-tool.php</code>). Vorhandene Datei <strong>überschreiben</strong>.</p>
         </header>
-        <p class="info"><fa-icon size="16" name="file-arrow-up" solid></fa-icon> FTP, SFTP oder Dateimanager Ihres Hosters.</p>
-        <div class="formSubmit">
-            <button type="button" class="button buttonPrimary" id="uploadedBtn">
-                <fa-icon size="16" name="circle-check" solid></fa-icon> Ich habe die Datei hochgeladen
+        <p class="info"><fa-icon size="16" name="file-arrow-up" solid></fa-icon> FTP/SFTP: Binärmodus, exakter Dateiname <code><?= \htmlspecialchars($authFile) ?></code></p>
+        <div class="formSubmit recovery-auth-actions">
+            <button type="button" class="button buttonPrimary" id="validateBtn" data-state="idle">
+                <span class="recovery-auth-btn-label" data-state="idle">
+                    <fa-icon size="16" name="shield-halved" solid></fa-icon> Auth-Datei prüfen
+                </span>
+                <span class="recovery-auth-btn-label" data-state="loading">
+                    <fa-icon size="16" name="spinner" solid></fa-icon> Prüfe …
+                </span>
+                <span class="recovery-auth-btn-label" data-state="success">
+                    <fa-icon size="16" name="circle-check" solid></fa-icon> Gültig
+                </span>
+            </button>
+            <button type="button" class="button" id="redownloadBtn">
+                <fa-icon size="16" name="rotate" solid></fa-icon> Neu herunterladen
             </button>
         </div>
-        <p><small id="pollStatus"></small></p>
+        <p class="recovery-auth-status-line" id="validateStatus" aria-live="polite"></p>
     </section>
 
     <section class="section recovery-auth-step" id="auth-step-3" hidden>
@@ -557,7 +661,9 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
     <script>
     (function () {
         var authToken = <?= \json_encode($authHash) ?>;
+        var authFileName = <?= \json_encode($authFile) ?>;
         var pollInterval = null;
+        var pollingActive = false;
         var progress = document.getElementById('authWizardProgress');
         var steps = [
             document.getElementById('auth-step-1'),
@@ -565,6 +671,16 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
             document.getElementById('auth-step-3')
         ];
         var stepLabels = ['Schritt 1 von 3', 'Schritt 2 von 3', 'Schritt 3 von 3'];
+        var downloadBtn = document.getElementById('downloadBtn');
+        var validateBtn = document.getElementById('validateBtn');
+        var redownloadBtn = document.getElementById('redownloadBtn');
+        var authAlert = document.getElementById('authAlert');
+        var validateStatus = document.getElementById('validateStatus');
+
+        function setButtonState(btn, state) {
+            if (!btn) { return; }
+            btn.setAttribute('data-state', state);
+        }
 
         function updateProgressLabel(n) {
             var desc = document.querySelector('.contentHeaderDescription');
@@ -589,31 +705,222 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
                 progress.title = Math.round((n / 3) * 100) + '%';
             }
             updateProgressLabel(n);
+            if (n !== 2 && pollInterval) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+                pollingActive = false;
+            }
+        }
+
+        function severityIcon(severity) {
+            return severity === 'info' ? 'circle-info' : 'triangle-exclamation';
+        }
+
+        function renderAlertFromDetails(details) {
+            if (!authAlert || !details) {
+                return;
+            }
+            var severity = details.severity || 'error';
+            authAlert.className = 'recovery-auth-alert recovery-auth-alert--' + severity;
+            authAlert.hidden = false;
+            var stepsHtml = '';
+            if (details.steps && details.steps.length) {
+                stepsHtml = '<ol class="recovery-auth-alert-steps">';
+                details.steps.forEach(function (step) {
+                    stepsHtml += '<li>' + step + '</li>';
+                });
+                stepsHtml += '</ol>';
+            }
+            authAlert.innerHTML =
+                '<p class="recovery-auth-alert-title">' +
+                '<fa-icon size="16" name="' + severityIcon(severity) + '" solid></fa-icon>' +
+                '<strong>' + escapeHtml(details.title || 'Hinweis') + '</strong></p>' +
+                '<p>' + escapeHtml(details.message || '') + '</p>' +
+                stepsHtml;
+            bootFaIcons(authAlert);
+        }
+
+        function escapeHtml(text) {
+            var div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function bootFaIcons(root) {
+            var scope = root || document;
+            scope.querySelectorAll('fa-icon').forEach(function (el) {
+                if (typeof el.setIcon === 'function') {
+                    el.setIcon(el.getAttribute('name'), el.hasAttribute('solid'));
+                }
+            });
+        }
+
+        function hideAlert() {
+            if (!authAlert) { return; }
+            authAlert.hidden = true;
+            authAlert.innerHTML = '';
+        }
+
+        function triggerBlobDownload(filename, base64Content) {
+            var binary = atob(base64Content);
+            var bytes = new Uint8Array(binary.length);
+            for (var i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            var blob = new Blob([bytes], { type: 'application/octet-stream' });
+            var url = URL.createObjectURL(blob);
+            var link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        function downloadAuthFile(options) {
+            options = options || {};
+            if (!downloadBtn) { return Promise.reject(); }
+            setButtonState(downloadBtn, 'loading');
+            downloadBtn.disabled = true;
+            hideAlert();
+            if (validateStatus && options.clearStatus) {
+                validateStatus.textContent = '';
+            }
+            return fetch('?action=download-auth-file&ajax=1&t=' + encodeURIComponent(authToken))
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data.ok) {
+                        throw new Error(data.message || 'Download fehlgeschlagen.');
+                    }
+                    triggerBlobDownload(data.filename || authFileName, data.content);
+                    setButtonState(downloadBtn, 'done');
+                    downloadBtn.disabled = true;
+                    if (options.goToStep2 !== false) {
+                        goToStep(2);
+                    }
+                    return data;
+                })
+                .catch(function (err) {
+                    setButtonState(downloadBtn, 'idle');
+                    downloadBtn.disabled = false;
+                    if (authAlert) {
+                        authAlert.className = 'recovery-auth-alert recovery-auth-alert--error';
+                        authAlert.hidden = false;
+                        authAlert.innerHTML =
+                            '<p class="recovery-auth-alert-title">' +
+                            '<fa-icon size="16" name="triangle-exclamation" solid></fa-icon>' +
+                            '<strong>Download fehlgeschlagen</strong></p>' +
+                            '<p>' + escapeHtml(err.message || 'Unbekannter Fehler') + '</p>';
+                        bootFaIcons(authAlert);
+                    }
+                    throw err;
+                });
+        }
+
+        function handleAuthStatus(data, fromPoll) {
+            if (data.ok) {
+                if (pollInterval) {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                }
+                pollingActive = false;
+                hideAlert();
+                setButtonState(validateBtn, 'success');
+                if (validateBtn) { validateBtn.disabled = true; }
+                if (validateStatus) {
+                    validateStatus.textContent = 'Authentifizierung erfolgreich.';
+                }
+                goToStep(3);
+                return;
+            }
+            if (data.details) {
+                renderAlertFromDetails(data.details);
+            } else if (authAlert) {
+                authAlert.className = 'recovery-auth-alert recovery-auth-alert--error';
+                authAlert.hidden = false;
+                authAlert.innerHTML =
+                    '<p class="recovery-auth-alert-title">' +
+                    '<fa-icon size="16" name="triangle-exclamation" solid></fa-icon>' +
+                    '<strong>Prüfung fehlgeschlagen</strong></p>' +
+                    '<p>' + escapeHtml(data.message || 'Auth-Datei noch nicht gültig.') + '</p>';
+                bootFaIcons(authAlert);
+            }
+            setButtonState(validateBtn, 'idle');
+            if (validateBtn) { validateBtn.disabled = false; }
+            if (validateStatus) {
+                validateStatus.textContent = fromPoll
+                    ? (data.message || 'Warte auf gültige Auth-Datei …')
+                    : (data.message || 'Bitte Datei hochladen und erneut prüfen.');
+            }
+        }
+
+        function checkAuthStatus(fromPoll) {
+            return fetch('?action=auth-status&t=' + encodeURIComponent(authToken))
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    handleAuthStatus(data, fromPoll);
+                    return data;
+                })
+                .catch(function () {
+                    if (validateStatus && fromPoll) {
+                        validateStatus.textContent = 'Verbindungsfehler — erneuter Versuch …';
+                    }
+                });
+        }
+
+        function startPolling() {
+            if (pollingActive) { return; }
+            pollingActive = true;
+            if (pollInterval) { clearInterval(pollInterval); }
+            pollInterval = setInterval(function () {
+                checkAuthStatus(true);
+            }, 3000);
         }
 
         goToStep(<?= (int) $initialStep ?>);
-        document.getElementById('uploadedBtn').addEventListener('click', function () {
-            document.getElementById('pollStatus').textContent = 'Prüfe Upload\u2026';
-            if (pollInterval) { clearInterval(pollInterval); }
-            pollInterval = setInterval(function () {
-                fetch('?action=auth-status&t=' + encodeURIComponent(authToken))
-                    .then(function (r) { return r.json(); })
-                    .then(function (data) {
-                        if (data.ok) {
-                            clearInterval(pollInterval);
-                            goToStep(3);
-                        } else {
-                            var msg = data.message || 'Datei noch nicht gefunden \u2013 prüfe erneut\u2026';
-                            document.getElementById('pollStatus').textContent = msg;
-                        }
-                    })
-                    .catch(function () {});
-            }, 2000);
-        });
+
+        if (downloadBtn) {
+            downloadBtn.addEventListener('click', function () {
+                if (downloadBtn.getAttribute('data-state') === 'done') {
+                    goToStep(2);
+                    return;
+                }
+                downloadAuthFile({ goToStep2: true, clearStatus: true });
+            });
+        }
+
+        if (redownloadBtn) {
+            redownloadBtn.addEventListener('click', function () {
+                if (pollInterval) {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                }
+                pollingActive = false;
+                setButtonState(validateBtn, 'idle');
+                if (validateBtn) { validateBtn.disabled = false; }
+                downloadAuthFile({ goToStep2: false, clearStatus: true });
+            });
+        }
+
+        if (validateBtn) {
+            validateBtn.addEventListener('click', function () {
+                setButtonState(validateBtn, 'loading');
+                validateBtn.disabled = true;
+                if (validateStatus) {
+                    validateStatus.textContent = 'Prüfe Auth-Datei auf dem Server …';
+                }
+                checkAuthStatus(false).finally(function () {
+                    if (!pollingActive && validateBtn.getAttribute('data-state') !== 'success') {
+                        startPolling();
+                    }
+                });
+            });
+        }
     }());
     </script>
     <?php
-    recoveryStubRenderPageEnd(['logPanelExpanded' => $errorMessage !== null && $errorMessage !== '']);
+    recoveryStubRenderPageEnd(['logPanelExpanded' => false]);
 }
 
 function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMessage = null): void
@@ -679,7 +986,7 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
     }());
     </script>
     <?php
-    recoveryStubRenderPageEnd(['logPanelExpanded' => $errorMessage !== null && $errorMessage !== '']);
+    recoveryStubRenderPageEnd(['logPanelExpanded' => false]);
 }
 
 \define('RECOVERY_STUB_LOG_SUBDIR', 'log/recovery');
@@ -1268,18 +1575,146 @@ function recoveryStubIsAuthenticated(string $urlToken): bool
     return $cache[$urlToken] = true;
 }
 
-function recoveryStubAuthFailureMessage(string $reason): string
+/**
+ * @return array{
+ *     reason: string,
+ *     title: string,
+ *     message: string,
+ *     steps: list<string>,
+ *     severity: string,
+ *     suggestRedownload: bool,
+ *     suggestNewSession: bool
+ * }
+ */
+function recoveryStubAuthFailureDetails(string $reason): array
+{
+    $authFile = RECOVERY_AUTH_FILENAME;
+
+    return match ($reason) {
+        'token_mismatch' => [
+            'reason' => $reason,
+            'title' => 'Falsche Auth-Datei für diese Sitzung',
+            'message' => 'Die Datei auf dem Server stammt von einem anderen Tool-Aufruf (anderer Link / anderes Browser-Tab).',
+            'steps' => [
+                'Alte Datei auf dem Server löschen oder überschreiben: <code>' . $authFile . '</code> im WoltLab-Hauptverzeichnis.',
+                'Unten „Auth-Datei neu herunterladen“ — nur die Datei von dieser Seite ist gültig.',
+                'Neue Datei per FTP/SFTP hochladen (Binärmodus).',
+                '„Auth-Datei prüfen“ klicken — die Prüfung läuft automatisch.',
+            ],
+            'severity' => 'error',
+            'suggestRedownload' => true,
+            'suggestNewSession' => false,
+        ],
+        'stub_mismatch', 'server_stub_mismatch' => [
+            'reason' => $reason,
+            'title' => 'Auth-Datei passt nicht zur Tool-Version',
+            'message' => 'Die hochgeladene Datei wurde mit einer anderen plugin-recovery-tool.php erzeugt.',
+            'steps' => [
+                'Aktuelle <code>plugin-recovery-tool.php</code> vom GitHub-Release verwenden.',
+                'Auth-Datei neu herunterladen (Button unten) und alte Datei überschreiben.',
+                'Erneut „Auth-Datei prüfen“.',
+            ],
+            'severity' => 'error',
+            'suggestRedownload' => true,
+            'suggestNewSession' => false,
+        ],
+        'bad_signature' => [
+            'reason' => $reason,
+            'title' => 'Auth-Datei ungültig oder verändert',
+            'message' => 'Die Signatur stimmt nicht — Datei wurde bearbeitet oder stammt von woanders.',
+            'steps' => [
+                'Datei nicht in einem Editor öffnen oder anpassen.',
+                'Neu herunterladen und die alte Datei vollständig ersetzen.',
+                '„Auth-Datei prüfen“ erneut ausführen.',
+            ],
+            'severity' => 'error',
+            'suggestRedownload' => true,
+            'suggestNewSession' => false,
+        ],
+        'expired' => [
+            'reason' => $reason,
+            'title' => 'Auth-Datei abgelaufen',
+            'message' => 'Aus Sicherheitsgründen sind Auth-Dateien nur kurz gültig.',
+            'steps' => [
+                'Neue Auth-Datei herunterladen (Button unten).',
+                'Alte Datei auf dem Server überschreiben.',
+                '„Auth-Datei prüfen“.',
+            ],
+            'severity' => 'warning',
+            'suggestRedownload' => true,
+            'suggestNewSession' => false,
+        ],
+        'no_server_session' => [
+            'reason' => $reason,
+            'title' => 'Recovery-Sitzung abgelaufen',
+            'message' => 'Auf dem Server gibt es keine passende Sitzung mehr zu diesem Link.',
+            'steps' => [
+                'Diese Seite komplett neu laden — Sie erhalten einen neuen Sicherheits-Link.',
+                'Auth-Datei neu herunterladen und hochladen.',
+                'Lesezeichen mit altem <code>?t=…</code>-Link nicht weiterverwenden.',
+            ],
+            'severity' => 'warning',
+            'suggestRedownload' => true,
+            'suggestNewSession' => true,
+        ],
+        'legacy_or_invalid_format', 'wrong_format_version' => [
+            'reason' => $reason,
+            'title' => 'Veraltetes Auth-Datei-Format',
+            'message' => 'Die Datei ist zu alt oder keine gültige Recovery-Auth-Datei.',
+            'steps' => [
+                'Nur die Datei aus diesem Tool verwenden (Download-Button).',
+                'Alte <code>' . $authFile . '</code> löschen und die neue hochladen.',
+                '„Auth-Datei prüfen“.',
+            ],
+            'severity' => 'error',
+            'suggestRedownload' => true,
+            'suggestNewSession' => false,
+        ],
+        'missing_file' => [
+            'reason' => $reason,
+            'title' => 'Auth-Datei fehlt noch',
+            'message' => 'Auf dem Server wurde <code>' . $authFile . '</code> noch nicht gefunden.',
+            'steps' => [
+                'Zuerst Auth-Datei herunterladen (Schritt 1).',
+                'Datei ins WoltLab-Hauptverzeichnis legen — neben <code>plugin-recovery-tool.php</code>.',
+                '„Auth-Datei prüfen“ — die Prüfung erkennt die Datei automatisch.',
+            ],
+            'severity' => 'info',
+            'suggestRedownload' => false,
+            'suggestNewSession' => false,
+        ],
+        default => [
+            'reason' => $reason,
+            'title' => 'Authentifizierung fehlgeschlagen',
+            'message' => recoveryStubAuthFailureMessageShort($reason),
+            'steps' => [
+                'Auth-Datei neu herunterladen und hochladen.',
+                '„Auth-Datei prüfen“ erneut ausführen.',
+            ],
+            'severity' => 'error',
+            'suggestRedownload' => true,
+            'suggestNewSession' => false,
+        ],
+    };
+}
+
+function recoveryStubAuthFailureMessageShort(string $reason): string
 {
     return match ($reason) {
         'token_mismatch' => 'Die Auth-Datei gehört nicht zu dieser Sitzung (URL-Token stimmt nicht überein).',
         'stub_mismatch', 'server_stub_mismatch' => 'Die Auth-Datei passt nicht zu dieser plugin-recovery-tool.php-Version.',
         'bad_signature' => 'Die Auth-Datei wurde manipuliert oder stammt von einer anderen Sitzung.',
-        'expired' => 'Die Auth-Datei ist abgelaufen. Bitte neu herunterladen.',
-        'no_server_session' => 'Keine gültige Recovery-Sitzung auf dem Server. Tool-URL erneut aufrufen.',
-        'legacy_or_invalid_format', 'wrong_format_version' => 'Ungültige oder veraltete Auth-Datei. Bitte neu herunterladen.',
+        'expired' => 'Die Auth-Datei ist abgelaufen.',
+        'no_server_session' => 'Keine gültige Recovery-Sitzung auf dem Server.',
+        'legacy_or_invalid_format', 'wrong_format_version' => 'Ungültige oder veraltete Auth-Datei.',
         'missing_file' => 'Auth-Datei wurde noch nicht hochgeladen.',
         default => 'Authentifizierung fehlgeschlagen.',
     };
+}
+
+function recoveryStubAuthFailureMessage(string $reason): string
+{
+    return recoveryStubAuthFailureMessageShort($reason);
 }
 
 function recoveryStubCleanupAuthState(): void
@@ -1298,12 +1733,12 @@ function recoveryStubCleanupAuthState(): void
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.1.9
+ * @version 2.2.0
  */
 
-define('RECOVERY_STUB_VERSION', '2.1.9');
-define('RECOVERY_PACKAGE_VERSION', '2.1.9');
-define('RECOVERY_STUB_INTEGRITY_HASH', 'e1610b9b91d373fe759bf5b5b5c1c871f17699b7bf56f3d57b601e435f563756');
+define('RECOVERY_STUB_VERSION', '2.2.0');
+define('RECOVERY_PACKAGE_VERSION', '2.2.0');
+define('RECOVERY_STUB_INTEGRITY_HASH', '9540d8d1a439b01268ba8f0238fb2978d8fa05299ca5a88dbe0c57aa53bc0d0f');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
@@ -1772,13 +2207,32 @@ $action = (!empty($_REQUEST['action'])) ? (string) $_REQUEST['action'] : '';
 
 if ($action === 'download-auth-file') {
     recoveryStubLogAction('auth_download');
+    $ajax = !empty($_REQUEST['ajax']);
     $generated = recoveryStubGenerateAuthFileContent($authHash);
     if (!$generated['ok']) {
         recoveryStubLogError('Auth-Datei konnte nicht erstellt werden', ['error' => $generated['error'] ?? '']);
+        if ($ajax) {
+            \header('Content-Type: application/json; charset=utf-8');
+            echo \json_encode([
+                'ok' => false,
+                'message' => (string) ($generated['error'] ?? 'Auth-Datei konnte nicht erstellt werden.'),
+            ], \JSON_UNESCAPED_UNICODE);
+            exit;
+        }
         recoveryStubRenderAuthWizard($authHash, (string) ($generated['error'] ?? ''));
         exit;
     }
     $content = $generated['content'];
+    if ($ajax) {
+        \header('Content-Type: application/json; charset=utf-8');
+        echo \json_encode([
+            'ok' => true,
+            'filename' => RECOVERY_AUTH_FILENAME,
+            'content' => \base64_encode($content),
+            'step' => 2,
+        ], \JSON_UNESCAPED_UNICODE);
+        exit;
+    }
     \header('Content-type: application/octet-stream');
     \header('Content-Disposition: attachment; filename="' . RECOVERY_AUTH_FILENAME . '"');
     \header('Content-Length: ' . (string) \strlen($content));
@@ -1790,10 +2244,12 @@ $isAuthenticated = recoveryStubIsAuthenticated($authHash);
 
 if ($action === 'auth-status') {
     $reason = null;
+    $details = null;
     if (!$isAuthenticated) {
         $check = recoveryStubValidateAuthFile($authHash);
-        $reason = $check['reason'] ?? 'unknown';
+        $reason = (string) ($check['reason'] ?? 'unknown');
         recoveryStubLogAction('auth_status_pending', ['reason' => $reason]);
+        $details = recoveryStubAuthFailureDetails($reason);
     } else {
         recoveryStubLogAction('auth_status_ok');
     }
@@ -1801,8 +2257,9 @@ if ($action === 'auth-status') {
     echo \json_encode([
         'ok' => $isAuthenticated,
         'reason' => $isAuthenticated ? null : $reason,
-        'message' => $isAuthenticated ? null : recoveryStubAuthFailureMessage((string) $reason),
-    ]);
+        'message' => $isAuthenticated ? null : recoveryStubAuthFailureMessage($reason),
+        'details' => $details,
+    ], \JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -1833,14 +2290,16 @@ if (!$isAuthenticated) {
         recoveryStubCreatePendingSession($authHash);
     }
     $authHint = null;
+    $authReason = null;
     if (\is_file(recoveryStubWcfRoot() . RECOVERY_AUTH_FILENAME)) {
         $check = recoveryStubValidateAuthFile($authHash);
         if (!$check['ok'] && isset($check['reason'])) {
-            $authHint = recoveryStubAuthFailureMessage((string) $check['reason']);
+            $authReason = (string) $check['reason'];
+            $authHint = recoveryStubAuthFailureMessage($authReason);
         }
     }
-    recoveryStubLogAction('auth_wizard', ['hint' => $authHint]);
-    recoveryStubRenderAuthWizard($authHash, $authHint);
+    recoveryStubLogAction('auth_wizard', ['hint' => $authHint, 'reason' => $authReason]);
+    recoveryStubRenderAuthWizard($authHash, $authHint, $authReason);
     exit;
 }
 
