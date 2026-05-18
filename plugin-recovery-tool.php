@@ -223,7 +223,98 @@ function recoveryStubAssetHref(string $relative): string
 function recoveryStubWizardCss(): string
 {
     return <<<'RECOVERY_STUB_WIZARD_CSS'
-/* Auth wizard (stub) — complements WCFSetup when no compiled ACP style */
+/* Recovery Tool — Layout & Banner (Stub + eingebettet in plugin-recovery-tool.php) */
+
+/* Volle Breite im Content — kein WCFSetup-Sidebar-Float */
+#tplRecoveryAuth .content .info,
+#tplRecoveryAuth .content .warning,
+#tplRecoveryAuth .content .error,
+#tplRecoveryAuth .content .success,
+#tplRecoveryAuth .content .recovery-content-banner,
+#tplRecoveryAuth .content .recovery-info-panel,
+#tplRecoveryAuth .content .recovery-log-hint,
+#tplRecoveryAuth .content .recovery-auth-alert,
+#tplRecoveryAuth .content .section,
+#tplRecoveryAuth .content .recovery-log-panel {
+    clear: both;
+    display: block;
+    float: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+}
+
+.recovery-content-banner {
+    margin: 0 0 20px;
+    padding: 14px 16px;
+    border-radius: 4px;
+    border-left: 4px solid var(--wcfStatusInfoBorder, #2196f3);
+    background: var(--wcfStatusInfoBackground, rgba(33, 150, 243, 0.08));
+}
+
+.recovery-info-panel {
+    width: 100%;
+    margin: 0 0 20px;
+    padding: 18px 20px;
+    border: 1px solid var(--wcfContentBorderInner, rgba(0, 0, 0, 0.12));
+    border-radius: 6px;
+    background: var(--wcfSidebarBackground, rgba(0, 0, 0, 0.04));
+    box-sizing: border-box;
+}
+
+.recovery-info-panel h2 {
+    margin: 0 0 10px;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.recovery-info-panel .recovery-info-hint {
+    margin: 0 0 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--wcfContentDimmedText, #888);
+}
+
+.recovery-info-panel--drawer summary {
+    cursor: pointer;
+    font-weight: 600;
+    list-style: none;
+}
+
+.recovery-info-panel--drawer summary::-webkit-details-marker {
+    display: none;
+}
+
+/* Kommandozeilen — lesbar im Dark Mode */
+.recovery-cmd-block,
+pre.recoveryLog,
+.recovery-log-pre {
+    display: block;
+    overflow-x: auto;
+    margin: 12px 0;
+    padding: 12px 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #e8e8e8;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 4px;
+}
+
+html[data-color-scheme="light"] .recovery-cmd-block,
+html[data-color-scheme="light"] pre.recoveryLog,
+html[data-color-scheme="light"] .recovery-log-pre {
+    color: #1a1a1a;
+    background: #f4f4f4;
+    border-color: #ccc;
+}
+
+/* Auth wizard alerts */
 .recovery-auth-alert {
     margin: 0 0 20px;
     padding: 14px 16px;
@@ -302,6 +393,23 @@ function recoveryStubWizardCss(): string
 }
 .recovery-auth-status-line:empty {
     display: none;
+}
+
+/* Wizard-Fortschritt */
+.recovery-wizard-progress {
+    margin: 0 0 24px;
+}
+.recovery-wizard-progress progress {
+    display: block;
+    width: 100%;
+    max-width: 480px;
+    margin-bottom: 8px;
+}
+.recovery-wizard-steps {
+    list-style: decimal;
+    margin: 0 0 24px 24px;
+    padding: 0;
+    line-height: 1.6;
 }
 
 RECOVERY_STUB_WIZARD_CSS;
@@ -601,7 +709,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
             <h2 class="sectionTitle">Schritt 1 — Auth-Datei laden</h2>
             <p class="sectionDescription">Nur für <strong>diese</strong> Sitzung gültig. Bei neuem Tool-Link oder Lesezeichen: Auth-Datei neu herunterladen und alte auf dem Server überschreiben.</p>
         </header>
-        <p class="info"><fa-icon size="16" name="file-arrow-down" solid></fa-icon>
+        <p class="info recovery-content-banner"><fa-icon size="16" name="file-arrow-down" solid></fa-icon>
             Dateiname: <code><?= \htmlspecialchars($authFile) ?></code></p>
         <div class="formSubmit recovery-auth-actions">
             <button type="button" class="button buttonPrimary" id="downloadBtn" data-state="<?= $initialStep >= 2 ? 'done' : 'idle' ?>"<?= $initialStep >= 2 ? ' disabled' : '' ?>>
@@ -941,7 +1049,7 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
             <h2 class="sectionTitle">Paket automatisch installieren</h2>
             <p class="sectionDescription">Lädt <a href="<?= $ghDownloadUrl ?>"><code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code></a> vom <a href="<?= $ghReleaseUrl ?>" rel="noopener noreferrer">GitHub-Release v<?= \htmlspecialchars($version) ?></a> und entpackt es nach <code><?= \htmlspecialchars($dirName) ?>/</code>.</p>
         </header>
-        <p class="info"><fa-icon size="16" name="box-archive" solid></fa-icon> Version <strong>v<?= \htmlspecialchars($version) ?></strong> enthält alle Recovery-Modi und die ACP-Oberfläche.</p>
+        <p class="info recovery-content-banner"><fa-icon size="16" name="box-archive" solid></fa-icon> Version <strong>v<?= \htmlspecialchars($version) ?></strong> enthält alle Recovery-Modi und die ACP-Oberfläche.</p>
         <form method="post" action="plugin-recovery-tool.php" id="installPackageForm">
             <input type="hidden" name="action" value="install-package">
             <input type="hidden" name="t" value="<?= \htmlspecialchars($authHash) ?>">
@@ -1733,12 +1841,12 @@ function recoveryStubCleanupAuthState(): void
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.2.0
+ * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.2.0');
-define('RECOVERY_PACKAGE_VERSION', '2.2.0');
-define('RECOVERY_STUB_INTEGRITY_HASH', '9540d8d1a439b01268ba8f0238fb2978d8fa05299ca5a88dbe0c57aa53bc0d0f');
+define('RECOVERY_STUB_VERSION', '2.2.1');
+define('RECOVERY_PACKAGE_VERSION', '2.2.1');
+define('RECOVERY_STUB_INTEGRITY_HASH', '6015b2e356e71572ab4bedfe09d5a5f777095f0ef7deb9fb6a764601333989b6');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
