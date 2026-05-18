@@ -96,6 +96,7 @@ function recoveryStubRenderWoltLabHeadGlobals(): void
     <script data-eager="true">
     window.TIME_NOW = window.TIME_NOW || <?= (int) $timeNow ?>;
     window.LAST_UPDATE_TIME = window.LAST_UPDATE_TIME || <?= (int) $timeNow ?>;
+    window.COMPILER_TARGET_DEFAULT = true;
     </script>
     <?php
 }
@@ -156,8 +157,6 @@ function recoveryStubRenderFaIconStyles(): void
         pointer-events: none;
         width: calc(var(--icon-size) * 1.25);
     }
-    fa-icon:not(:defined) { visibility: hidden; }
-    fa-icon:defined { visibility: visible; }
     fa-icon[size="16"] { --font-size: 14px; --icon-size: 16px; }
     fa-icon[size="24"] { --font-size: 18px; --icon-size: 24px; }
     fa-icon[size="32"] { --font-size: 28px; --icon-size: 32px; }
@@ -166,8 +165,10 @@ function recoveryStubRenderFaIconStyles(): void
         font-size: var(--font-size) !important;
         font-weight: var(--fa-font-weight, 400) !important;
         line-height: 1 !important;
+        visibility: visible !important;
     }
     fa-icon[solid] { font-weight: 900 !important; }
+    #tplRecoveryAuth fa-icon { visibility: visible !important; }
     </style>
     <?php
 }
@@ -191,6 +192,22 @@ function recoveryStubRenderWebComponentsScript(): void
     recoveryStubRenderWoltLabHeadGlobals();
     ?>
     <script data-eager="true" src="<?= \htmlspecialchars($href) ?>"></script>
+    <script data-eager="true">
+    (function () {
+        function bootIcon(el) {
+            if (!el || typeof el.setIcon !== "function") { return; }
+            var name = el.getAttribute("name");
+            if (!name) { return; }
+            try { el.setIcon(name, el.hasAttribute("solid")); } catch (e) {}
+        }
+        function bootAll() {
+            document.querySelectorAll("fa-icon[name]").forEach(bootIcon);
+        }
+        if (customElements.get("fa-icon")) { bootAll(); }
+        else { customElements.whenDefined("fa-icon").then(bootAll); }
+        document.addEventListener("DOMContentLoaded", bootAll);
+    }());
+    </script>
     <?php
 }
 
@@ -407,7 +424,7 @@ function recoveryStubRenderLogPanel(bool $expanded = false): void
             <p class="sectionDescription" style="margin-top:12px">
                 Verzeichnis: <code title="<?= \htmlspecialchars(recoveryStubLogDir()) ?>"><?= \htmlspecialchars(recoveryStubLogDisplayPath()) ?></code>
             </p>
-            <p class="info" style="margin-top:10px"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+            <p class="info" style="margin-top:10px"><fa-icon size="16" name="circle-info" solid></fa-icon>
                 Die Log-Dateien sind Protokolle, kein Fehlerstatus der Oberfläche.
                 Ein leeres <strong>Fehlerprotokoll</strong> bedeutet: es ist nichts schiefgelaufen.</p>
             <dl class="recovery-log-files">
@@ -473,7 +490,7 @@ function recoveryStubRenderIntegrityError(string $message, ?string $logDir = nul
     recoveryStubLogExposeHeaders();
     recoveryStubRenderPageStart('Plugin Recovery Tool', 'Integritätsprüfung fehlgeschlagen');
     ?>
-    <p class="error"><strong><i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Ungültige Recovery-Datei</strong><br>
+    <p class="error"><strong><fa-icon size="16" name="circle-xmark" solid></fa-icon> Ungültige Recovery-Datei</strong><br>
     <?= \htmlspecialchars($message) ?></p>
     <p class="info">Laden Sie <code>plugin-recovery-tool.php</code> ausschließlich vom
         <a href="https://github.com/<?= \htmlspecialchars(RECOVERY_GITHUB_REPO) ?>/releases" rel="noopener noreferrer">offiziellen GitHub-Release</a> herunter.</p>
@@ -500,10 +517,10 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
             <h2 class="sectionTitle">Auth-Datei laden</h2>
             <p class="sectionDescription">Laden Sie die Auth-Datei herunter. Sie ist kryptografisch an diese Sitzung und diese Tool-Version gebunden.</p>
         </header>
-        <p class="info"><i class="fa-solid fa-file-arrow-down" aria-hidden="true"></i> Die Datei <code><?= \htmlspecialchars($authFile) ?></code> wird für Schritt 2 benötigt.</p>
+        <p class="info"><fa-icon size="16" name="file-arrow-down" solid></fa-icon> Die Datei <code><?= \htmlspecialchars($authFile) ?></code> wird für Schritt 2 benötigt.</p>
         <div class="formSubmit">
             <a href="?action=download-auth-file&amp;t=<?= \htmlspecialchars($authHash) ?>" class="button buttonPrimary" id="downloadBtn">
-                <i class="fa-solid fa-file-arrow-down" aria-hidden="true"></i> <?= \htmlspecialchars($authFile) ?> herunterladen
+                <fa-icon size="16" name="file-arrow-down" solid></fa-icon> <?= \htmlspecialchars($authFile) ?> herunterladen
             </a>
         </div>
     </section>
@@ -513,10 +530,10 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
             <h2 class="sectionTitle">Datei hochladen</h2>
             <p class="sectionDescription">Legen Sie die Datei ins WoltLab-Hauptverzeichnis (neben <code>plugin-recovery-tool.php</code>).</p>
         </header>
-        <p class="info"><i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i> FTP, SFTP oder Dateimanager Ihres Hosters.</p>
+        <p class="info"><fa-icon size="16" name="file-arrow-up" solid></fa-icon> FTP, SFTP oder Dateimanager Ihres Hosters.</p>
         <div class="formSubmit">
             <button type="button" class="button buttonPrimary" id="uploadedBtn">
-                <i class="fa-solid fa-circle-check" aria-hidden="true"></i> Ich habe die Datei hochgeladen
+                <fa-icon size="16" name="circle-check" solid></fa-icon> Ich habe die Datei hochgeladen
             </button>
         </div>
         <p><small id="pollStatus"></small></p>
@@ -526,15 +543,15 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
         <header class="sectionHeader">
             <h2 class="sectionTitle">Recovery Tool starten</h2>
         </header>
-        <p class="success"><strong><i class="fa-solid fa-circle-check" aria-hidden="true"></i> Authentifizierung erfolgreich!</strong> Die Auth-Datei wurde erkannt.</p>
+        <p class="success"><strong><fa-icon size="16" name="circle-check" solid></fa-icon> Authentifizierung erfolgreich!</strong> Die Auth-Datei wurde erkannt.</p>
         <div class="formSubmit">
             <a href="?t=<?= \htmlspecialchars($authHash) ?>" class="button buttonPrimary">
-                <i class="fa-solid fa-rocket" aria-hidden="true"></i> Recovery Tool starten
+                <fa-icon size="16" name="rocket" solid></fa-icon> Recovery Tool starten
             </a>
         </div>
     </section>
 
-    <p class="warning"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i> <strong>Sicherheitshinweis:</strong>
+    <p class="warning"><fa-icon size="16" name="shield-halved" solid></fa-icon> <strong>Sicherheitshinweis:</strong>
     Löschen Sie <code>plugin-recovery-tool.php</code> und <code><?= \htmlspecialchars($authFile) ?></code> nach der Verwendung.</p>
 
     <script>
@@ -609,7 +626,7 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
     recoveryStubRenderPageStart('Recovery-Paket installieren', 'Paket wird für die volle Oberfläche benötigt');
     ?>
     <?php if ($errorMessage !== null && $errorMessage !== ''): ?>
-    <p class="error"><strong><i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Fehler</strong><br><?= $errorMessage ?></p>
+    <p class="error"><strong><fa-icon size="16" name="circle-xmark" solid></fa-icon> Fehler</strong><br><?= $errorMessage ?></p>
     <?php endif; ?>
 
     <section class="section">
@@ -617,7 +634,7 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
             <h2 class="sectionTitle">Paket automatisch installieren</h2>
             <p class="sectionDescription">Lädt <a href="<?= $ghDownloadUrl ?>"><code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code></a> vom <a href="<?= $ghReleaseUrl ?>" rel="noopener noreferrer">GitHub-Release v<?= \htmlspecialchars($version) ?></a> und entpackt es nach <code><?= \htmlspecialchars($dirName) ?>/</code>.</p>
         </header>
-        <p class="info"><i class="fa-solid fa-box-archive" aria-hidden="true"></i> Version <strong>v<?= \htmlspecialchars($version) ?></strong> enthält alle Recovery-Modi und die ACP-Oberfläche.</p>
+        <p class="info"><fa-icon size="16" name="box-archive" solid></fa-icon> Version <strong>v<?= \htmlspecialchars($version) ?></strong> enthält alle Recovery-Modi und die ACP-Oberfläche.</p>
         <form method="post" action="plugin-recovery-tool.php" id="installPackageForm">
             <input type="hidden" name="action" value="install-package">
             <input type="hidden" name="t" value="<?= \htmlspecialchars($authHash) ?>">
@@ -1281,12 +1298,12 @@ function recoveryStubCleanupAuthState(): void
  * Upload ins WoltLab-Hauptverzeichnis. Auth bleibt separat (plugin-recovery-auth.php).
  * Nach Auth wird recovery-{VERSION}.tar.gz von GitHub geladen und nach recovery-tool/ entpackt.
  *
- * @version 2.1.8
+ * @version 2.1.9
  */
 
-define('RECOVERY_STUB_VERSION', '2.1.8');
-define('RECOVERY_PACKAGE_VERSION', '2.1.8');
-define('RECOVERY_STUB_INTEGRITY_HASH', '9247cac5fb58854a2e5f27be674ab3d155eb2abcbf82dfc2804a4136aece3225');
+define('RECOVERY_STUB_VERSION', '2.1.9');
+define('RECOVERY_PACKAGE_VERSION', '2.1.9');
+define('RECOVERY_STUB_INTEGRITY_HASH', 'e1610b9b91d373fe759bf5b5b5c1c871f17699b7bf56f3d57b601e435f563756');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
