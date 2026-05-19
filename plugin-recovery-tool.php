@@ -1664,6 +1664,43 @@ function recoveryStubGetAuthWizardStep(string $urlToken): int
     return 1;
 }
 
+function recoveryStubEnsurePhpSession(): void
+{
+    if (\session_status() === PHP_SESSION_NONE) {
+        \session_start([
+            'cookie_httponly' => true,
+            'cookie_samesite' => 'Lax',
+        ]);
+    }
+}
+
+function recoveryStubBindSessionAuthToken(string $token): void
+{
+    if (!recoveryStubAssertValidToken($token)) {
+        return;
+    }
+    recoveryStubEnsurePhpSession();
+    $_SESSION['recovery_auth_token'] = $token;
+    $_SESSION['recovery_auth_bound_at'] = \time();
+}
+
+function recoveryStubGetSessionAuthToken(): ?string
+{
+    recoveryStubEnsurePhpSession();
+    $token = $_SESSION['recovery_auth_token'] ?? null;
+    if (!\is_string($token) || !recoveryStubAssertValidToken($token)) {
+        return null;
+    }
+    $boundAt = (int) ($_SESSION['recovery_auth_bound_at'] ?? 0);
+    if ($boundAt > 0 && \time() - $boundAt > 86400) {
+        unset($_SESSION['recovery_auth_token'], $_SESSION['recovery_auth_bound_at']);
+
+        return null;
+    }
+
+    return $token;
+}
+
 function recoveryStubIsAuthenticated(string $urlToken): bool
 {
     static $cache = [];
@@ -1680,6 +1717,8 @@ function recoveryStubIsAuthenticated(string $urlToken): bool
 
         return $cache[$urlToken] = false;
     }
+
+    recoveryStubBindSessionAuthToken($urlToken);
 
     return $cache[$urlToken] = true;
 }
@@ -1845,9 +1884,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.4.1');
-define('RECOVERY_PACKAGE_VERSION', '2.4.1');
-define('RECOVERY_STUB_INTEGRITY_HASH', 'a5fd1d12b4667ed4cd0cd8aef197ffed6376ed35725f6607b29815fa47006ee7');
+define('RECOVERY_STUB_VERSION', '2.4.2');
+define('RECOVERY_PACKAGE_VERSION', '2.4.2');
+define('RECOVERY_STUB_INTEGRITY_HASH', 'cc05b122f2f70b35a295f79c1bde533ed179fbd612a8657c82d6252902f19be3');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
@@ -2304,14 +2343,23 @@ if (!$integrityResult['ok']) {
 recoveryStubLogDebug('bootstrap', 'integrity_ok', ['buildId' => recoveryStubBuildId()]);
 
 // --- Token / Sitzung ---
-if (empty($_REQUEST['t']) || !recoveryStubAssertValidToken((string) $_REQUEST['t'])) {
+recoveryStubEnsurePhpSession();
+$authHash = null;
+if (!empty($_REQUEST['t']) && recoveryStubAssertValidToken((string) $_REQUEST['t'])) {
+    $authHash = (string) $_REQUEST['t'];
+} else {
+    $sessionToken = recoveryStubGetSessionAuthToken();
+    if ($sessionToken !== null && recoveryStubIsAuthenticated($sessionToken)) {
+        $authHash = $sessionToken;
+    }
+}
+if ($authHash === null) {
     $authHash = \bin2hex(\random_bytes(20));
     recoveryStubCreatePendingSession($authHash);
     recoveryStubLogAction('session_start', ['tokenPrefix' => \substr($authHash, 0, 8)]);
     \header('Location: plugin-recovery-tool.php?t=' . $authHash);
     exit;
 }
-$authHash = (string) $_REQUEST['t'];
 $action = (!empty($_REQUEST['action'])) ? (string) $_REQUEST['action'] : '';
 
 if ($action === 'download-auth-file') {
