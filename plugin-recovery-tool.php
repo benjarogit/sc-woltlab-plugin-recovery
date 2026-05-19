@@ -231,6 +231,7 @@ function recoveryStubWizardCss(): string
 #tplRecoveryAuth .content .error,
 #tplRecoveryAuth .content .success,
 #tplRecoveryAuth .content .recovery-content-banner,
+#tplRecoveryAuth .content .recovery-panel,
 #tplRecoveryAuth .content .recovery-info-panel,
 #tplRecoveryAuth .content .recovery-log-hint,
 #tplRecoveryAuth .content .recovery-auth-alert,
@@ -437,6 +438,41 @@ html[data-color-scheme="light"] .recovery-log-pre {
 
 #tplRecoveryAuth .formSubmit.recovery-auth-actions .button {
     margin: 0;
+}
+
+.recovery-panel {
+    width: 100%;
+    margin: 0 0 20px;
+    padding: 0;
+    border: 1px solid var(--wcfContentBorderInner, #ddd);
+    border-radius: 6px;
+    background: var(--wcfSidebarBackground, rgba(0, 0, 0, 0.04));
+    box-sizing: border-box;
+}
+
+.recovery-panel summary {
+    cursor: pointer;
+    padding: 14px 18px;
+    font-weight: 600;
+    list-style: none;
+}
+
+.recovery-panel summary::-webkit-details-marker {
+    display: none;
+}
+
+.recovery-panel__body {
+    padding: 0 18px 16px;
+    line-height: 1.55;
+}
+
+.recovery-package-contents-list {
+    margin: 8px 0 0;
+    padding-left: 22px;
+}
+
+.recovery-package-contents-list li {
+    margin: 0 0 6px;
 }
 
 RECOVERY_STUB_WIZARD_CSS;
@@ -1058,12 +1094,46 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
     recoveryStubRenderPageEnd(['logPanelExpanded' => false]);
 }
 
+/**
+ * @return list<string>
+ */
+function recoveryStubGetPackageContentsList(): array
+{
+    $manifestPath = \defined('RECOVERY_PACKAGE_DIR')
+        ? RECOVERY_PACKAGE_DIR . '/manifest.json'
+        : '';
+    if ($manifestPath !== '' && \is_file($manifestPath)) {
+        $json = \json_decode((string) \file_get_contents($manifestPath), true);
+        if (\is_array($json['contents'] ?? null)) {
+            $items = [];
+            foreach ($json['contents'] as $entry) {
+                if (\is_string($entry) && $entry !== '') {
+                    $items[] = $entry;
+                }
+            }
+            if ($items !== []) {
+                return $items;
+            }
+        }
+    }
+
+    return [
+        'app.php — Router, Recovery-Logik und ACP-Oberfläche',
+        'bootstrap.php, paths.php, version.php — Bootstrap und Version',
+        'lib/Recovery/Modes/ — PHP-Modi (Start, Wizard, Plugin entfernen, System-Check, Datensicherung, …)',
+        'lib/Recovery/Ui/ — Layout, RecoveryUi, recovery-acp-extensions.css, recovery-wcfsetup-dark.css',
+        'lib/Recovery/Bootstrap/ — Datenbank-Anbindung',
+        'lib/Recovery/Log/ — Recovery-Logger',
+    ];
+}
+
 function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMessage = null): void
 {
     $version = RECOVERY_PACKAGE_VERSION;
     $ghDownloadUrl = \htmlspecialchars(recoveryStubReleaseDownloadUrl($version));
     $ghReleaseUrl = \htmlspecialchars(recoveryStubReleasePageUrl($version));
     $dirName = RECOVERY_PACKAGE_DIR_NAME;
+    $packageContents = recoveryStubGetPackageContentsList();
 
     recoveryStubRenderPageStart('Recovery-Paket installieren', 'Paket wird für die volle Oberfläche benötigt');
     ?>
@@ -1071,12 +1141,30 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
     <p class="error"><strong><fa-icon size="16" name="circle-xmark" solid></fa-icon> Fehler</strong><br><?= $errorMessage ?></p>
     <?php endif; ?>
 
+    <p class="info recovery-content-banner">
+        <fa-icon size="16" name="box-archive" solid></fa-icon>
+        Das Archiv <strong><code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code></strong> enthält das vollständige
+        Recovery-Tool: alle PHP-Modi (Wizard, Plugin entfernen, System-Check, Datensicherung, …), die ACP-Oberfläche sowie
+        die Stylesheets <code>recovery-acp-extensions.css</code> und <code>recovery-wcfsetup-dark.css</code>.
+    </p>
+
+    <details class="recovery-panel recovery-panel--package-contents">
+        <summary><span class="recovery-license-panel__summary-title"><?= recoveryStubFaIcon(16, 'folder-open') ?> Was enthält das Paket?</span></summary>
+        <div class="recovery-panel__body">
+            <p class="sectionDescription">Inhalt von <code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code> nach dem Entpacken nach <code><?= \htmlspecialchars($dirName) ?>/</code>:</p>
+            <ul class="recovery-package-contents-list">
+                <?php foreach ($packageContents as $line): ?>
+                <li><?= \htmlspecialchars($line) ?></li>
+                <?php endforeach; ?>
+            </ul>
+        </div>
+    </details>
+
     <section class="section">
         <header class="sectionHeader">
             <h2 class="sectionTitle">Paket automatisch installieren</h2>
             <p class="sectionDescription">Lädt <a href="<?= $ghDownloadUrl ?>"><code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code></a> vom <a href="<?= $ghReleaseUrl ?>" rel="noopener noreferrer">GitHub-Release v<?= \htmlspecialchars($version) ?></a> und entpackt es nach <code><?= \htmlspecialchars($dirName) ?>/</code>.</p>
         </header>
-        <p class="info recovery-content-banner"><fa-icon size="16" name="box-archive" solid></fa-icon> Version <strong>v<?= \htmlspecialchars($version) ?></strong> enthält alle Recovery-Modi und die ACP-Oberfläche.</p>
         <form method="post" action="plugin-recovery-tool.php" id="installPackageForm">
             <input type="hidden" name="action" value="install-package">
             <input type="hidden" name="t" value="<?= \htmlspecialchars($authHash) ?>">
@@ -1910,9 +1998,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.7.10');
-define('RECOVERY_PACKAGE_VERSION', '2.7.10');
-define('RECOVERY_STUB_INTEGRITY_HASH', 'dee6ff326336bc5b1e7cfd8fe1d10b9e744f38a72fcc5bfb3138a50bf438e6d1');
+define('RECOVERY_STUB_VERSION', '2.7.11');
+define('RECOVERY_PACKAGE_VERSION', '2.7.11');
+define('RECOVERY_STUB_INTEGRITY_HASH', 'c658361d348ef83978e8307290839c08d2bbeff4d2dfbae016418503308e1046');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
