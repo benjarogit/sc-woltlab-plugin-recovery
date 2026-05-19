@@ -413,6 +413,32 @@ html[data-color-scheme="light"] .recovery-log-pre {
     line-height: 1.6;
 }
 
+/* Auth-Wizard: Karten & Sektionen (an ACP-Recovery-Tool angeglichen) */
+#tplRecoveryAuth .recovery-auth-step {
+    margin-bottom: 24px;
+    padding: 18px 20px;
+    border: 1px solid var(--wcfContentBorderInner, rgba(0, 0, 0, 0.12));
+    border-radius: 6px;
+    background: var(--wcfSidebarBackground, rgba(0, 0, 0, 0.04));
+    box-sizing: border-box;
+}
+
+#tplRecoveryAuth .recovery-auth-step .sectionHeader {
+    margin-bottom: 12px;
+}
+
+#tplRecoveryAuth .recovery-content-banner {
+    margin-bottom: 16px;
+}
+
+#tplRecoveryAuth .recovery-auth-actions {
+    margin-top: 4px;
+}
+
+#tplRecoveryAuth .formSubmit.recovery-auth-actions .button {
+    margin: 0;
+}
+
 RECOVERY_STUB_WIZARD_CSS;
 }
 
@@ -1884,9 +1910,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.5.0');
-define('RECOVERY_PACKAGE_VERSION', '2.5.0');
-define('RECOVERY_STUB_INTEGRITY_HASH', '6e01a464f969c5122d5d9c3a99f4f201f404f866a685d70a1444f28786e444c5');
+define('RECOVERY_STUB_VERSION', '2.6.1');
+define('RECOVERY_PACKAGE_VERSION', '2.6.1');
+define('RECOVERY_STUB_INTEGRITY_HASH', '237043a82caebad99b2020c90ac3fd72d51502490e2eb11a4903ac12442d4d2c');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
