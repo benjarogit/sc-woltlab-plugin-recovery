@@ -1884,9 +1884,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.4.4');
-define('RECOVERY_PACKAGE_VERSION', '2.4.4');
-define('RECOVERY_STUB_INTEGRITY_HASH', 'f3675f186cb1d4fb67bd4fef9c7db12ff8c7827a330914f5840e5b3b901af45e');
+define('RECOVERY_STUB_VERSION', '2.4.5');
+define('RECOVERY_PACKAGE_VERSION', '2.4.5');
+define('RECOVERY_STUB_INTEGRITY_HASH', 'c90ed6bf3c6a0296dc924c4c32e8e826ab4debf8d4999436ba4da89c5947743f');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
