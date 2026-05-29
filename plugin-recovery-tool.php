@@ -571,9 +571,10 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
     $wizardCss = recoveryStubWizardCss();
     $usesAcpUi = $assets['usesCompiledAcpStyle'];
     $extensionsCss = '';
-    $recoveryToolRoot = \dirname(__DIR__) . '/recovery-tool/lib/Recovery/Ui/recovery-acp-extensions.css';
+    $uiCssFile = $usesAcpUi ? 'recovery-acp-native.css' : 'recovery-acp-extensions.css';
+    $recoveryToolRoot = \dirname(__DIR__) . '/recovery-tool/lib/Recovery/Ui/' . $uiCssFile;
     if (\is_readable($recoveryToolRoot)) {
-        $extensionsCss = 'recovery-tool/lib/Recovery/Ui/recovery-acp-extensions.css';
+        $extensionsCss = 'recovery-tool/lib/Recovery/Ui/' . $uiCssFile;
     }
     $bodyClass = 'wcfAcp' . ($usesAcpUi ? ' acpAuthFlow recovery-uses-acp-ui' : '');
     $headerContainerClass = 'pageHeaderContainer' . ($usesAcpUi ? ' pageHeaderContainerIsLogin' : '');
@@ -885,7 +886,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
             <h2 class="sectionTitle">Schritt 1 — Auth-Datei laden</h2>
             <p class="sectionDescription">Nur für <strong>diese</strong> Sitzung gültig. Bei neuem Tool-Link oder Lesezeichen: Auth-Datei neu herunterladen und alte auf dem Server überschreiben.</p>
         </header>
-        <p class="info recovery-content-banner"><fa-icon size="16" name="file-arrow-down" solid></fa-icon>
+        <p class="info"><fa-icon size="16" name="file-arrow-down" solid></fa-icon>
             Dateiname: <code><?= \htmlspecialchars($authFile) ?></code></p>
         <div class="formSubmit recovery-auth-actions">
             <button type="button" class="button buttonPrimary" id="downloadBtn" data-state="<?= $initialStep >= 2 ? 'done' : 'idle' ?>"<?= $initialStep >= 2 ? ' disabled' : '' ?>>
@@ -2225,9 +2226,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.7.33');
-define('RECOVERY_PACKAGE_VERSION', '2.7.33');
-define('RECOVERY_STUB_INTEGRITY_HASH', '8629d7b251ed329bffe697cdb7c39a6db2e947e24e5b86ceb82d23c70ef0e4f6');
+define('RECOVERY_STUB_VERSION', '2.7.34');
+define('RECOVERY_PACKAGE_VERSION', '2.7.34');
+define('RECOVERY_STUB_INTEGRITY_HASH', 'f8a09de1f4a8386b706693e3679f936660b87e22e589d6584fc1f2b988d93461');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
