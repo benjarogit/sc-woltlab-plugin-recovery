@@ -78,6 +78,18 @@ function recoveryStubFaIcon(int $size, string $name, bool $solid = true): string
     return \sprintf('<fa-icon size="%d" name="%s"></fa-icon>', $size, $name);
 }
 
+function recoveryStubAuthAlertIcon(string $severity): string
+{
+    $name = match ($severity) {
+        'error' => 'circle-xmark',
+        'info' => 'circle-info',
+        'success' => 'circle-check',
+        default => 'triangle-exclamation',
+    };
+
+    return recoveryStubFaIcon(16, $name, true);
+}
+
 function recoveryStubLoadingIndicator(int $size = 24): string
 {
     if (!\in_array($size, [24, 48, 96], true)) {
@@ -603,6 +615,25 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
         #tplRecoveryAuth #authAlert { margin: 0 0 16px; }
         #tplRecoveryAuth #authAlert p { margin: 0 0 8px; }
         #tplRecoveryAuth #authAlert p:last-child { margin-bottom: 0; }
+        #tplRecoveryAuth .success > p,
+        #tplRecoveryAuth .warning > p,
+        #tplRecoveryAuth .error > p,
+        #tplRecoveryAuth .info > p,
+        #tplRecoveryAuth p.warning,
+        #tplRecoveryAuth #authAlert > p:first-child {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        #tplRecoveryAuth .success fa-icon,
+        #tplRecoveryAuth .warning fa-icon,
+        #tplRecoveryAuth .error fa-icon,
+        #tplRecoveryAuth .info fa-icon,
+        #tplRecoveryAuth p.warning fa-icon,
+        #tplRecoveryAuth #authAlert fa-icon {
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
         .recovery-log-panel { margin-top: 24px; }
         .recovery-log-panel > summary {
             cursor: pointer;
@@ -805,7 +836,7 @@ function recoveryStubRenderAuthAlertBox(?string $reason): void
         default => 'warning',
     };
     echo '<div id="authAlert" class="' . $wcfClass . '" role="alert">';
-    echo '<p><strong>' . \htmlspecialchars($d['title'], ENT_QUOTES, 'UTF-8') . '</strong></p>';
+    echo '<p>' . recoveryStubAuthAlertIcon($severity) . ' <strong>' . \htmlspecialchars($d['title'], ENT_QUOTES, 'UTF-8') . '</strong></p>';
     echo '<p>' . \htmlspecialchars($d['message'], ENT_QUOTES, 'UTF-8') . '</p>';
     if ($d['steps'] !== []) {
         echo '<ol>';
@@ -861,15 +892,16 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
 
         <div class="recovery-auth-step" id="auth-step-3" hidden>
             <div class="success" role="status">
-                <p><strong>Authentifizierung erfolgreich</strong> — die Auth-Datei wurde erkannt.</p>
+                <p><?= recoveryStubAuthAlertIcon('success') ?>
+                    <span><strong>Authentifizierung erfolgreich</strong> — die Auth-Datei wurde erkannt.</span></p>
             </div>
             <div class="formSubmit">
-                <a href="?t=<?= \htmlspecialchars($authHash) ?>" class="button buttonPrimary">Recovery Tool starten</a>
+                <a href="?t=<?= \htmlspecialchars($authHash) ?>" class="button buttonPrimary"><?= recoveryStubFaIcon(16, 'rocket', true) ?> Recovery Tool starten</a>
             </div>
         </div>
     </form>
 
-    <p class="warning"><strong>Sicherheitshinweis:</strong>
+    <p class="warning"><?= recoveryStubFaIcon(16, 'shield-halved', true) ?> <strong>Sicherheitshinweis:</strong>
     Löschen Sie <code>plugin-recovery-tool.php</code> und <code><?= \htmlspecialchars($authFile) ?></code> nach der Verwendung.</p>
 
     <script>
@@ -953,14 +985,26 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
         function wcfAlertClass(severity) {
             if (severity === 'error') { return 'error'; }
             if (severity === 'info') { return 'info'; }
+            if (severity === 'success') { return 'success'; }
             return 'warning';
+        }
+
+        function alertIconName(severity) {
+            if (severity === 'error') { return 'circle-xmark'; }
+            if (severity === 'info') { return 'circle-info'; }
+            if (severity === 'success') { return 'circle-check'; }
+            return 'triangle-exclamation';
+        }
+
+        function faIconHtml(name) {
+            return '<fa-icon size="16" name="' + escapeHtml(name) + '" solid></fa-icon>';
         }
 
         function renderSimpleAlert(severity, title, message, steps) {
             if (!authAlert) { return; }
             authAlert.hidden = false;
             authAlert.className = wcfAlertClass(severity);
-            var html = '<p><strong>' + escapeHtml(title || 'Hinweis') + '</strong></p>';
+            var html = '<p>' + faIconHtml(alertIconName(severity)) + ' <strong>' + escapeHtml(title || 'Hinweis') + '</strong></p>';
             if (message) {
                 html += '<p>' + escapeHtml(message) + '</p>';
             }
@@ -972,6 +1016,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
                 html += '</ol>';
             }
             authAlert.innerHTML = html;
+            bootFaIcons(authAlert);
         }
 
         function renderAlertFromDetails(details) {
@@ -1119,6 +1164,8 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
         }
 
         goToStep(<?= (int) $initialStep ?>);
+        bootFaIcons(document.getElementById('recovery-auth-wizard'));
+        bootFaIcons(document.querySelector('p.warning'));
 
         if (downloadBtn) {
             downloadBtn.addEventListener('click', function () {
@@ -2172,9 +2219,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.7.39');
-define('RECOVERY_PACKAGE_VERSION', '2.7.39');
-define('RECOVERY_STUB_INTEGRITY_HASH', '8454353ed321c4f06f809a2c554f567754a783c512929eab5cf78dc234a41427');
+define('RECOVERY_STUB_VERSION', '2.7.40');
+define('RECOVERY_PACKAGE_VERSION', '2.7.40');
+define('RECOVERY_STUB_INTEGRITY_HASH', '08d8fcaa2755b3f02691a46ffe7321b3d5816bcbddf31fc1078d7a7b107440af');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
