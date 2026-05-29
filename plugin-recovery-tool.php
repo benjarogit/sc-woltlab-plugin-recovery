@@ -834,17 +834,17 @@ function recoveryStubRenderAuthAlertBox(?string $reason): void
             'info' => 'info',
             default => 'warning',
         };
-        echo '<p id="authAlert" class="' . $wcfClass . '" role="alert">';
-        echo '<strong>' . \htmlspecialchars($d['title'], ENT_QUOTES, 'UTF-8') . '</strong><br>';
-        echo \htmlspecialchars($d['message'], ENT_QUOTES, 'UTF-8');
+        echo '<div id="authAlert" class="' . $wcfClass . '" role="alert">';
+        echo '<p><strong>' . \htmlspecialchars($d['title'], ENT_QUOTES, 'UTF-8') . '</strong></p>';
+        echo '<p>' . \htmlspecialchars($d['message'], ENT_QUOTES, 'UTF-8') . '</p>';
         if ($d['steps'] !== []) {
-            echo '<ol class="recovery-step-list">';
+            echo '<ol>';
             foreach ($d['steps'] as $step) {
                 echo '<li>' . $step . '</li>';
             }
             echo '</ol>';
         }
-        echo '</p>';
+        echo '</div>';
 
         return;
     }
@@ -874,13 +874,70 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
     ?>
     <?php if ($errorReason === null): ?>
     <?php if (recoveryStubUsesCompiledAcpStyle()): ?>
-    <p id="authAlert" class="warning" hidden role="alert"></p>
+    <div id="authAlert" class="warning" hidden role="alert"></div>
     <?php else: ?>
     <div id="authAlert" class="recovery-auth-alert" hidden role="alert"></div>
     <?php endif; ?>
     <?php else: ?>
     <?php recoveryStubRenderAuthAlertBox($errorReason); ?>
     <?php endif; ?>
+    <?php if (recoveryStubUsesCompiledAcpStyle()): ?>
+    <form id="recovery-auth-wizard" class="recoveryAuthForm">
+    <div class="recovery-auth-step" id="auth-step-1"<?= $initialStep !== 1 ? ' hidden' : '' ?>>
+        <dl>
+            <dt><label>Schritt 1 — Auth-Datei laden</label></dt>
+            <dd>
+                <p>Nur für <strong>diese</strong> Sitzung gültig. Bei neuem Link: Auth-Datei neu herunterladen und alte auf dem Server überschreiben.</p>
+                <dl>
+                    <dt>Dateiname</dt>
+                    <dd><code><?= \htmlspecialchars($authFile) ?></code></dd>
+                </dl>
+            </dd>
+        </dl>
+        <div class="formSubmit">
+            <button type="button" class="button buttonPrimary" id="downloadBtn" data-state="<?= $initialStep >= 2 ? 'done' : 'idle' ?>"<?= $initialStep >= 2 ? ' disabled' : '' ?>>
+                <span class="recovery-auth-btn-label" data-state="idle"><?= \htmlspecialchars($authFile) ?> herunterladen</span>
+                <span class="recovery-auth-btn-label" data-state="loading">Wird erstellt …</span>
+                <span class="recovery-auth-btn-label" data-state="done">Heruntergeladen — weiter zu Schritt 2</span>
+            </button>
+        </div>
+    </div>
+
+    <div class="recovery-auth-step" id="auth-step-2"<?= $initialStep !== 2 ? ' hidden' : '' ?>>
+        <dl>
+            <dt><label>Schritt 2 — Hochladen &amp; prüfen</label></dt>
+            <dd>
+                <p>Datei ins WoltLab-Hauptverzeichnis legen (neben <code>plugin-recovery-tool.php</code>). Vorhandene Datei <strong>überschreiben</strong>.</p>
+                <p>FTP/SFTP: Binärmodus, exakter Dateiname <code><?= \htmlspecialchars($authFile) ?></code></p>
+            </dd>
+        </dl>
+        <div class="formSubmit">
+            <button type="button" class="button buttonPrimary" id="validateBtn" data-state="idle">
+                <span class="recovery-auth-btn-label" data-state="idle">Auth-Datei prüfen</span>
+                <span class="recovery-auth-btn-label" data-state="loading">Prüfe …</span>
+                <span class="recovery-auth-btn-label" data-state="success">Gültig</span>
+            </button>
+            <button type="button" class="button" id="redownloadBtn">Neu herunterladen</button>
+        </div>
+        <p class="innerInfo" id="validateStatus" aria-live="polite"></p>
+    </div>
+
+    <div class="recovery-auth-step" id="auth-step-3" hidden>
+        <dl>
+            <dt><label>Schritt 3 — Recovery Tool starten</label></dt>
+            <dd>
+                <p class="success">Authentifizierung erfolgreich — die Auth-Datei wurde erkannt.</p>
+            </dd>
+        </dl>
+        <div class="formSubmit">
+            <a href="?t=<?= \htmlspecialchars($authHash) ?>" class="button buttonPrimary">Recovery Tool starten</a>
+        </div>
+    </div>
+    </form>
+
+    <p class="warning"><strong>Sicherheitshinweis:</strong>
+    Löschen Sie <code>plugin-recovery-tool.php</code> und <code><?= \htmlspecialchars($authFile) ?></code> nach der Verwendung.</p>
+    <?php else: ?>
     <section class="section recovery-auth-step" id="auth-step-1"<?= $initialStep !== 1 ? ' hidden' : '' ?>>
         <header class="sectionHeader">
             <h2 class="sectionTitle">Schritt 1 — Auth-Datei laden</h2>
@@ -942,6 +999,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
 
     <p class="warning"><fa-icon size="16" name="shield-halved" solid></fa-icon> <strong>Sicherheitshinweis:</strong>
     Löschen Sie <code>plugin-recovery-tool.php</code> und <code><?= \htmlspecialchars($authFile) ?></code> nach der Verwendung.</p>
+    <?php endif; ?>
 
     <script>
     (function () {
@@ -1017,17 +1075,18 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
             authAlert.hidden = false;
             if (usesAcpUi) {
                 authAlert.className = wcfAlertClass(severity);
-                var stepsHtml = '';
-                if (steps && steps.length) {
-                    stepsHtml = '<ol class="recovery-step-list">';
-                    steps.forEach(function (step) {
-                        stepsHtml += '<li>' + step + '</li>';
-                    });
-                    stepsHtml += '</ol>';
+                var html = '<p><strong>' + escapeHtml(title || 'Hinweis') + '</strong></p>';
+                if (message) {
+                    html += '<p>' + escapeHtml(message) + '</p>';
                 }
-                authAlert.innerHTML =
-                    '<strong>' + escapeHtml(title || 'Hinweis') + '</strong><br>' +
-                    escapeHtml(message || '') + stepsHtml;
+                if (steps && steps.length) {
+                    html += '<ol>';
+                    steps.forEach(function (step) {
+                        html += '<li>' + step + '</li>';
+                    });
+                    html += '</ol>';
+                }
+                authAlert.innerHTML = html;
                 return;
             }
             var stepsHtml = '';
@@ -1302,18 +1361,43 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
     $packageContents = recoveryStubGetPackageContentsList();
 
     recoveryStubRenderPageStart('Recovery-Paket installieren', 'Paket wird für die volle Oberfläche benötigt');
+    $usesAcpUi = recoveryStubUsesCompiledAcpStyle();
     ?>
     <?php if ($errorMessage !== null && $errorMessage !== ''): ?>
-    <p class="error"><strong><fa-icon size="16" name="circle-xmark" solid></fa-icon> Fehler</strong><br><?= $errorMessage ?></p>
+    <div class="error" role="alert"><p><strong>Fehler</strong></p><p><?= \htmlspecialchars($errorMessage, ENT_QUOTES, 'UTF-8') ?></p></div>
     <?php endif; ?>
 
-    <p class="info recovery-content-banner">
-        <fa-icon size="16" name="box-archive" solid></fa-icon>
+    <p class="info">
         Das Archiv <strong><code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code></strong> enthält das vollständige
-        Recovery-Tool: alle PHP-Modi (Wizard, Plugin entfernen, System-Check, Datensicherung, …), die ACP-Oberfläche sowie
-        die Stylesheets <code>recovery-acp-extensions.css</code> und <code>recovery-wcfsetup-dark.css</code>.
+        Recovery-Tool (alle Modi, ACP-Oberfläche, Stylesheets).
     </p>
 
+    <?php if ($usesAcpUi): ?>
+    <section class="section">
+        <header class="sectionHeader">
+            <h2 class="sectionTitle">Was enthält das Paket?</h2>
+            <p class="sectionDescription">Inhalt von <code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code> nach <code><?= \htmlspecialchars($dirName) ?>/</code></p>
+        </header>
+        <table class="table tableList">
+            <thead>
+                <tr>
+                    <th>Pfad</th>
+                    <th>Beschreibung</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($packageContents as $line):
+                    $entry = recoveryStubParsePackageContentEntry((string) $line);
+                    ?>
+                <tr>
+                    <td><code><?= \htmlspecialchars($entry['path']) ?></code></td>
+                    <td><?= \htmlspecialchars($entry['desc']) ?></td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </section>
+    <?php else: ?>
     <details class="recovery-panel recovery-panel--package-contents">
         <summary><span class="recovery-license-panel__summary-title"><?= recoveryStubFaIcon(16, 'folder-open') ?> Was enthält das Paket?</span></summary>
         <div class="recovery-panel__body recovery-panel__body--package-contents">
@@ -1335,6 +1419,7 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
             </ul>
         </div>
     </details>
+    <?php endif; ?>
 
     <section class="section">
         <header class="sectionHeader">
@@ -2226,9 +2311,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.7.34');
-define('RECOVERY_PACKAGE_VERSION', '2.7.34');
-define('RECOVERY_STUB_INTEGRITY_HASH', 'f8a09de1f4a8386b706693e3679f936660b87e22e589d6584fc1f2b988d93461');
+define('RECOVERY_STUB_VERSION', '2.7.35');
+define('RECOVERY_PACKAGE_VERSION', '2.7.35');
+define('RECOVERY_STUB_INTEGRITY_HASH', 'a10ee1a505064976703ff0dc2adb8b95b9e522af9c0ea8fec11f1c220615c148');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
