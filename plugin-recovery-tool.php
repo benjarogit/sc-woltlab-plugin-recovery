@@ -951,9 +951,13 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
 
         function downloadAuthFile(options) {
             options = options || {};
-            if (!downloadBtn) { return Promise.reject(); }
-            setButtonState(downloadBtn, 'loading');
-            downloadBtn.disabled = true;
+            var triggerBtn = options.triggerBtn || downloadBtn;
+            if (!triggerBtn) {
+                return Promise.reject(new Error('Download nicht verfügbar.'));
+            }
+            var isRedownload = triggerBtn === redownloadBtn;
+            setButtonState(triggerBtn, 'loading');
+            triggerBtn.disabled = true;
             hideAlert();
             if (validateStatus && options.clearStatus) {
                 validateStatus.textContent = '';
@@ -965,16 +969,24 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
                         throw new Error(data.message || 'Download fehlgeschlagen.');
                     }
                     triggerBlobDownload(data.filename || authFileName, data.content);
-                    setButtonState(downloadBtn, 'done');
-                    downloadBtn.disabled = true;
-                    if (options.goToStep2 !== false) {
-                        goToStep(2);
+                    if (isRedownload) {
+                        setButtonState(triggerBtn, 'idle');
+                        triggerBtn.disabled = false;
+                        if (validateStatus) {
+                            validateStatus.textContent = 'Neue Auth-Datei heruntergeladen — bitte auf den Server hochladen und prüfen.';
+                        }
+                    } else if (downloadBtn) {
+                        setButtonState(downloadBtn, 'done');
+                        downloadBtn.disabled = true;
+                        if (options.goToStep2 !== false) {
+                            goToStep(2);
+                        }
                     }
                     return data;
                 })
                 .catch(function (err) {
-                    setButtonState(downloadBtn, 'idle');
-                    downloadBtn.disabled = false;
+                    setButtonState(triggerBtn, 'idle');
+                    triggerBtn.disabled = false;
                     if (authAlert) {
                         authAlert.className = 'recovery-auth-alert recovery-auth-alert--error';
                         authAlert.hidden = false;
@@ -1070,7 +1082,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
                 pollingActive = false;
                 setButtonState(validateBtn, 'idle');
                 if (validateBtn) { validateBtn.disabled = false; }
-                downloadAuthFile({ goToStep2: false, clearStatus: true });
+                downloadAuthFile({ goToStep2: false, clearStatus: true, triggerBtn: redownloadBtn });
             });
         }
 
@@ -1613,6 +1625,50 @@ function recoveryStubCreatePendingSession(string $token): void
     recoveryStubLogDebug('auth', 'pending_session_created', ['tokenPrefix' => \substr($token, 0, 8)]);
 }
 
+/**
+ * Pending-Sitzung an aktuelle Stub-Version anpassen (z. B. nach Tool-Update ohne neuen Link).
+ */
+function recoveryStubSyncPendingStubBuild(string $token): bool
+{
+    if (!recoveryStubAssertValidToken($token)) {
+        return false;
+    }
+
+    $path = recoveryStubPendingAuthPath($token);
+    $state = recoveryStubLoadAuthState($path);
+    if ($state === null) {
+        return false;
+    }
+
+    $currentBuild = recoveryStubBuildId();
+    if (($state['stubBuildId'] ?? '') === $currentBuild) {
+        return true;
+    }
+
+    $state['stubBuildId'] = $currentBuild;
+    if (\defined('RECOVERY_STUB_INTEGRITY_HASH')) {
+        $state['stubIntegrity'] = (string) RECOVERY_STUB_INTEGRITY_HASH;
+    }
+    recoveryStubSaveAuthState($path, $state);
+
+    $boundPath = recoveryStubBoundAuthPath($token);
+    $bound = recoveryStubLoadAuthState($boundPath);
+    if ($bound !== null) {
+        $bound['stubBuildId'] = $currentBuild;
+        if (\defined('RECOVERY_STUB_INTEGRITY_HASH')) {
+            $bound['stubIntegrity'] = (string) RECOVERY_STUB_INTEGRITY_HASH;
+        }
+        recoveryStubSaveAuthState($boundPath, $bound);
+    }
+
+    recoveryStubLog('info', 'Pending-Sitzung an Stub-Build angepasst', [
+        'tokenPrefix' => \substr($token, 0, 8),
+        'buildId' => $currentBuild,
+    ]);
+
+    return true;
+}
+
 function recoveryStubAuthSignature(string $secret, int $expires, string $token, string $stubBuildId): string
 {
     $payload = $expires . "\n" . $token . "\n" . $stubBuildId;
@@ -1629,15 +1685,18 @@ function recoveryStubGenerateAuthFileContent(string $token): array
         return ['ok' => false, 'error' => 'Ungültige Sitzung.'];
     }
 
-    $pending = recoveryStubLoadAuthState(recoveryStubPendingAuthPath($token));
+    $pendingPath = recoveryStubPendingAuthPath($token);
+    $pending = recoveryStubLoadAuthState($pendingPath);
     if ($pending === null) {
         recoveryStubLog('warning', 'Auth-Download ohne Pending-Session', ['tokenPrefix' => \substr($token, 0, 8)]);
 
         return ['ok' => false, 'error' => 'Keine gültige Recovery-Sitzung. Bitte plugin-recovery-tool.php erneut aufrufen.'];
     }
 
-    if (($pending['stubBuildId'] ?? '') !== recoveryStubBuildId()) {
-        return ['ok' => false, 'error' => 'Auth-Datei passt nicht zu dieser plugin-recovery-tool.php (Version/Build).'];
+    recoveryStubSyncPendingStubBuild($token);
+    $pending = recoveryStubLoadAuthState($pendingPath);
+    if ($pending === null) {
+        return ['ok' => false, 'error' => 'Keine gültige Recovery-Sitzung. Bitte plugin-recovery-tool.php erneut aufrufen.'];
     }
 
     if (($pending['stubIntegrity'] ?? '') !== '' && \defined('RECOVERY_STUB_INTEGRITY_HASH')
@@ -1726,7 +1785,12 @@ function recoveryStubValidateAuthFile(string $urlToken): array
     }
 
     if (($state['stubBuildId'] ?? '') !== recoveryStubBuildId()) {
-        return ['ok' => false, 'reason' => 'server_stub_mismatch'];
+        recoveryStubSyncPendingStubBuild($urlToken);
+        $state = recoveryStubLoadAuthState(recoveryStubPendingAuthPath($urlToken))
+            ?? recoveryStubLoadAuthState(recoveryStubBoundAuthPath($urlToken));
+        if ($state === null || ($state['stubBuildId'] ?? '') !== recoveryStubBuildId()) {
+            return ['ok' => false, 'reason' => 'server_stub_mismatch'];
+        }
     }
 
     $secret = (string) ($state['secret'] ?? '');
@@ -1998,9 +2062,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.7.19');
-define('RECOVERY_PACKAGE_VERSION', '2.7.19');
-define('RECOVERY_STUB_INTEGRITY_HASH', 'dafcbad21a9e274d3367b6b578b503eac87d6056372f6417c4bf0c9a63648049');
+define('RECOVERY_STUB_VERSION', '2.7.20');
+define('RECOVERY_PACKAGE_VERSION', '2.7.20');
+define('RECOVERY_STUB_INTEGRITY_HASH', '55a5a4ec2f7d4381c302ffd6b3660aa76220020b4b4337e35808bde3db2fb287');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
