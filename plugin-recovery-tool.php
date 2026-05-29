@@ -509,11 +509,139 @@ function recoveryStubRenderColorSchemeHeadScript(): void
     <?php
 }
 
+function recoveryStubAcpLayoutCss(): string
+{
+    return <<<'RECOVERY_STUB_ACP_LAYOUT_CSS'
+/**
+ * ACP-Inhaltsbreite (Stub + Paket) — nicht Login-Schmalspur.
+ * Orientierung: acp/style/style.css layoutBoundary, ohne Sidebar volle Content-Spalte.
+ */
+
+#tplRecoveryTool,
+#tplRecoveryAuth.recovery-stub-acp-page {
+    --recovery-content-max-width: min(96vw, 1400px);
+    --recovery-content-gutter: 24px;
+}
+
+#tplRecoveryTool #main > .layoutBoundary,
+#tplRecoveryAuth.recovery-stub-acp-page #main > .layoutBoundary {
+    box-sizing: border-box;
+    width: 100% !important;
+    max-width: var(--recovery-content-max-width) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding-left: var(--recovery-content-gutter) !important;
+    padding-right: var(--recovery-content-gutter) !important;
+}
+
+#tplRecoveryTool #pageHeaderContainer,
+#tplRecoveryTool #pageHeader,
+#tplRecoveryTool #pageHeaderPanel,
+#tplRecoveryTool #pageHeaderFacade,
+#tplRecoveryAuth.recovery-stub-acp-page #pageHeaderContainer,
+#tplRecoveryAuth.recovery-stub-acp-page #pageHeader,
+#tplRecoveryAuth.recovery-stub-acp-page #pageHeaderPanel,
+#tplRecoveryAuth.recovery-stub-acp-page #pageHeaderFacade {
+    width: 100% !important;
+    max-width: none !important;
+    box-sizing: border-box;
+}
+
+#tplRecoveryTool #pageHeaderPanel > .layoutBoundary,
+#tplRecoveryTool #pageHeaderFacade > .layoutBoundary,
+#tplRecoveryAuth.recovery-stub-acp-page #pageHeaderPanel > .layoutBoundary,
+#tplRecoveryAuth.recovery-stub-acp-page #pageHeaderFacade > .layoutBoundary {
+    box-sizing: border-box;
+    width: 100% !important;
+    max-width: none !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: max(
+        var(--recovery-content-gutter),
+        calc((100% - var(--recovery-content-max-width)) / 2 + var(--recovery-content-gutter))
+    ) !important;
+    padding-right: max(
+        var(--recovery-content-gutter),
+        calc((100% - var(--recovery-content-max-width)) / 2 + var(--recovery-content-gutter))
+    ) !important;
+}
+
+#tplRecoveryTool #content,
+#tplRecoveryAuth.recovery-stub-acp-page #content {
+    float: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
+}
+
+#tplRecoveryTool .content .section,
+#tplRecoveryAuth.recovery-stub-acp-page .content .section {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+#tplRecoveryTool .table.tableList,
+#tplRecoveryAuth.recovery-stub-acp-page .table.tableList {
+    width: 100%;
+    table-layout: auto;
+}
+
+#tplRecoveryTool p.info,
+#tplRecoveryTool p.warning,
+#tplRecoveryTool p.error,
+#tplRecoveryTool p.success,
+#tplRecoveryTool .error > p:first-child,
+#tplRecoveryTool .success > p:first-child,
+#tplRecoveryAuth.recovery-stub-acp-page p.info,
+#tplRecoveryAuth.recovery-stub-acp-page p.warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+#tplRecoveryTool p.info fa-icon,
+#tplRecoveryTool p.warning fa-icon,
+#tplRecoveryTool .error fa-icon,
+#tplRecoveryTool .success fa-icon,
+#tplRecoveryAuth.recovery-stub-acp-page p.info fa-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+#tplRecoveryTool .recovery-footer-meta,
+#tplRecoveryAuth.recovery-stub-acp-page .recovery-footer-meta {
+    max-width: var(--recovery-content-max-width);
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: var(--recovery-content-gutter);
+    padding-right: var(--recovery-content-gutter);
+    box-sizing: border-box;
+}
+
+@media (max-width: 720px) {
+    #tplRecoveryTool,
+    #tplRecoveryAuth.recovery-stub-acp-page {
+        --recovery-content-gutter: 16px;
+        --recovery-content-max-width: 100%;
+    }
+}
+
+RECOVERY_STUB_ACP_LAYOUT_CSS;
+}
+
+
 /**
  * @param array{value?: int, max?: int, label?: string}|null $wizardProgress
+ * @param 'auth'|'acp' $layout auth = Login-Schmalspur, acp = volle Inhaltsbreite wie ACP-Seiten
  */
-function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?array $wizardProgress = null): void
-{
+function recoveryStubRenderPageStart(
+    string $title,
+    string $subtitle = '',
+    ?array $wizardProgress = null,
+    string $layout = 'auth',
+): void {
+    $layout = $layout === 'acp' ? 'acp' : 'auth';
     $assets = recoveryStubGetSetupAssets();
     $logoHref = ($assets['woltlabSuite.png'] ?? '') !== '' ? recoveryStubAssetHref($assets['woltlabSuite.png']) : '';
     $logoSmallHref = ($assets['woltlabSuite-small.png'] ?? '') !== ''
@@ -523,7 +651,7 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
         ? recoveryStubAssetHref($assets['fontAwesomeCss'])
         : '';
     $faExtra = $assets['fontAwesomeLocal'] ? '' : ' crossorigin="anonymous" referrerpolicy="no-referrer"';
-    $wizardCss = recoveryStubWizardCss();
+    $wizardCss = $layout === 'auth' ? recoveryStubWizardCss() : '';
     $usesAcpUi = $assets['usesCompiledAcpStyle'];
     $hasAcpStylesheet = $assets['stylesheets'] !== [];
     $extensionsCss = '';
@@ -533,14 +661,23 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
             $extensionsCss = 'recovery-tool/lib/Recovery/Ui/recovery-acp-native.css';
         }
     }
+    $bodyId = $layout === 'acp' ? 'tplRecoveryTool' : 'tplRecoveryAuth';
     $bodyClass = 'wcfAcp';
-    if ($hasAcpStylesheet) {
+    if ($layout === 'auth' && $hasAcpStylesheet) {
         $bodyClass .= ' acpAuthFlow pageHeaderContainerIsLogin';
+    }
+    if ($layout === 'acp') {
+        $bodyClass .= ' recovery-stub-acp-page';
     }
     if ($usesAcpUi) {
         $bodyClass .= ' recovery-uses-acp-ui';
     }
-    $headerContainerClass = 'pageHeaderContainer' . ($hasAcpStylesheet ? ' pageHeaderContainerIsLogin' : '');
+    $headerContainerClass = 'pageHeaderContainer';
+    if ($layout === 'auth' && $hasAcpStylesheet) {
+        $headerContainerClass .= ' pageHeaderContainerIsLogin';
+    }
+    $pageContainerClass = $layout === 'acp' ? 'pageContainer' : 'pageContainer acpPageHiddenMenu';
+    $acpLayoutCss = $layout === 'acp' ? recoveryStubAcpLayoutCss() : '';
 
     \header('Content-Type: text/html; charset=utf-8');
     ?>
@@ -671,13 +808,16 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
         .recovery-log-empty { margin: 8px 0 0; color: var(--wcfContentDimmedText, #888); font-size: 13px; }
         .recovery-loading-inline { display: inline-flex; align-items: center; gap: 10px; }
     </style>
+    <?php if ($acpLayoutCss !== ''): ?>
+    <style><?= $acpLayoutCss ?></style>
+    <?php endif; ?>
     <?php if ($wizardCss !== ''): ?>
     <style><?= $wizardCss ?></style>
     <?php endif; ?>
 </head>
-<body id="tplRecoveryAuth" class="<?= \htmlspecialchars($bodyClass, ENT_QUOTES, 'UTF-8') ?>">
+<body id="<?= \htmlspecialchars($bodyId, ENT_QUOTES, 'UTF-8') ?>" class="<?= \htmlspecialchars($bodyClass, ENT_QUOTES, 'UTF-8') ?>">
 <a id="top"></a>
-<div id="pageContainer" class="pageContainer acpPageHiddenMenu">
+<div id="pageContainer" class="<?= \htmlspecialchars($pageContainerClass, ENT_QUOTES, 'UTF-8') ?>">
     <div id="pageHeaderContainer" class="<?= \htmlspecialchars($headerContainerClass, ENT_QUOTES, 'UTF-8') ?>">
         <header id="pageHeader" class="pageHeader">
             <div id="pageHeaderPanel" class="pageHeaderPanel">
@@ -813,7 +953,7 @@ function recoveryStubRenderPageEnd(array $options = []): void
 function recoveryStubRenderIntegrityError(string $message, ?string $logDir = null): void
 {
     recoveryStubLogExposeHeaders();
-    recoveryStubRenderPageStart('Plugin Recovery Tool', 'Integritätsprüfung fehlgeschlagen');
+    recoveryStubRenderPageStart('Plugin Recovery Tool', 'Integritätsprüfung fehlgeschlagen', null, 'acp');
     ?>
     <p class="error"><strong><fa-icon size="16" name="circle-xmark" solid></fa-icon> Ungültige Recovery-Datei</strong><br>
     <?= \htmlspecialchars($message) ?></p>
@@ -1260,6 +1400,19 @@ function recoveryStubParsePackageContentEntry(string $line): array
     return ['path' => $line, 'desc' => ''];
 }
 
+function recoveryStubPackagePathIcon(string $path): string
+{
+    $path = \trim($path);
+    if ($path === '' || \str_ends_with($path, '/')) {
+        return recoveryStubFaIcon(16, 'folder', true);
+    }
+    if (\str_contains($path, '/')) {
+        return recoveryStubFaIcon(16, 'folder-open', true);
+    }
+
+    return recoveryStubFaIcon(16, 'file', true);
+}
+
 function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMessage = null): void
 {
     $version = RECOVERY_PACKAGE_VERSION;
@@ -1268,19 +1421,21 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
     $dirName = RECOVERY_PACKAGE_DIR_NAME;
     $packageContents = recoveryStubGetPackageContentsList();
 
-    recoveryStubRenderPageStart('Recovery-Paket installieren', 'Paket wird für die volle Oberfläche benötigt');
-    $usesAcpUi = recoveryStubUsesCompiledAcpStyle();
+    recoveryStubRenderPageStart('Recovery-Paket installieren', 'Paket wird für die volle Oberfläche benötigt', null, 'acp');
     ?>
     <?php if ($errorMessage !== null && $errorMessage !== ''): ?>
-    <div class="error" role="alert"><p><strong>Fehler</strong></p><p><?= \htmlspecialchars($errorMessage, ENT_QUOTES, 'UTF-8') ?></p></div>
+    <div class="error" role="alert">
+        <p><?= recoveryStubAuthAlertIcon('error') ?> <strong>Fehler</strong></p>
+        <p><?= \htmlspecialchars($errorMessage, ENT_QUOTES, 'UTF-8') ?></p>
+    </div>
     <?php endif; ?>
 
     <p class="info">
+        <?= recoveryStubFaIcon(16, 'circle-info', true) ?>
         Das Archiv <strong><code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code></strong> enthält das vollständige
         Recovery-Tool (alle Modi, ACP-Oberfläche, Stylesheets).
     </p>
 
-    <?php if ($usesAcpUi): ?>
     <section class="section">
         <header class="sectionHeader">
             <h2 class="sectionTitle">Was enthält das Paket?</h2>
@@ -1289,6 +1444,7 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
         <table class="table tableList">
             <thead>
                 <tr>
+                    <th class="columnIcon"></th>
                     <th>Pfad</th>
                     <th>Beschreibung</th>
                 </tr>
@@ -1298,6 +1454,7 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
                     $entry = recoveryStubParsePackageContentEntry((string) $line);
                     ?>
                 <tr>
+                    <td class="columnIcon"><?= recoveryStubPackagePathIcon($entry['path']) ?></td>
                     <td><code><?= \htmlspecialchars($entry['path']) ?></code></td>
                     <td><?= \htmlspecialchars($entry['desc']) ?></td>
                 </tr>
@@ -1305,29 +1462,6 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
             </tbody>
         </table>
     </section>
-    <?php else: ?>
-    <details class="recovery-panel recovery-panel--package-contents">
-        <summary><span class="recovery-license-panel__summary-title"><?= recoveryStubFaIcon(16, 'folder-open') ?> Was enthält das Paket?</span></summary>
-        <div class="recovery-panel__body recovery-panel__body--package-contents">
-            <p class="recovery-package-contents-intro">
-                Inhalt von <code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code>
-                nach dem Entpacken nach <code><?= \htmlspecialchars($dirName) ?>/</code>
-            </p>
-            <ul class="recovery-package-contents">
-                <?php foreach ($packageContents as $line):
-                    $entry = recoveryStubParsePackageContentEntry((string) $line);
-                    ?>
-                <li class="recovery-package-contents__item">
-                    <code class="recovery-package-contents__path"><?= \htmlspecialchars($entry['path']) ?></code>
-                    <?php if ($entry['desc'] !== ''): ?>
-                    <span class="recovery-package-contents__desc"><?= \htmlspecialchars($entry['desc']) ?></span>
-                    <?php endif; ?>
-                </li>
-                <?php endforeach; ?>
-            </ul>
-        </div>
-    </details>
-    <?php endif; ?>
 
     <section class="section">
         <header class="sectionHeader">
@@ -2219,9 +2353,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.7.40');
-define('RECOVERY_PACKAGE_VERSION', '2.7.40');
-define('RECOVERY_STUB_INTEGRITY_HASH', '08d8fcaa2755b3f02691a46ffe7321b3d5816bcbddf31fc1078d7a7b107440af');
+define('RECOVERY_STUB_VERSION', '2.7.41');
+define('RECOVERY_PACKAGE_VERSION', '2.7.41');
+define('RECOVERY_STUB_INTEGRITY_HASH', '78ae27c75d15c95fa7bfde7b01edb50c43fe5112fb19ff7eed9c1b9436ddce63');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
