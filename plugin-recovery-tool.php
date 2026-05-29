@@ -466,13 +466,64 @@ html[data-color-scheme="light"] .recovery-log-pre {
     line-height: 1.55;
 }
 
-.recovery-package-contents-list {
-    margin: 8px 0 0;
-    padding-left: 22px;
+.recovery-panel--package-contents .recovery-panel__body--package-contents {
+    padding: 16px 18px 18px;
 }
 
-.recovery-package-contents-list li {
-    margin: 0 0 6px;
+.recovery-package-contents-intro {
+    margin: 0 0 14px;
+    padding: 12px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--wcfContentBorderInner, #ddd);
+    background: var(--wcfSidebarBackground, rgba(0, 0, 0, 0.04));
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--wcfContentDimmedText, #888);
+}
+
+.recovery-package-contents-intro code {
+    font-size: 12px;
+}
+
+.recovery-package-contents {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+}
+
+.recovery-package-contents__item {
+    display: grid;
+    grid-template-columns: minmax(11rem, 36%) 1fr;
+    gap: 8px 16px;
+    align-items: start;
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--wcfContentBorderInner, #ddd);
+    background: var(--wcfContentBackground, rgba(0, 0, 0, 0.02));
+    line-height: 1.5;
+}
+
+.recovery-package-contents__path {
+    display: block;
+    font-size: 12px;
+    word-break: break-word;
+    color: var(--wcfContentText, inherit);
+}
+
+.recovery-package-contents__desc {
+    display: block;
+    font-size: 13px;
+    color: var(--wcfContentDimmedText, #888);
+}
+
+@media (max-width: 640px) {
+    .recovery-package-contents__item {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
 }
 
 RECOVERY_STUB_WIZARD_CSS;
@@ -1139,6 +1190,22 @@ function recoveryStubGetPackageContentsList(): array
     ];
 }
 
+/**
+ * @return array{path: string, desc: string}
+ */
+function recoveryStubParsePackageContentEntry(string $line): array
+{
+    $line = \trim($line);
+    if (\preg_match('/^(.+?)\s+[—–-]\s+(.+)$/u', $line, $m)) {
+        return [
+            'path' => \trim((string) $m[1]),
+            'desc' => \trim((string) $m[2]),
+        ];
+    }
+
+    return ['path' => $line, 'desc' => ''];
+}
+
 function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMessage = null): void
 {
     $version = RECOVERY_PACKAGE_VERSION;
@@ -1162,11 +1229,21 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
 
     <details class="recovery-panel recovery-panel--package-contents">
         <summary><span class="recovery-license-panel__summary-title"><?= recoveryStubFaIcon(16, 'folder-open') ?> Was enthält das Paket?</span></summary>
-        <div class="recovery-panel__body">
-            <p class="sectionDescription">Inhalt von <code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code> nach dem Entpacken nach <code><?= \htmlspecialchars($dirName) ?>/</code>:</p>
-            <ul class="recovery-package-contents-list">
-                <?php foreach ($packageContents as $line): ?>
-                <li><?= \htmlspecialchars($line) ?></li>
+        <div class="recovery-panel__body recovery-panel__body--package-contents">
+            <p class="recovery-package-contents-intro">
+                Inhalt von <code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code>
+                nach dem Entpacken nach <code><?= \htmlspecialchars($dirName) ?>/</code>
+            </p>
+            <ul class="recovery-package-contents">
+                <?php foreach ($packageContents as $line):
+                    $entry = recoveryStubParsePackageContentEntry((string) $line);
+                    ?>
+                <li class="recovery-package-contents__item">
+                    <code class="recovery-package-contents__path"><?= \htmlspecialchars($entry['path']) ?></code>
+                    <?php if ($entry['desc'] !== ''): ?>
+                    <span class="recovery-package-contents__desc"><?= \htmlspecialchars($entry['desc']) ?></span>
+                    <?php endif; ?>
+                </li>
                 <?php endforeach; ?>
             </ul>
         </div>
@@ -2062,9 +2139,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.7.22');
-define('RECOVERY_PACKAGE_VERSION', '2.7.22');
-define('RECOVERY_STUB_INTEGRITY_HASH', '4a21f4779b399b3818d59eb554136a719b097d041b3d481e85026c1733cbe06b');
+define('RECOVERY_STUB_VERSION', '2.7.23');
+define('RECOVERY_PACKAGE_VERSION', '2.7.23');
+define('RECOVERY_STUB_INTEGRITY_HASH', '1ff947a65e6c6d07f75e3b8ec6eaa7c864c32539fead57e68f33f6093307c371');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
