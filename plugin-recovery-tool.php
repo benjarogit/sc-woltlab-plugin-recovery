@@ -810,11 +810,32 @@ function recoveryStubRenderAuthAlertBox(?string $reason): void
         return;
     }
     $d = recoveryStubAuthFailureDetails($reason);
-    $class = 'recovery-auth-alert recovery-auth-alert--' . \htmlspecialchars($d['severity']);
+    $severity = $d['severity'];
+    if (recoveryStubUsesCompiledAcpStyle()) {
+        $wcfClass = match ($severity) {
+            'error' => 'error',
+            'info' => 'info',
+            default => 'warning',
+        };
+        echo '<p id="authAlert" class="' . $wcfClass . '" role="alert">';
+        echo '<strong>' . \htmlspecialchars($d['title'], ENT_QUOTES, 'UTF-8') . '</strong><br>';
+        echo \htmlspecialchars($d['message'], ENT_QUOTES, 'UTF-8');
+        if ($d['steps'] !== []) {
+            echo '<ol class="recovery-step-list">';
+            foreach ($d['steps'] as $step) {
+                echo '<li>' . $step . '</li>';
+            }
+            echo '</ol>';
+        }
+        echo '</p>';
+
+        return;
+    }
+    $class = 'recovery-auth-alert recovery-auth-alert--' . \htmlspecialchars($severity);
     ?>
     <div id="authAlert" class="<?= $class ?>" role="alert">
         <p class="recovery-auth-alert-title">
-            <?= recoveryStubFaIcon(16, $d['severity'] === 'info' ? 'circle-info' : 'triangle-exclamation', true) ?>
+            <?= recoveryStubFaIcon(16, $severity === 'info' ? 'circle-info' : 'triangle-exclamation', true) ?>
             <strong><?= \htmlspecialchars($d['title']) ?></strong>
         </p>
         <p><?= \htmlspecialchars($d['message']) ?></p>
@@ -2160,9 +2181,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.7.30');
-define('RECOVERY_PACKAGE_VERSION', '2.7.30');
-define('RECOVERY_STUB_INTEGRITY_HASH', 'a80396c0df8851d4acfd33c554828f29d70a5ab87622f1a0f624d0bc9d3581de');
+define('RECOVERY_STUB_VERSION', '2.7.31');
+define('RECOVERY_PACKAGE_VERSION', '2.7.31');
+define('RECOVERY_STUB_INTEGRITY_HASH', 'df23f3580f45f161a0474a96d1128e05f3e0a3c4de024da8306b4fbbe5bf995d');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
