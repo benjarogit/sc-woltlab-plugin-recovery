@@ -733,8 +733,8 @@ function recoveryStubRenderPageStart(
         }
         <?php endif; ?>
         .recovery-auth-step[hidden] { display: none !important; }
-        #tplRecoveryAuth form#recovery-auth-wizard { margin: 0; }
-        #tplRecoveryAuth form#recovery-auth-wizard .recovery-auth-step {
+        #tplRecoveryAuth .recovery-auth-wizard { margin: 0; }
+        #tplRecoveryAuth .recovery-auth-wizard .recovery-auth-step {
             margin: 0 0 16px;
             padding: 0;
             border: 0;
@@ -742,15 +742,17 @@ function recoveryStubRenderPageStart(
             box-shadow: none;
             border-radius: 0;
         }
-        #tplRecoveryAuth form#recovery-auth-wizard dl { margin-bottom: 0; }
-        #tplRecoveryAuth form#recovery-auth-wizard dd small {
+        #tplRecoveryAuth .recovery-auth-wizard dl { margin-bottom: 0; }
+        #tplRecoveryAuth .recovery-auth-wizard dd small {
             display: block;
             margin-top: 4px;
             color: var(--wcfContentDimmedText, #888);
             line-height: 1.5;
         }
-        #tplRecoveryAuth form#recovery-auth-wizard .formSubmit { margin-top: 0; }
-        #tplRecoveryAuth form#recovery-auth-wizard .formSubmit .button { margin-right: 8px; }
+        #tplRecoveryAuth .recovery-auth-wizard .formSubmit { margin-top: 0; }
+        #tplRecoveryAuth .recovery-auth-wizard .formSubmit .button { margin-right: 8px; }
+        #tplRecoveryAuth .recovery-auth-wizard:has(.recovery-auth-step:not([hidden])) { min-height: 0; }
+        #tplRecoveryAuth .recovery-auth-wizard:not(:has(.recovery-auth-step:not([hidden]))) { display: none; }
         #tplRecoveryAuth #auth-step-3 .success { margin: 0 0 20px; }
         #tplRecoveryAuth #auth-step-3 .formSubmit {
             margin: 0;
@@ -908,34 +910,44 @@ function recoveryStubRenderLogPanel(bool $expanded = false): void
     $excerpt = recoveryStubRecentLogExcerpt();
     $open = $expanded;
     ?>
-    <section class="section recovery-log-section">
-        <details class="recovery-log-panel"<?= $open ? ' open' : '' ?>>
-            <summary>Protokoll &amp; Diagnose</summary>
-            <p class="sectionDescription" style="margin-top:12px">
+    <section class="section">
+        <header class="sectionHeader">
+            <h2 class="sectionTitle">Protokoll &amp; Diagnose</h2>
+            <p class="sectionDescription">
                 Verzeichnis: <code title="<?= \htmlspecialchars(recoveryStubLogDir()) ?>"><?= \htmlspecialchars(recoveryStubLogDisplayPath()) ?></code>
             </p>
-            <p class="info" style="margin-top:10px"><fa-icon size="16" name="circle-info" solid></fa-icon>
+        </header>
+        <div class="info" role="status">
+            <p><fa-icon size="16" name="circle-info" solid></fa-icon>
                 Die Log-Dateien sind Protokolle, kein Fehlerstatus der Oberfläche.
                 Ein leeres <strong>Fehlerprotokoll</strong> bedeutet: es ist nichts schiefgelaufen.</p>
-            <dl class="recovery-log-files">
+        </div>
+        <table class="table tableList">
+            <thead>
+                <tr>
+                    <th>Datei</th>
+                    <th>Status</th>
+                    <th>Beschreibung</th>
+                </tr>
+            </thead>
+            <tbody>
                 <?php foreach ($catalog as $entry): ?>
-                <dt>
-                    <?= \htmlspecialchars($entry['label']) ?>
-                    <?= recoveryStubLogFileBadge($entry) ?>
-                </dt>
-                <dd>
-                    <?= \htmlspecialchars($entry['description']) ?>
-                    — <code><?= \htmlspecialchars($entry['file']) ?></code>
-                </dd>
+                <tr>
+                    <td><code><?= \htmlspecialchars($entry['file']) ?></code></td>
+                    <td><?= recoveryStubLogFileBadge($entry) ?></td>
+                    <td><?= \htmlspecialchars($entry['label']) ?> — <?= \htmlspecialchars($entry['description']) ?></td>
+                </tr>
                 <?php endforeach; ?>
-            </dl>
-            <?php if ($excerpt !== []): ?>
-            <p class="sectionDescription" style="margin-top:14px">Letzte Einträge</p>
-            <pre class="recovery-log-pre" role="log"><?= \htmlspecialchars(\implode("\n", $excerpt)) ?></pre>
-            <?php else: ?>
-            <p class="recovery-log-empty">Nach Aktionen (Download, Auth, Installation) erscheinen hier die letzten Zeilen.</p>
-            <?php endif; ?>
-        </details>
+            </tbody>
+        </table>
+        <?php if ($excerpt !== []): ?>
+        <header class="sectionHeader" style="margin-top:20px">
+            <h3 class="sectionTitle">Letzte Einträge</h3>
+        </header>
+        <pre class="recovery-log-pre" role="log"><?= \htmlspecialchars(\implode("\n", $excerpt)) ?></pre>
+        <?php else: ?>
+        <p class="sectionDescription">Nach Aktionen (Download, Auth, Installation) erscheinen hier die letzten Zeilen.</p>
+        <?php endif; ?>
     </section>
     <?php
 }
@@ -1032,7 +1044,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
     <?php else: ?>
     <?php recoveryStubRenderAuthAlertBox($errorReason); ?>
     <?php endif; ?>
-    <form id="recovery-auth-wizard" method="post" action="#">
+    <div id="recovery-auth-wizard" class="recovery-auth-wizard">
         <div class="recovery-auth-step" id="auth-step-1"<?= $initialStep !== 1 ? ' hidden' : '' ?>>
             <dl>
                 <dt><label for="downloadBtn"><?= \htmlspecialchars($authFile) ?></label> <span class="formFieldRequired">*</span></dt>
@@ -1058,7 +1070,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
             </div>
         </div>
 
-    </form>
+    </div>
 
     <div class="recovery-auth-step" id="auth-step-3" hidden>
         <div class="success" role="status">
@@ -1070,8 +1082,10 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
         </div>
     </div>
 
-    <p class="warning"><?= recoveryStubFaIcon(16, 'shield-halved', true) ?> <strong>Sicherheitshinweis:</strong>
-    Löschen Sie <code>plugin-recovery-tool.php</code> und <code><?= \htmlspecialchars($authFile) ?></code> nach der Verwendung.</p>
+    <div class="warning" role="alert">
+        <p><?= recoveryStubFaIcon(16, 'shield-halved', true) ?> <strong>Sicherheitshinweis</strong></p>
+        <p>Löschen Sie <code>plugin-recovery-tool.php</code> und <code><?= \htmlspecialchars($authFile) ?></code> nach der Verwendung.</p>
+    </div>
 
     <script>
     (function () {
@@ -1091,6 +1105,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
         var validateBtn = document.getElementById('validateBtn');
         var redownloadBtn = document.getElementById('redownloadBtn');
         var startRecoveryBtn = document.getElementById('startRecoveryBtn');
+        var authWizard = document.getElementById('recovery-auth-wizard');
         var authAlert = document.getElementById('authAlert');
 
         var downloadBtnLabels = {
@@ -1133,6 +1148,9 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
                 if (!el) { return; }
                 el.hidden = i + 1 !== n;
             });
+            if (authWizard) {
+                authWizard.hidden = n === 3;
+            }
             if (progress) {
                 if (progress.tagName === 'PROGRESS') {
                     progress.value = String(n);
@@ -1476,11 +1494,11 @@ function recoveryStubRenderPackageInstallPage(string $authHash, ?string $errorMe
     </div>
     <?php endif; ?>
 
-    <p class="info">
-        <?= recoveryStubFaIcon(16, 'circle-info', true) ?>
-        Das Archiv <strong><code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code></strong> enthält das vollständige
-        Recovery-Tool (alle Modi, ACP-Oberfläche, Stylesheets).
-    </p>
+    <div class="info" role="status">
+        <p><?= recoveryStubFaIcon(16, 'circle-info', true) ?>
+            Das Archiv <strong><code>recovery-<?= \htmlspecialchars($version) ?>.tar.gz</code></strong> enthält das vollständige
+            Recovery-Tool (alle Modi, ACP-Oberfläche, Stylesheets).</p>
+    </div>
 
     <section class="section">
         <header class="sectionHeader">
@@ -2399,9 +2417,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.7.44');
-define('RECOVERY_PACKAGE_VERSION', '2.7.44');
-define('RECOVERY_STUB_INTEGRITY_HASH', '65f86a7ba5825d84223e339242245d1271dcdfc748ed21713c383243480132d2');
+define('RECOVERY_STUB_VERSION', '2.7.45');
+define('RECOVERY_PACKAGE_VERSION', '2.7.45');
+define('RECOVERY_STUB_INTEGRITY_HASH', '6fa9f986cd162008de77096ac6feccc108a9d7e3d2c59290780d950c26ddb00b');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
