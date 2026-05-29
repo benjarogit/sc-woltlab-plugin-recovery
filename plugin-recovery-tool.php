@@ -882,57 +882,41 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
     <?php recoveryStubRenderAuthAlertBox($errorReason); ?>
     <?php endif; ?>
     <?php if (recoveryStubUsesCompiledAcpStyle()): ?>
-    <form id="recovery-auth-wizard" class="recoveryAuthForm">
-    <div class="recovery-auth-step" id="auth-step-1"<?= $initialStep !== 1 ? ' hidden' : '' ?>>
-        <dl>
-            <dt><label>Schritt 1 — Auth-Datei laden</label></dt>
-            <dd>
-                <p>Nur für <strong>diese</strong> Sitzung gültig. Bei neuem Link: Auth-Datei neu herunterladen und alte auf dem Server überschreiben.</p>
-                <dl>
-                    <dt>Dateiname</dt>
-                    <dd><code><?= \htmlspecialchars($authFile) ?></code></dd>
-                </dl>
-            </dd>
-        </dl>
-        <div class="formSubmit">
-            <button type="button" class="button buttonPrimary" id="downloadBtn" data-state="<?= $initialStep >= 2 ? 'done' : 'idle' ?>"<?= $initialStep >= 2 ? ' disabled' : '' ?>>
-                <span class="recovery-auth-btn-label" data-state="idle"><?= \htmlspecialchars($authFile) ?> herunterladen</span>
-                <span class="recovery-auth-btn-label" data-state="loading">Wird erstellt …</span>
-                <span class="recovery-auth-btn-label" data-state="done">Heruntergeladen — weiter zu Schritt 2</span>
-            </button>
+    <form id="recovery-auth-wizard" method="post" action="#">
+        <div class="recovery-auth-step" id="auth-step-1"<?= $initialStep !== 1 ? ' hidden' : '' ?>>
+            <dl>
+                <dt><label for="downloadBtn"><?= \htmlspecialchars($authFile) ?></label> <span class="formFieldRequired">*</span></dt>
+                <dd>
+                    <small>Nur für <strong>diese</strong> Sitzung gültig. Bei neuem Link Auth-Datei neu herunterladen und auf dem Server überschreiben.</small>
+                </dd>
+            </dl>
+            <div class="formSubmit">
+                <button type="button" class="button buttonPrimary" id="downloadBtn" data-state="<?= $initialStep >= 2 ? 'done' : 'idle' ?>"<?= $initialStep >= 2 ? ' disabled' : '' ?>><?= \htmlspecialchars($authFile) ?> herunterladen</button>
+            </div>
         </div>
-    </div>
 
-    <div class="recovery-auth-step" id="auth-step-2"<?= $initialStep !== 2 ? ' hidden' : '' ?>>
-        <dl>
-            <dt><label>Schritt 2 — Hochladen &amp; prüfen</label></dt>
-            <dd>
-                <p>Datei ins WoltLab-Hauptverzeichnis legen (neben <code>plugin-recovery-tool.php</code>). Vorhandene Datei <strong>überschreiben</strong>.</p>
-                <p>FTP/SFTP: Binärmodus, exakter Dateiname <code><?= \htmlspecialchars($authFile) ?></code></p>
-            </dd>
-        </dl>
-        <div class="formSubmit">
-            <button type="button" class="button buttonPrimary" id="validateBtn" data-state="idle">
-                <span class="recovery-auth-btn-label" data-state="idle">Auth-Datei prüfen</span>
-                <span class="recovery-auth-btn-label" data-state="loading">Prüfe …</span>
-                <span class="recovery-auth-btn-label" data-state="success">Gültig</span>
-            </button>
-            <button type="button" class="button" id="redownloadBtn">Neu herunterladen</button>
+        <div class="recovery-auth-step" id="auth-step-2"<?= $initialStep !== 2 ? ' hidden' : '' ?>>
+            <dl>
+                <dt><label for="validateBtn">Auth-Datei auf dem Server</label> <span class="formFieldRequired">*</span></dt>
+                <dd>
+                    <small>Datei ins WoltLab-Hauptverzeichnis legen (neben <code>plugin-recovery-tool.php</code>), vorhandene Datei <strong>überschreiben</strong>. FTP/SFTP: Binärmodus.</small>
+                </dd>
+            </dl>
+            <div class="formSubmit">
+                <button type="button" class="button buttonPrimary" id="validateBtn" data-state="idle">Auth-Datei prüfen</button>
+                <button type="button" class="button" id="redownloadBtn">Neu herunterladen</button>
+            </div>
+            <p class="innerInfo" id="validateStatus" aria-live="polite"></p>
         </div>
-        <p class="innerInfo" id="validateStatus" aria-live="polite"></p>
-    </div>
 
-    <div class="recovery-auth-step" id="auth-step-3" hidden>
-        <dl>
-            <dt><label>Schritt 3 — Recovery Tool starten</label></dt>
-            <dd>
-                <p class="success">Authentifizierung erfolgreich — die Auth-Datei wurde erkannt.</p>
-            </dd>
-        </dl>
-        <div class="formSubmit">
-            <a href="?t=<?= \htmlspecialchars($authHash) ?>" class="button buttonPrimary">Recovery Tool starten</a>
+        <div class="recovery-auth-step" id="auth-step-3" hidden>
+            <div class="success" role="status">
+                <p><strong>Authentifizierung erfolgreich</strong> — die Auth-Datei wurde erkannt.</p>
+            </div>
+            <div class="formSubmit">
+                <a href="?t=<?= \htmlspecialchars($authHash) ?>" class="button buttonPrimary">Recovery Tool starten</a>
+            </div>
         </div>
-    </div>
     </form>
 
     <p class="warning"><strong>Sicherheitshinweis:</strong>
@@ -1021,9 +1005,29 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
         var authAlert = document.getElementById('authAlert');
         var validateStatus = document.getElementById('validateStatus');
 
+        var downloadBtnLabels = {
+            idle: authFileName + ' herunterladen',
+            loading: 'Wird erstellt …',
+            done: 'Heruntergeladen — weiter zu Schritt 2'
+        };
+        var validateBtnLabels = {
+            idle: 'Auth-Datei prüfen',
+            loading: 'Prüfe …',
+            success: 'Gültig',
+            error: 'Erneut prüfen'
+        };
+
         function setButtonState(btn, state) {
             if (!btn) { return; }
             btn.setAttribute('data-state', state);
+            if (usesAcpUi) {
+                var labels = btn === downloadBtn ? downloadBtnLabels : validateBtnLabels;
+                if (labels[state]) {
+                    btn.textContent = labels[state];
+                }
+                btn.disabled = state === 'loading' || state === 'done' || state === 'success';
+                return;
+            }
         }
 
         function updateProgressLabel(n) {
@@ -2311,9 +2315,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.7.36');
-define('RECOVERY_PACKAGE_VERSION', '2.7.36');
-define('RECOVERY_STUB_INTEGRITY_HASH', 'e069b6879a2a51aa33f3fd76f34d7301e896816a8971e356869246d7b4b27f9b');
+define('RECOVERY_STUB_VERSION', '2.7.37');
+define('RECOVERY_PACKAGE_VERSION', '2.7.37');
+define('RECOVERY_STUB_INTEGRITY_HASH', '4d6baf398910cfc5e3ff9b03e953820fc49d0a729edc8746dc81503c94de4cb7');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
