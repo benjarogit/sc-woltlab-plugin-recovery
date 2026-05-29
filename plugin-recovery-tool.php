@@ -52,6 +52,9 @@ function recoveryStubGetSetupAssets(): array
     if (\is_readable($root . 'acp/images/woltlabSuite.png')) {
         $assets['woltlabSuite.png'] = 'acp/images/woltlabSuite.png';
     }
+    if (\is_readable($root . 'acp/images/woltlabSuite-small.png')) {
+        $assets['woltlabSuite-small.png'] = 'acp/images/woltlabSuite-small.png';
+    }
     $wcPath = 'js/WoltLabSuite/WebComponent.min.js';
     if (\is_readable($root . $wcPath)) {
         $assets['webComponentsJs'] = $wcPath;
@@ -557,7 +560,10 @@ function recoveryStubRenderColorSchemeHeadScript(): void
 function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?array $wizardProgress = null): void
 {
     $assets = recoveryStubGetSetupAssets();
-    $logoHref = recoveryStubAssetHref($assets['woltlabSuite.png']);
+    $logoHref = ($assets['woltlabSuite.png'] ?? '') !== '' ? recoveryStubAssetHref($assets['woltlabSuite.png']) : '';
+    $logoSmallHref = ($assets['woltlabSuite-small.png'] ?? '') !== ''
+        ? recoveryStubAssetHref($assets['woltlabSuite-small.png'])
+        : '';
     $faHref = $assets['fontAwesomeCss'] !== ''
         ? recoveryStubAssetHref($assets['fontAwesomeCss'])
         : '';
@@ -569,7 +575,8 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
     if (\is_readable($recoveryToolRoot)) {
         $extensionsCss = 'recovery-tool/lib/Recovery/Ui/recovery-acp-extensions.css';
     }
-    $bodyClass = 'wcfAcp' . ($usesAcpUi ? ' recovery-uses-acp-ui' : '');
+    $bodyClass = 'wcfAcp' . ($usesAcpUi ? ' acpAuthFlow recovery-uses-acp-ui' : '');
+    $headerContainerClass = 'pageHeaderContainer' . ($usesAcpUi ? ' pageHeaderContainerIsLogin' : '');
 
     \header('Content-Type: text/html; charset=utf-8');
     ?>
@@ -594,6 +601,7 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
     <link rel="stylesheet" href="<?= \htmlspecialchars(recoveryStubAssetHref($extensionsCss)) ?>">
     <?php endif; ?>
     <style>
+        <?php if (!$usesAcpUi): ?>
         #pageHeaderContainer { height: 100px; }
         #pageHeader { padding: 30px 0; }
         #pageHeaderPanel,
@@ -606,6 +614,7 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
             width: auto;
             max-width: 281px;
         }
+        <?php endif; ?>
         .recovery-auth-step[hidden] { display: none !important; }
         .recovery-log-panel { margin-top: 24px; }
         .recovery-log-panel > summary {
@@ -651,7 +660,7 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
 <body id="tplRecoveryAuth" class="<?= \htmlspecialchars($bodyClass, ENT_QUOTES, 'UTF-8') ?>">
 <a id="top"></a>
 <div id="pageContainer" class="pageContainer acpPageHiddenMenu">
-    <div id="pageHeaderContainer" class="pageHeaderContainer">
+    <div id="pageHeaderContainer" class="<?= \htmlspecialchars($headerContainerClass, ENT_QUOTES, 'UTF-8') ?>">
         <header id="pageHeader" class="pageHeader">
             <div id="pageHeaderPanel" class="pageHeaderPanel">
                 <div class="layoutBoundary">
@@ -659,6 +668,9 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
                         <?php if ($logoHref !== ''): ?>
                         <a href="<?= \htmlspecialchars(recoveryStubGetSiteBaseUrl()) ?>acp/">
                             <img src="<?= \htmlspecialchars($logoHref) ?>" alt="" width="562" height="80" loading="eager" class="pageHeaderLogoLarge">
+                            <?php if ($logoSmallHref !== ''): ?>
+                            <img src="<?= \htmlspecialchars($logoSmallHref) ?>" alt="" width="55" height="30" loading="eager" class="pageHeaderLogoSmall">
+                            <?php endif; ?>
                         </a>
                         <?php endif; ?>
                     </div>
@@ -675,7 +687,11 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
                             <h1 class="contentTitle"><?= \htmlspecialchars($title) ?></h1>
                             <?php if ($wizardProgress !== null): ?>
                             <p class="contentHeaderDescription">
+                                <?php if (!$usesAcpUi): ?>
                                 <progress id="authWizardProgress" value="<?= (int) ($wizardProgress['value'] ?? 1) ?>" max="<?= (int) ($wizardProgress['max'] ?? 3) ?>" style="width:300px"><?= (int) ($wizardProgress['value'] ?? 1) ?>%</progress>
+                                <?php else: ?>
+                                <span id="authWizardProgress" hidden aria-hidden="true" data-value="<?= (int) ($wizardProgress['value'] ?? 1) ?>" data-max="<?= (int) ($wizardProgress['max'] ?? 3) ?>"></span>
+                                <?php endif; ?>
                                 <?php if (($wizardProgress['label'] ?? '') !== ''): ?>
                                 <?= \htmlspecialchars((string) $wizardProgress['label']) ?>
                                 <?php endif; ?>
@@ -856,7 +872,11 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
     ]);
     ?>
     <?php if ($errorReason === null): ?>
+    <?php if (recoveryStubUsesCompiledAcpStyle()): ?>
+    <p id="authAlert" class="warning" hidden role="alert"></p>
+    <?php else: ?>
     <div id="authAlert" class="recovery-auth-alert" hidden role="alert"></div>
+    <?php endif; ?>
     <?php else: ?>
     <?php recoveryStubRenderAuthAlertBox($errorReason); ?>
     <?php endif; ?>
@@ -926,6 +946,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
     (function () {
         var authToken = <?= \json_encode($authHash) ?>;
         var authFileName = <?= \json_encode($authFile) ?>;
+        var usesAcpUi = <?= recoveryStubUsesCompiledAcpStyle() ? 'true' : 'false' ?>;
         var pollInterval = null;
         var pollingActive = false;
         var progress = document.getElementById('authWizardProgress');
@@ -965,8 +986,12 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
                 el.hidden = i + 1 !== n;
             });
             if (progress) {
-                progress.value = String(n);
-                progress.title = Math.round((n / 3) * 100) + '%';
+                if (progress.tagName === 'PROGRESS') {
+                    progress.value = String(n);
+                    progress.title = Math.round((n / 3) * 100) + '%';
+                } else if (progress.dataset) {
+                    progress.dataset.value = String(n);
+                }
             }
             updateProgressLabel(n);
             if (n !== 2 && pollInterval) {
@@ -980,28 +1005,58 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
             return severity === 'info' ? 'circle-info' : 'triangle-exclamation';
         }
 
-        function renderAlertFromDetails(details) {
-            if (!authAlert || !details) {
+        function wcfAlertClass(severity) {
+            if (severity === 'error') { return 'error'; }
+            if (severity === 'info') { return 'info'; }
+            return 'warning';
+        }
+
+        function renderSimpleAlert(severity, title, message, steps) {
+            if (!authAlert) { return; }
+            authAlert.hidden = false;
+            if (usesAcpUi) {
+                authAlert.className = wcfAlertClass(severity);
+                var stepsHtml = '';
+                if (steps && steps.length) {
+                    stepsHtml = '<ol class="recovery-step-list">';
+                    steps.forEach(function (step) {
+                        stepsHtml += '<li>' + step + '</li>';
+                    });
+                    stepsHtml += '</ol>';
+                }
+                authAlert.innerHTML =
+                    '<strong>' + escapeHtml(title || 'Hinweis') + '</strong><br>' +
+                    escapeHtml(message || '') + stepsHtml;
                 return;
             }
-            var severity = details.severity || 'error';
-            authAlert.className = 'recovery-auth-alert recovery-auth-alert--' + severity;
-            authAlert.hidden = false;
             var stepsHtml = '';
-            if (details.steps && details.steps.length) {
+            if (steps && steps.length) {
                 stepsHtml = '<ol class="recovery-auth-alert-steps">';
-                details.steps.forEach(function (step) {
+                steps.forEach(function (step) {
                     stepsHtml += '<li>' + step + '</li>';
                 });
                 stepsHtml += '</ol>';
             }
+            authAlert.className = 'recovery-auth-alert recovery-auth-alert--' + severity;
             authAlert.innerHTML =
                 '<p class="recovery-auth-alert-title">' +
                 '<fa-icon size="16" name="' + severityIcon(severity) + '" solid></fa-icon>' +
-                '<strong>' + escapeHtml(details.title || 'Hinweis') + '</strong></p>' +
-                '<p>' + escapeHtml(details.message || '') + '</p>' +
+                '<strong>' + escapeHtml(title || 'Hinweis') + '</strong></p>' +
+                '<p>' + escapeHtml(message || '') + '</p>' +
                 stepsHtml;
             bootFaIcons(authAlert);
+        }
+
+        function renderAlertFromDetails(details) {
+            if (!authAlert || !details) {
+                return;
+            }
+            renderSimpleAlert(
+                details.severity || 'error',
+                details.title || 'Hinweis',
+                details.message || '',
+                details.steps || []
+            );
         }
 
         function escapeHtml(text) {
@@ -1080,16 +1135,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
                 .catch(function (err) {
                     setButtonState(triggerBtn, 'idle');
                     triggerBtn.disabled = false;
-                    if (authAlert) {
-                        authAlert.className = 'recovery-auth-alert recovery-auth-alert--error';
-                        authAlert.hidden = false;
-                        authAlert.innerHTML =
-                            '<p class="recovery-auth-alert-title">' +
-                            '<fa-icon size="16" name="triangle-exclamation" solid></fa-icon>' +
-                            '<strong>Download fehlgeschlagen</strong></p>' +
-                            '<p>' + escapeHtml(err.message || 'Unbekannter Fehler') + '</p>';
-                        bootFaIcons(authAlert);
-                    }
+                    renderSimpleAlert('error', 'Download fehlgeschlagen', err.message || 'Unbekannter Fehler', []);
                     throw err;
                 });
         }
@@ -1112,15 +1158,13 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
             }
             if (data.details) {
                 renderAlertFromDetails(data.details);
-            } else if (authAlert) {
-                authAlert.className = 'recovery-auth-alert recovery-auth-alert--error';
-                authAlert.hidden = false;
-                authAlert.innerHTML =
-                    '<p class="recovery-auth-alert-title">' +
-                    '<fa-icon size="16" name="triangle-exclamation" solid></fa-icon>' +
-                    '<strong>Prüfung fehlgeschlagen</strong></p>' +
-                    '<p>' + escapeHtml(data.message || 'Auth-Datei noch nicht gültig.') + '</p>';
-                bootFaIcons(authAlert);
+            } else {
+                renderSimpleAlert(
+                    'error',
+                    'Prüfung fehlgeschlagen',
+                    data.message || 'Auth-Datei noch nicht gültig.',
+                    []
+                );
             }
             setButtonState(validateBtn, 'idle');
             if (validateBtn) { validateBtn.disabled = false; }
@@ -2181,9 +2225,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.7.32');
-define('RECOVERY_PACKAGE_VERSION', '2.7.32');
-define('RECOVERY_STUB_INTEGRITY_HASH', '93f293d06221effd9c9c0d9ea5cd55818228ddba7744e40e101e71246abeae40');
+define('RECOVERY_STUB_VERSION', '2.7.33');
+define('RECOVERY_PACKAGE_VERSION', '2.7.33');
+define('RECOVERY_STUB_INTEGRITY_HASH', '8629d7b251ed329bffe697cdb7c39a6db2e947e24e5b86ceb82d23c70ef0e4f6');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
