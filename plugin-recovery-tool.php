@@ -563,6 +563,13 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
         : '';
     $faExtra = $assets['fontAwesomeLocal'] ? '' : ' crossorigin="anonymous" referrerpolicy="no-referrer"';
     $wizardCss = recoveryStubWizardCss();
+    $usesAcpUi = $assets['usesCompiledAcpStyle'];
+    $extensionsCss = '';
+    $recoveryToolRoot = \dirname(__DIR__) . '/recovery-tool/lib/Recovery/Ui/recovery-acp-extensions.css';
+    if (\is_readable($recoveryToolRoot)) {
+        $extensionsCss = 'recovery-tool/lib/Recovery/Ui/recovery-acp-extensions.css';
+    }
+    $bodyClass = 'wcfAcp' . ($usesAcpUi ? ' recovery-uses-acp-ui' : '');
 
     \header('Content-Type: text/html; charset=utf-8');
     ?>
@@ -583,10 +590,22 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
     <?php recoveryStubRenderWoltLabHeadGlobals(); ?>
     <?php recoveryStubRenderFaIconStyles(); ?>
     <?php recoveryStubRenderWebComponentsScript(); ?>
+    <?php if ($extensionsCss !== ''): ?>
+    <link rel="stylesheet" href="<?= \htmlspecialchars(recoveryStubAssetHref($extensionsCss)) ?>">
+    <?php endif; ?>
     <style>
         #pageHeaderContainer { height: 100px; }
-        #pageHeader { padding: 30px 20px; }
-        .content { margin: 0 auto; max-width: 1120px; }
+        #pageHeader { padding: 30px 0; }
+        #pageHeaderPanel,
+        #pageHeaderPanel > .layoutBoundary {
+            width: 100%;
+            max-width: none;
+        }
+        #pageHeaderLogo img.pageHeaderLogoLarge {
+            height: 40px;
+            width: auto;
+            max-width: 281px;
+        }
         .recovery-auth-step[hidden] { display: none !important; }
         .recovery-log-panel { margin-top: 24px; }
         .recovery-log-panel > summary {
@@ -629,16 +648,18 @@ function recoveryStubRenderPageStart(string $title, string $subtitle = '', ?arra
     <style><?= $wizardCss ?></style>
     <?php endif; ?>
 </head>
-<body id="tplRecoveryAuth" class="wcfAcp">
+<body id="tplRecoveryAuth" class="<?= \htmlspecialchars($bodyClass, ENT_QUOTES, 'UTF-8') ?>">
 <a id="top"></a>
 <div id="pageContainer" class="pageContainer acpPageHiddenMenu">
     <div id="pageHeaderContainer" class="pageHeaderContainer">
         <header id="pageHeader" class="pageHeader">
-            <div id="pageHeaderFacade" class="pageHeaderFacade">
+            <div id="pageHeaderPanel" class="pageHeaderPanel">
                 <div class="layoutBoundary">
                     <div id="pageHeaderLogo" class="pageHeaderLogo">
                         <?php if ($logoHref !== ''): ?>
-                        <img src="<?= \htmlspecialchars($logoHref) ?>" alt="" style="height:40px;width:281px;">
+                        <a href="<?= \htmlspecialchars(recoveryStubGetSiteBaseUrl()) ?>acp/">
+                            <img src="<?= \htmlspecialchars($logoHref) ?>" alt="" width="562" height="80" loading="eager" class="pageHeaderLogoLarge">
+                        </a>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -2139,9 +2160,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.7.29');
-define('RECOVERY_PACKAGE_VERSION', '2.7.29');
-define('RECOVERY_STUB_INTEGRITY_HASH', '6542028eaa6b3a0cfef7677b34dc14afb58f4774419fdf62268ca67a39f0869c');
+define('RECOVERY_STUB_VERSION', '2.7.30');
+define('RECOVERY_PACKAGE_VERSION', '2.7.30');
+define('RECOVERY_STUB_INTEGRITY_HASH', 'a80396c0df8851d4acfd33c554828f29d70a5ab87622f1a0f624d0bc9d3581de');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
