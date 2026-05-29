@@ -12,6 +12,16 @@ function recoveryStubGetSiteBaseUrl(): string
     return $scheme . '://' . $host . ($base === '' || $base === '.' ? '' : $base) . '/';
 }
 
+function recoveryStubSelfScript(): string
+{
+    return \basename($_SERVER['SCRIPT_NAME'] ?? 'plugin-recovery-tool.php');
+}
+
+function recoveryStubContinuationUrl(string $authHash): string
+{
+    return recoveryStubSelfScript() . '?t=' . \rawurlencode($authHash);
+}
+
 /**
  * @return list<string>
  */
@@ -619,6 +629,18 @@ function recoveryStubAcpLayoutCss(): string
     box-sizing: border-box;
 }
 
+#tplRecoveryAuth.recovery-stub-acp-page #auth-step-3 .success {
+    margin: 0 0 20px;
+}
+
+#tplRecoveryAuth.recovery-stub-acp-page #auth-step-3 .formSubmit {
+    margin: 0;
+    padding: 0;
+    clear: both;
+    position: relative;
+    z-index: 1;
+}
+
 @media (max-width: 720px) {
     #tplRecoveryTool,
     #tplRecoveryAuth.recovery-stub-acp-page {
@@ -663,9 +685,6 @@ function recoveryStubRenderPageStart(
     }
     $bodyId = $layout === 'acp' ? 'tplRecoveryTool' : 'tplRecoveryAuth';
     $bodyClass = 'wcfAcp';
-    if ($layout === 'auth' && $hasAcpStylesheet) {
-        $bodyClass .= ' acpAuthFlow pageHeaderContainerIsLogin';
-    }
     if ($layout === 'acp') {
         $bodyClass .= ' recovery-stub-acp-page';
     }
@@ -673,9 +692,6 @@ function recoveryStubRenderPageStart(
         $bodyClass .= ' recovery-uses-acp-ui';
     }
     $headerContainerClass = 'pageHeaderContainer';
-    if ($layout === 'auth' && $hasAcpStylesheet) {
-        $headerContainerClass .= ' pageHeaderContainerIsLogin';
-    }
     $pageContainerClass = $layout === 'acp' ? 'pageContainer' : 'pageContainer acpPageHiddenMenu';
     $acpLayoutCss = $layout === 'acp' ? recoveryStubAcpLayoutCss() : '';
 
@@ -735,6 +751,15 @@ function recoveryStubRenderPageStart(
         }
         #tplRecoveryAuth form#recovery-auth-wizard .formSubmit { margin-top: 0; }
         #tplRecoveryAuth form#recovery-auth-wizard .formSubmit .button { margin-right: 8px; }
+        #tplRecoveryAuth #auth-step-3 .success { margin: 0 0 20px; }
+        #tplRecoveryAuth #auth-step-3 .formSubmit {
+            margin: 0;
+            padding: 0;
+            clear: both;
+            position: relative;
+            z-index: 1;
+        }
+        #tplRecoveryAuth #auth-step-3 .formSubmit .button { margin-right: 0; }
         #tplRecoveryAuth .error ol,
         #tplRecoveryAuth .warning ol,
         #tplRecoveryAuth .info ol {
@@ -993,11 +1018,14 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
     $authFile = RECOVERY_AUTH_FILENAME;
     $initialStep = recoveryStubGetAuthWizardStep($authHash);
     $stepLabels = ['Schritt 1 von 3', 'Schritt 2 von 3', 'Schritt 3 von 3'];
+    $assets = recoveryStubGetSetupAssets();
+    $layout = ($assets['stylesheets'] ?? []) !== [] ? 'acp' : 'auth';
+    $continueUrl = recoveryStubContinuationUrl($authHash);
     recoveryStubRenderPageStart('Plugin Recovery Tool', '', [
         'value' => $initialStep,
         'max' => 3,
         'label' => $stepLabels[$initialStep - 1],
-    ]);
+    ], $layout);
     ?>
     <?php if ($errorReason === null): ?>
     <div id="authAlert" class="warning" hidden role="alert"></div>
@@ -1030,16 +1058,17 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
             </div>
         </div>
 
-        <div class="recovery-auth-step" id="auth-step-3" hidden>
-            <div class="success" role="status">
-                <p><?= recoveryStubAuthAlertIcon('success') ?>
-                    <span><strong>Authentifizierung erfolgreich</strong> — die Auth-Datei wurde erkannt.</span></p>
-            </div>
-            <div class="formSubmit">
-                <a href="?t=<?= \htmlspecialchars($authHash) ?>" class="button buttonPrimary"><?= recoveryStubFaIcon(16, 'rocket', true) ?> Recovery Tool starten</a>
-            </div>
-        </div>
     </form>
+
+    <div class="recovery-auth-step" id="auth-step-3" hidden>
+        <div class="success" role="status">
+            <p><?= recoveryStubAuthAlertIcon('success') ?>
+                <span><strong>Authentifizierung erfolgreich</strong> — die Auth-Datei wurde erkannt.</span></p>
+        </div>
+        <div class="formSubmit">
+            <a href="<?= \htmlspecialchars($continueUrl) ?>" class="button buttonPrimary" id="startRecoveryBtn"><?= recoveryStubFaIcon(16, 'rocket', true) ?> Recovery Tool starten</a>
+        </div>
+    </div>
 
     <p class="warning"><?= recoveryStubFaIcon(16, 'shield-halved', true) ?> <strong>Sicherheitshinweis:</strong>
     Löschen Sie <code>plugin-recovery-tool.php</code> und <code><?= \htmlspecialchars($authFile) ?></code> nach der Verwendung.</p>
@@ -1047,6 +1076,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
     <script>
     (function () {
         var authToken = <?= \json_encode($authHash) ?>;
+        var continueUrl = <?= \json_encode($continueUrl) ?>;
         var authFileName = <?= \json_encode($authFile) ?>;
         var pollInterval = null;
         var pollingActive = false;
@@ -1060,6 +1090,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
         var downloadBtn = document.getElementById('downloadBtn');
         var validateBtn = document.getElementById('validateBtn');
         var redownloadBtn = document.getElementById('redownloadBtn');
+        var startRecoveryBtn = document.getElementById('startRecoveryBtn');
         var authAlert = document.getElementById('authAlert');
 
         var downloadBtnLabels = {
@@ -1264,6 +1295,9 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
                 setButtonState(validateBtn, 'success');
                 if (validateBtn) { validateBtn.disabled = true; }
                 goToStep(3);
+                if (startRecoveryBtn && continueUrl) {
+                    startRecoveryBtn.setAttribute('href', continueUrl);
+                }
                 return;
             }
             if (data.details) {
@@ -1305,6 +1339,7 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
 
         goToStep(<?= (int) $initialStep ?>);
         bootFaIcons(document.getElementById('recovery-auth-wizard'));
+        bootFaIcons(document.getElementById('auth-step-3'));
         bootFaIcons(document.querySelector('p.warning'));
 
         if (downloadBtn) {
@@ -1327,6 +1362,17 @@ function recoveryStubRenderAuthWizard(string $authHash, ?string $errorMessage = 
                 setButtonState(validateBtn, 'idle');
                 if (validateBtn) { validateBtn.disabled = false; }
                 downloadAuthFile({ goToStep2: false, clearStatus: true, triggerBtn: redownloadBtn });
+            });
+        }
+
+        if (startRecoveryBtn) {
+            startRecoveryBtn.addEventListener('click', function (e) {
+                var target = startRecoveryBtn.getAttribute('href') || continueUrl;
+                if (!target) {
+                    return;
+                }
+                e.preventDefault();
+                window.location.assign(target);
             });
         }
 
@@ -2353,9 +2399,9 @@ function recoveryStubCleanupAuthState(): void
  * @version 2.2.1
  */
 
-define('RECOVERY_STUB_VERSION', '2.7.42');
-define('RECOVERY_PACKAGE_VERSION', '2.7.42');
-define('RECOVERY_STUB_INTEGRITY_HASH', '6ddce7bb0140739b6c3dca72680baf6e23b8d5fd36ed04bb94bac450a9a2c2e8');
+define('RECOVERY_STUB_VERSION', '2.7.44');
+define('RECOVERY_PACKAGE_VERSION', '2.7.44');
+define('RECOVERY_STUB_INTEGRITY_HASH', '65f86a7ba5825d84223e339242245d1271dcdfc748ed21713c383243480132d2');
 define('RECOVERY_MIN_PHP_VERSION', '8.1.0');
 define('RECOVERY_GITHUB_REPO', 'benjarogit/sc-woltlab-plugin-recovery');
 define('RECOVERY_AUTH_FILENAME', 'plugin-recovery-auth.php');
