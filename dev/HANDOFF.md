@@ -1,5 +1,15 @@
 # Übergabe: Plugin Recovery
 
+## Auslagerung gesichert und SWPM-Kopie abgelöst – 22. November 2026
+
+Der geprüfte Quellenstand `6488cc7544d252b4b8d394750d8c040b418a7b10` ist auf `codex/source-extraction-20261122` normal gepusht: [Recovery-Draft-PR1](https://github.com/benjarogit/sc-woltlab-plugin-recovery/pull/1). Originaler Master und importierte Quellenhistorie bleiben erhalten. Anschließend wurde die alte SWPM-Quellenkopie einschließlich ignorierter lokaler Buildausgaben reversibel in einen privaten Workspace-Checkpoint verschoben. Alle53 ursprünglichen Dateien wurden vorher und nachher hashgeprüft.
+
+Die53 Quellenlöschungen und aktualisierten SWPM-Verweise sind separat als `3799e903a8522744a38be65126cdce5050cfad45` auf dem SWPM-Entwicklungsbranch gepusht: [SWPM-Draft-PR5](https://github.com/benjarogit/simple-woltlab-plugin-manager/pull/5). Nach tatsächlichem Entfernen des alten Verzeichnisses bestehen die13 eigenständigen Offline-Regressionen erneut. Dieser Checkout benötigt die alte SWPM-Kopie nicht.
+
+Publisher weiterhin standardmäßig nur lokale Prüfung und Plan; keine automatische Veröffentlichung, kein Tag/Main-/Master-Merge, kein Force-Push und keine Live-Reparatur. WSC Lokals offizielles WoltLab-Recovery ist unverändert ein separates Werkzeug. GitHub-CI und externe Reviews sind eigene noch nachzuweisende Gates.
+
+Die folgenden Einträge dokumentieren frühere Arbeitsschritte; Aussagen über noch ausstehende Commits oder die alte SWPM-Kopie sind historisch.
+
 Stand: 22. November 2026. Quellen ausgelagert und eigenständigen Build/Offline-Regressionen geprüft. Keine Live-Reparatur und kein Release dieser Runde.
 
 ## Quellenauslagerung – 22. November 2026
