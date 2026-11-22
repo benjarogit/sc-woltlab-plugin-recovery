@@ -15,8 +15,13 @@ if [[ -z "$PHP_BIN" ]]; then
 fi
 
 if [[ -z "$PHP_BIN" ]]; then
-  echo "WARN: php nicht im PATH — Syntax-Check übersprungen (PHP_BIN setzen)."
-  exit 0
+  echo "BLOCKED: php nicht im PATH — Syntax-Check nicht ausgeführt (PHP_BIN setzen)." >&2
+  exit 2
+fi
+
+if ! command -v "$PHP_BIN" >/dev/null 2>&1; then
+  echo "BLOCKED: PHP_BIN ist nicht ausführbar; kein Syntax-PASS." >&2
+  exit 2
 fi
 
 check_dir() {

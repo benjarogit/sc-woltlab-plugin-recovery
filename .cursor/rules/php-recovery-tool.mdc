@@ -9,7 +9,7 @@ alwaysApply: false
 ## Pflicht nach jeder PHP-Änderung
 
 ```bash
-cd tools/woltlab-plugin-recovery
+cd sc-woltlab-plugin-recovery
 ./dev/validate-php-syntax.sh
 # prüft stub/ und recovery-src/ (alle *.php)
 ```

@@ -1,0 +1,13 @@
+# WoltLab Plugin Recovery
+
+- Eigenständiges Quellen- und Auslieferungsrepository für das eigene Plugin-Recovery-Werkzeug. WSC Lokals integriertes offizielles WoltLab-Recovery ist ein anderes Werkzeug.
+- Einstieg: `README.md`, `README.en.md`, `dev/README.md`, `dev/HANDOFF.md`, `.cursor/rules/` und `docs/source-import/manifest.json`.
+- Bearbeitbare Quellen sind `stub/` und `recovery-src/`; Entwicklerwerkzeuge unter `dev/`, Regressionen unter `tests/`. `dist/` ist erzeugte lokale Ausgabe. Die historisch veröffentlichte Root-Datei `plugin-recovery-tool.php` bleibt erhalten; sie ist keine zweite Entwicklungsquelle und wird nicht automatisch synchronisiert.
+- Vor Änderungen Git-Status prüfen und vorhandene Änderungen erhalten. Quellen und Metadaten nicht über fremde Projekte oder übergeordnete `.env` beziehen.
+- Build: `bash dev/build-release.sh` verwendet die vorhandene Paketversion aus `recovery-src/version.php`; optional eine ausdrücklich gewählte Version. Im Rahmen der Quellenauslagerung keine Versionsnummer erhöhen. Die alten Quellen enthalten unterschiedliche Stub-/Manifestversionen; ein normalisierter Prüfbuild ändert ausschließlich erzeugte Dateien.
+- Nach PHP-Änderungen `bash dev/validate-php-syntax.sh`. Fehlendes PHP ist BLOCKED mit Fehlerstatus, kein übersprungener PASS. Regressionen: `python3 -m unittest discover -s tests -p 'test_*.py'`. Nach Shell-Änderungen Bash-Syntax und Shellcheck prüfen.
+- Build, Deployment und Veröffentlichung sind getrennte Schritte. `dev/publish-github-release.sh VERSION` validiert lokal und zeigt nur den Plan. Nur `--publish VERSION` darf nach eigener Nutzerfreigabe GitHub ansprechen. Publisher baut, committet, taggt oder pusht nicht selbst und überschreibt keine bestehenden Releases.
+- Keine Zugangsdaten, Auth-Dateien, `.env`, Zertifikate, Dumps, Sitzungen oder lokale WoltLab-Installationen ausgeben oder versionieren. Für Tests ausschließlich selbst erzeugte Dateien/Fixtures verwenden.
+- Keine direkten WoltLab-Core-Änderungen. Vor produktspezifischen Änderungen passende lokale WoltLab-Dokumentation und Core-Muster lesen; keine APIs erfinden.
+- Keine Live-Reparatur, Deinstallation oder absichtliche Beschädigung von Benjaro. Recovery-Abnahme nur auf gesondert autorisiertem, verifiziertem Ziel nach vollständig abgeschlossenem Datei-/DB-Snapshot. Ein Offline-Build ist keine Wiederherstellungsfreigabe für WoltLab 6.3.
+- Keine automatischen Commits, Pushes, Releases, Force-Pushes oder Main-/Master-Merges. Importhistorie nur auf dem beauftragten Entwicklungsbranch erhalten. Handoff mit Änderungen, Tests, Einschränkungen und nächstem Schritt fortschreiben.

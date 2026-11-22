@@ -2,8 +2,42 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${1:-2.0.0}"
-DIST="$ROOT/dist"
+if [[ $# -gt 1 ]]; then
+  echo "Usage: $0 [X.Y.Z] (local build only)" >&2
+  exit 2
+fi
+VERSION="${1:-}"
+if [[ -z "$VERSION" ]]; then
+  VERSION="$(python3 - "$ROOT/recovery-src/version.php" <<'PY_VERSION'
+import re, sys
+from pathlib import Path
+match = re.search(r"define\('RECOVERY_PACKAGE_VERSION',\s*'([^']+)'\)", Path(sys.argv[1]).read_text())
+if not match:
+    raise SystemExit('Cannot determine existing package version; specify X.Y.Z')
+print(match[1])
+PY_VERSION
+)"
+fi
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Invalid version; expected X.Y.Z" >&2
+  exit 2
+fi
+DIST="${RECOVERY_DIST_DIR:-$ROOT/dist}"
+python3 - "$ROOT" "$DIST" <<'PY_OUTPUT'
+from pathlib import Path
+import sys
+root, out = (Path(p).resolve() for p in sys.argv[1:])
+if root == out or root.is_relative_to(out) or (out.is_relative_to(root) and not out.is_relative_to(root / 'dist')):
+    raise SystemExit('Build output must not overwrite source or a source ancestor')
+if (out / 'recovery-tool').is_symlink():
+    raise SystemExit('Refusing symlinked package staging directory')
+for folder in ['stub', 'recovery-src']:
+    for item in (root / folder).rglob('*'):
+        if item.is_symlink():
+            raise SystemExit('Source symlinks are not permitted in a release build')
+        if item.name == '.env' or item.name.startswith('.env.') or item.name == 'plugin-recovery-auth.php':
+            raise SystemExit('Runtime or secret file in source tree')
+PY_OUTPUT
 PKG="$DIST/recovery-tool"
 
 echo "==> Recovery Release v${VERSION}"
@@ -40,7 +74,22 @@ PHP
 # tar.gz
 rm -f "$DIST/recovery-${VERSION}.tar.gz"
 # Dateien direkt im Archiv-Root (ohne ./ — PharData kann „.“ nicht entpacken)
-( cd "$PKG" && tar -czf "$DIST/recovery-${VERSION}.tar.gz" * )
+python3 - "$PKG" "$DIST/recovery-${VERSION}.tar.gz" <<'PY_ARCHIVE'
+import gzip, sys, tarfile
+from pathlib import Path
+root, output = map(Path, sys.argv[1:])
+def normalize(info):
+    info.uid = info.gid = 0
+    info.uname = info.gname = ''
+    info.mtime = 0
+    info.mode = 0o755 if info.isdir() else 0o644
+    return info
+with output.open('wb') as stream:
+    with gzip.GzipFile(filename='', mode='wb', fileobj=stream, mtime=0) as compressed:
+        with tarfile.open(fileobj=compressed, mode='w') as archive:
+            for path in sorted(root.rglob('*')):
+                archive.add(path, arcname=path.relative_to(root).as_posix(), recursive=False, filter=normalize)
+PY_ARCHIVE
 
 # Stub: Shell + Logger + Auth + CSS inline → eine Release-Datei
 STUB_OUT="$DIST/plugin-recovery-tool.php"
@@ -157,6 +206,23 @@ out.write_text(merged, encoding='utf-8')
 print('stub merged', out, 'bytes', out.stat().st_size, 'integrity', integrity[:16] + '…')
 PY
 
-echo "==> dist/"
+python3 - "$ROOT" "$DIST" "$VERSION" <<'PY_MANIFEST'
+import hashlib, json, sys
+from pathlib import Path
+root, dist, version = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+digest = hashlib.sha256()
+for folder in ['stub', 'recovery-src']:
+    for path in sorted((root / folder).rglob('*')):
+        if path.is_file():
+            digest.update(path.relative_to(root).as_posix().encode() + b'\0')
+            digest.update(path.read_bytes())
+artifacts = {}
+for name in ['plugin-recovery-tool.php', 'recovery-' + version + '.tar.gz']:
+    artifacts[name] = hashlib.sha256((dist / name).read_bytes()).hexdigest()
+(dist / 'build-manifest.json').write_text(json.dumps({'schema': 1, 'version': version,
+    'source_sha256': digest.hexdigest(), 'builder_sha256': hashlib.sha256((root / 'dev/build-release.sh').read_bytes()).hexdigest(), 'artifacts': artifacts}, indent=2) + '\n')
+PY_MANIFEST
+
+echo "==> local build output (no commit, push or release)"
 ls -la "$DIST/recovery-${VERSION}.tar.gz" "$STUB_OUT"
 echo "OK"

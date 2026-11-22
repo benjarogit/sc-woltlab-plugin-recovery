@@ -121,3 +121,7 @@ Current version and release notes: [Releases](https://github.com/benjarogit/sc-w
 ## License
 
 MIT — Copyright (c) 2025 Sunny C.
+
+## Source and development
+
+The development branch also contains `stub/`, `recovery-src/`, `dev/` and offline regression tests. See the [development guide](dev/README.md), [repository instructions](AGENTS.md) and [source provenance](docs/source-import/manifest.json). The existing public history is preserved. Local builds and actual publication are separate operations; the publisher defaults to a local plan. This is not a new version or a recovery certification.

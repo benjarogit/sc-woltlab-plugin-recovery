@@ -37,4 +37,4 @@ Custom-Primitives: `recovery-chip`, `recovery-panel`, `recovery-status-feed`, `r
 
 ## Release
 
-`./dev/validate-php-syntax.sh` → `./dev/build-release.sh X.Y.Z` → `./dev/publish-github-release.sh X.Y.Z`
+`./dev/validate-php-syntax.sh` → `./dev/build-release.sh X.Y.Z` → `./dev/publish-github-release.sh X.Y.Z` (nur lokale Prüfung/Vorschau). Tatsächliche Veröffentlichung separat freigeben; erst dann `./dev/publish-github-release.sh --publish X.Y.Z`. Kein automatischer Commit, Tag, Push oder Überschreiben bestehender Release-Assets.

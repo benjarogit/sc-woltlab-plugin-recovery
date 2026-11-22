@@ -1,0 +1,9 @@
+/dist/
+/recovery-tool/
+/plugin-recovery-auth.php
+/plugin-recovery.log
+.env
+.env.*
+__pycache__/
+*.pyc
+.cache/
