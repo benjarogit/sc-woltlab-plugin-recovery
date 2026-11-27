@@ -1,0 +1,291 @@
+{
+  "schema": 1,
+  "source_repository": "https://github.com/benjarogit/simple-woltlab-plugin-manager",
+  "source_head": "d04403c769d020f0ae5062455dc3fc3e4359ccfd",
+  "source_prefix": "tools/woltlab-plugin-recovery",
+  "existing_public_master": "1e44c26d3657b7c781c3d8430b054a1ff95cb91d",
+  "imported_history_head": "5e1260c4666724222bfb0732ed43887b9295374f",
+  "history_method": "git subtree split in disposable local manager clone; original author/date retained",
+  "history_mapping": [
+    {
+      "manager_commit": "fb36ec1824f417467f38804c75f04975045a73f1",
+      "recovery_commit": "bd2d276c43200887944f53a0d5fe77b6a1403ace"
+    },
+    {
+      "manager_commit": "24b2c9e9fdf6cb848a1cfe9d030f071eecbf62fa",
+      "recovery_commit": "8c239c0f81ad9101c16c263b85a5ee6b1c2c64ab"
+    },
+    {
+      "manager_commit": "d04403c769d020f0ae5062455dc3fc3e4359ccfd",
+      "recovery_commit": "5e1260c4666724222bfb0732ed43887b9295374f"
+    }
+  ],
+  "files": [
+    {
+      "source": ".cursor/plans/acp-stylesheet-recovery.plan.md",
+      "destination": ".cursor/plans/acp-stylesheet-recovery.plan.md",
+      "sha256": "e7f41c0c7a5f48549a0e7af160f4692c70a2c14601a70a5691c016e1bd9a6445"
+    },
+    {
+      "source": ".cursor/rules/php-recovery-tool.mdc",
+      "destination": ".cursor/rules/php-recovery-tool.mdc",
+      "sha256": "5c97e9e6207b8b1f48200c19c97a166d50e90085123525e752614bc1878053ea"
+    },
+    {
+      "source": ".cursor/rules/recovery-ui-design-system.mdc",
+      "destination": ".cursor/rules/recovery-ui-design-system.mdc",
+      "sha256": "d9514117be73ac354ae091ab24611de1767662fe5bb5cdf4dc9952369460432f"
+    },
+    {
+      "source": "README.en.md",
+      "destination": "docs/source-import/swpm-README.en.md",
+      "sha256": "ece1c82b61043d6b580b852e5d93a0ac2fc533da5ac7a089ad3dfd7bc231eab4"
+    },
+    {
+      "source": "README.md",
+      "destination": "docs/source-import/swpm-README.md",
+      "sha256": "24819588f55bbe1c9c49366ceddf5793f776f4b2bf7515b43037add985f657f5"
+    },
+    {
+      "source": "dev/HANDOFF.md",
+      "destination": "dev/HANDOFF.md",
+      "sha256": "1148224c94ed72dd94d81088e41f2b6a2e979598c33f42f07bbc71176ae1c2e6"
+    },
+    {
+      "source": "dev/README.md",
+      "destination": "dev/README.md",
+      "sha256": "58c62c43e2982fa13a5435a2a84c3a0ca47717bb5f0ea75adab4cf0ad40f6318"
+    },
+    {
+      "source": "dev/build-release.sh",
+      "destination": "dev/build-release.sh",
+      "sha256": "d27ce65e88e6a7e877778e08336e278dc8a36be59e1d0045fbb410f8c02777f2"
+    },
+    {
+      "source": "dev/debug_invoke_recovery.php",
+      "destination": "dev/debug_invoke_recovery.php",
+      "sha256": "8179cc2a8161ff4ed07d9f868f01cdee49c4f40b95c4e8392cdf8e25738a31a9"
+    },
+    {
+      "source": "dev/deploy-recovery.sh",
+      "destination": "dev/deploy-recovery.sh",
+      "sha256": "6201f0247511243aa8df29819c3340eb657dff4f1b63e266d77a119767bf3857"
+    },
+    {
+      "source": "dev/extract-package-app.sh",
+      "destination": "dev/extract-package-app.sh",
+      "sha256": "079d207fe0a6b241b32f324252e33fc79c4081cb27e4e1c75f8e6524d4b207d0"
+    },
+    {
+      "source": "dev/legacy-monolith.php",
+      "destination": "dev/legacy-monolith.php",
+      "sha256": "4d31aa92d58b36c1a23f60e2acbacc32ae5eb420f6cf86c23bac9c12633771e1"
+    },
+    {
+      "source": "dev/publish-github-release.sh",
+      "destination": "dev/publish-github-release.sh",
+      "sha256": "c3e9f2238a96fb808035b071b7a8bb858e51c65510e003e4fefa80f01ee004e0"
+    },
+    {
+      "source": "dev/split-modes.sh",
+      "destination": "dev/split-modes.sh",
+      "sha256": "a143215a60ee26a22f2fda1a55cceb2034927750d047f97ca2b5f82505d34674"
+    },
+    {
+      "source": "dev/validate-php-syntax.sh",
+      "destination": "dev/validate-php-syntax.sh",
+      "sha256": "0314ccac97e663e7a89ad985ddc5dd187037b624770c83ef7fcfd72d53364455"
+    },
+    {
+      "source": "recovery-src/app.php",
+      "destination": "recovery-src/app.php",
+      "sha256": "1d12e0ccd4fa89533f3709a30418fcf53a4352b08fe2974500def484168fae92"
+    },
+    {
+      "source": "recovery-src/bootstrap.php",
+      "destination": "recovery-src/bootstrap.php",
+      "sha256": "e9da2d030c11a62c861de5953e42f45adb2ade9380d9b940ccf12e5588e4ead1"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Bootstrap/Database.php",
+      "destination": "recovery-src/lib/Recovery/Bootstrap/Database.php",
+      "sha256": "99a55d508a558786e00c1f17552bfcbfe357ab9167c1b5b82d9ebde15fc96493"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Constants.php",
+      "destination": "recovery-src/lib/Recovery/Constants.php",
+      "sha256": "8777c8f378198b982a7211c22fe4ee24b6ecd9300fabf8589cc4c32aa5a6b0c6"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Log/RecoveryLogger.php",
+      "destination": "recovery-src/lib/Recovery/Log/RecoveryLogger.php",
+      "sha256": "314b46fe0dbb112746f9a9223903213a8d3937881ec8dfae1217ae726ce7cfe0"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Modes/acp_repair.php",
+      "destination": "recovery-src/lib/Recovery/Modes/acp_repair.php",
+      "sha256": "e9ddc75a4491965308dd6373496fb555a63f55c7fc1430c1c20f16c51c362066"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Modes/backup_guide.php",
+      "destination": "recovery-src/lib/Recovery/Modes/backup_guide.php",
+      "sha256": "400d28c8f10bdf3a2bb040179b57f375513e50074684c4dbe42b5eb1c23d708e"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Modes/cache_clear.php",
+      "destination": "recovery-src/lib/Recovery/Modes/cache_clear.php",
+      "sha256": "5f6de7a50b5e5a076d637f7a0001efa30b787e8de7cfd4e4fea3c43bb9867898"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Modes/directory_structure.php",
+      "destination": "recovery-src/lib/Recovery/Modes/directory_structure.php",
+      "sha256": "8e4371b51997c4f6329b09540ebd18a27d537fcef0530aedd0bf1f4e6be55825"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Modes/package_file_repair.php",
+      "destination": "recovery-src/lib/Recovery/Modes/package_file_repair.php",
+      "sha256": "7a6d6675f1e602dd90f9e89349227f83ac24de49478b3d2006b4aa2a78489f1f"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Modes/package_list_repair.php",
+      "destination": "recovery-src/lib/Recovery/Modes/package_list_repair.php",
+      "sha256": "e8654b2f29b205ce1c6ab7e32713c313111ce47508dd352651eb7998b627c5bd"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Modes/plugin_uninstall.php",
+      "destination": "recovery-src/lib/Recovery/Modes/plugin_uninstall.php",
+      "sha256": "07192661563ec5b38a7c8a5c0dfd5487a2189802e92a03edae050484891a090c"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Modes/recovery_wizard.php",
+      "destination": "recovery-src/lib/Recovery/Modes/recovery_wizard.php",
+      "sha256": "a9a06ebd7777e27c84dc985a8195142f6206f5ce6c00def896e51df649469f16"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Modes/selection.php",
+      "destination": "recovery-src/lib/Recovery/Modes/selection.php",
+      "sha256": "680b04edd908f22d2122a1a0877cd9de2fc87781ce29384e63edf1417d0a9f5e"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Modes/system_check.php",
+      "destination": "recovery-src/lib/Recovery/Modes/system_check.php",
+      "sha256": "04f22ba64ce7a0d15f5bec712ac99044df91bddac9a66af3ac2d7eef3457ad76"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Modes/user_management.php",
+      "destination": "recovery-src/lib/Recovery/Modes/user_management.php",
+      "sha256": "0a13aca0d7cb1f34ea2d7b3f2f7b89581eff273463a06a972663ff982aeb6727"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Ui/AcpLayout.php",
+      "destination": "recovery-src/lib/Recovery/Ui/AcpLayout.php",
+      "sha256": "4c8bbfe200090be74c93c0a2157b94cd25ffb2bed4e5512238bad0107596a469"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Ui/PageLayout.php",
+      "destination": "recovery-src/lib/Recovery/Ui/PageLayout.php",
+      "sha256": "9d535980d701478660b4d6758044312f0e2f256efdd89f22be29ed2962e9af14"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Ui/RecoveryAcpMarkup.php",
+      "destination": "recovery-src/lib/Recovery/Ui/RecoveryAcpMarkup.php",
+      "sha256": "7d0a18995d89b4316a107470f4b8df1ef58d839575da34e973e4a0e199cb3896"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Ui/RecoveryIcons.php",
+      "destination": "recovery-src/lib/Recovery/Ui/RecoveryIcons.php",
+      "sha256": "ee50f7ac8275e0913b6a86aeb9c1babf0ab096676f9df9391352837dadbafbc9"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Ui/RecoveryUi.php",
+      "destination": "recovery-src/lib/Recovery/Ui/RecoveryUi.php",
+      "sha256": "ad20b74d7b3a6823c99f22111b5bc9819b599d78246def56989e593ebcb6968b"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Ui/SetupAssets.php",
+      "destination": "recovery-src/lib/Recovery/Ui/SetupAssets.php",
+      "sha256": "3e249dfb4ce3b4b5bcd96920f760ecc30c023c977107fb6930927e5a34d5349c"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Ui/recovery-acp-extensions.css",
+      "destination": "recovery-src/lib/Recovery/Ui/recovery-acp-extensions.css",
+      "sha256": "ca71f615c93dbd19d774b9b3eb5fff28e29b58fdec33673e8143dd4d6f9975a3"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Ui/recovery-acp-layout.css",
+      "destination": "recovery-src/lib/Recovery/Ui/recovery-acp-layout.css",
+      "sha256": "4989f666e545b4685aa07686cfafcb3af70482fb393a51782d343bc8671d6e8e"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Ui/recovery-acp-menu.js",
+      "destination": "recovery-src/lib/Recovery/Ui/recovery-acp-menu.js",
+      "sha256": "cb0828b5ed908551cbe66f8cbba3ce7c8455610ea3322bf34ab91c1dee3be4ec"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Ui/recovery-acp-native.css",
+      "destination": "recovery-src/lib/Recovery/Ui/recovery-acp-native.css",
+      "sha256": "0ddd66482ebe5e36d716c43fd7adef90f961f1b3f209879d14874cc7ba4cb386"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/Ui/recovery-wcfsetup-dark.css",
+      "destination": "recovery-src/lib/Recovery/Ui/recovery-wcfsetup-dark.css",
+      "sha256": "0354ba65b020fc91abec1c4f7e37d5f56e115a4083051a8cc6b186c0299bebaa"
+    },
+    {
+      "source": "recovery-src/lib/Recovery/router.php",
+      "destination": "recovery-src/lib/Recovery/router.php",
+      "sha256": "55a2e2f655a535106f75784731fe3fd09a6ff453777afba5b98f2ae3c6a26f61"
+    },
+    {
+      "source": "recovery-src/manifest.json",
+      "destination": "recovery-src/manifest.json",
+      "sha256": "85eaaa3db7bca7825a131cceb6e0e4bc0dc1358cf2e113d202d5fdf0e8adc69f"
+    },
+    {
+      "source": "recovery-src/paths.php",
+      "destination": "recovery-src/paths.php",
+      "sha256": "5d56b2a3d56177ef06b6f04e934d297f10962f0840962e36bd73bacea6057a3e"
+    },
+    {
+      "source": "recovery-src/version.php",
+      "destination": "recovery-src/version.php",
+      "sha256": "9ace3e385ac8c9898b43a76943bea1419c5461ce9b143986ab98a7ed4218abd0"
+    },
+    {
+      "source": "stub/plugin-recovery-tool.php",
+      "destination": "stub/plugin-recovery-tool.php",
+      "sha256": "32a13acdb4b9f1f98d1b10f270ec9dff1663cbb26300904e5db5b8e4335a580c"
+    },
+    {
+      "source": "stub/recovery-acp-layout.css",
+      "destination": "stub/recovery-acp-layout.css",
+      "sha256": "067f5bc1119c685caabbdaddfd846571ed1b7c7d91daed04e5f134e472461631"
+    },
+    {
+      "source": "stub/recovery-stub-auth.php",
+      "destination": "stub/recovery-stub-auth.php",
+      "sha256": "3fac18aa3ce67d2e08e75f8e047aefe2b565e0edd552761fd14d42cf7c99d526"
+    },
+    {
+      "source": "stub/recovery-stub-logger.php",
+      "destination": "stub/recovery-stub-logger.php",
+      "sha256": "b9ea8d61453d9147197ea3850d0a65a02e54380e549e0e8841102abb6abe6b4a"
+    },
+    {
+      "source": "stub/recovery-stub-shell.css",
+      "destination": "stub/recovery-stub-shell.css",
+      "sha256": "2b87c97696ad7dc6d5262bd2ed779826cecc165b258c569bb2e21d9306f4df40"
+    },
+    {
+      "source": "stub/recovery-stub-shell.php",
+      "destination": "stub/recovery-stub-shell.php",
+      "sha256": "2959219d9484ad55540d45eb04b3c9d6dfacdd04c6dfd0a60a5981df26fc352b"
+    },
+    {
+      "source": "stub/recovery-stub-wizard.css",
+      "destination": "stub/recovery-stub-wizard.css",
+      "sha256": "7ff44d2560b1b80e28174b06c2d556756abb47244400049106867ffd68695285"
+    }
+  ],
+  "comparison": "All tracked source files byte-identical before adaptation; source READMEs archived to preserve public repository READMEs"
+}

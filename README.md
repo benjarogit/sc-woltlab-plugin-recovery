@@ -121,3 +121,7 @@ Aktuelle Version und Release Notes: [Releases](https://github.com/benjarogit/sc-
 ## Lizenz
 
 MIT — Copyright (c) 2025 Sunny C.
+
+## Quellcode und Entwicklung
+
+Dieses Repository enthält auf dem Entwicklungsbranch nun auch `stub/`, `recovery-src/`, `dev/` und Offline-Regressionen. Einstieg: [Entwicklerdokumentation](dev/README.md), [Arbeitsregeln](AGENTS.md) und [Quellenherkunft](docs/source-import/manifest.json). Die frühere öffentliche Geschichte bleibt erhalten. Lokaler Build und tatsächliche Veröffentlichung sind getrennte Schritte; der Publisher zeigt standardmäßig nur eine Vorschau. Dies ist keine neue Versions- oder Wiederherstellungsfreigabe.
